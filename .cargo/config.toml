@@ -1,0 +1,2 @@
+[env]
+JEMALLOC_SYS_WITH_MALLOC_CONF="abort_conf:true,background_thread:true"

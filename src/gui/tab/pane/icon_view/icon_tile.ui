@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="IconTile" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="margin-top">1</property>
+    <property name="margin-bottom">1</property>
+    <property name="margin-start">1</property>
+    <property name="margin-end">1</property>
+    <child>
+      <object class="GtkImage" id="image">
+        <property name="pixel-size">128</property>
+      </object>
+          <!-- <object class="GtkLabel" id="name2"> -->
+          <!--   <property name="halign">start</property> -->
+          <!--   <property name="wrap">True</property> -->
+          <!--   <style> -->
+          <!--     <class name="body" /> -->
+          <!--   </style> -->
+          <!-- </object> -->
+    </child>
+    <child>
+      <!-- <object class="GtkLabel" id="name"> -->
+      <object class="GtkInscription" id="name">
+        <!-- <property name="halign">center</property> -->
+        <property name="xalign">0.5</property>
+        <!-- <property name="max-width-chars">20</property> -->
+        <!-- <property name="width-chars">20</property> -->
+        <!-- <property name="lines">4</property> -->
+        <!-- <property name="wrap">true</property> -->
+        <!-- <property name="wrap-mode">PANGO_WRAP_CHAR</property> -->
+        <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
+        <property name="nat-lines">2</property>
+        <property name="min-lines">2</property>
+        <property name="nat-chars">20</property>
+        <property name="min-chars">20</property>
+        <!-- <property name="ellipsize">PANGO_ELLIPSIZE_END</property> -->
+      </object>
+        <!-- <child> -->
+        <!--   <object class="GtkLabel" id="description"> -->
+        <!--     <property name="halign">start</property> -->
+        <!--     <property name="wrap">True</property> -->
+        <!--     <style> -->
+        <!--       <class name="body" /> -->
+        <!--     </style> -->
+        <!--   </object> -->
+        <!-- </child> -->
+    </child>
+  </template>
+</interface>

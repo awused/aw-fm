@@ -1,0 +1,415 @@
+use std::any::Any;
+use std::ffi::OsString;
+use std::fs::{DirEntry, Metadata};
+use std::future::ready;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::thread::{self};
+use std::time::{Duration, SystemTime};
+
+use futures_util::StreamExt;
+use gtk::gio::{
+    FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE, FILE_ATTRIBUTE_STANDARD_ICON,
+    FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
+    FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON, FILE_ATTRIBUTE_TIME_CREATED,
+    FILE_ATTRIBUTE_TIME_CREATED_USEC, FILE_ATTRIBUTE_TIME_MODIFIED,
+    FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+};
+use gtk::glib::{self, GStr};
+use gtk::prelude::FileExt;
+use once_cell::sync::Lazy;
+use rayon::prelude::{ParallelBridge, ParallelIterator};
+use rayon::{ThreadPool, ThreadPoolBuilder};
+use tokio::select;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
+use tokio::task::spawn_local;
+use tokio::time::{sleep, sleep_until, Instant};
+
+use super::Manager;
+use crate::closing;
+use crate::com::{DirSnapshot, Entry, EntryObject, GuiAction, SnapshotKind};
+use crate::natsort::ParsedString;
+
+
+// DO NOT COMMIT
+static FAST_TIMEOUT: Duration = Duration::from_millis(1000);
+// Aim to send batches at least this large to the gui.
+// Subsequent batches grow larger to avoid taking quadratic time.
+static INITIAL_BATCH: usize = 100;
+// The timeout after which we send a completed batch as soon as no more items are immediately
+// available.
+static BATCH_TIMEOUT: Duration = Duration::from_millis(100);
+
+static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
+    [
+        FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE,
+        FILE_ATTRIBUTE_STANDARD_ICON,
+        FILE_ATTRIBUTE_STANDARD_IS_SYMLINK,
+        FILE_ATTRIBUTE_STANDARD_SIZE,
+        FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
+        FILE_ATTRIBUTE_TIME_MODIFIED,
+        FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+        FILE_ATTRIBUTE_TIME_CREATED,
+        FILE_ATTRIBUTE_TIME_CREATED_USEC,
+    ]
+    .map(GStr::as_str)
+    .join(",")
+});
+
+fn handle_panic(_e: Box<dyn Any + Send>) {
+    error!("Unexpected panic in thread {}", thread::current().name().unwrap_or("unnamed"));
+    closing::close();
+}
+
+// Could potentially be a non-rayon threadpool for directory reading and only use rayon for
+// individual entries.
+static READ_POOL: Lazy<ThreadPool> = Lazy::new(|| {
+    ThreadPoolBuilder::new()
+        .thread_name(|u| format!("read-dir-{u}"))
+        .panic_handler(handle_panic)
+        // This shouldn't be too large - the returns diminish fast and there's a risk of
+        // overwhelming slow network drives.
+        // For benchmarks on one large directory with a warm cache, excluding unusually long runs
+        // 1 - 400-500ms
+        // 2 - 200-330ms
+        // 4 - 140-200ms (180 typical)
+        // 8 - 105-140ms
+        // 16 - 120-130ms (hitting some kind of limit?)
+        // 32 - ~130ms
+        .num_threads(4)
+        .build()
+        .expect("Error creating directory read threadpool")
+});
+
+enum ReadResult {
+    DirError(std::io::Error),
+    EntryError(PathBuf, gtk::glib::Error),
+    Entry(Entry),
+}
+
+pub const fn full_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
+    GuiAction::Snapshot(DirSnapshot {
+        kind: SnapshotKind::Complete,
+        path,
+        entries,
+    })
+}
+
+pub const fn start_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
+    GuiAction::Snapshot(DirSnapshot { kind: SnapshotKind::Start, path, entries })
+}
+
+pub const fn mid_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
+    GuiAction::Snapshot(DirSnapshot {
+        kind: SnapshotKind::Middle,
+        path,
+        entries,
+    })
+}
+
+pub const fn end_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
+    GuiAction::Snapshot(DirSnapshot { kind: SnapshotKind::End, path, entries })
+}
+
+
+fn read_dir_sync(
+    path: Arc<Path>,
+    sender: UnboundedSender<ReadResult>,
+    // ) -> JoinHandle<()> {
+) -> oneshot::Receiver<()> {
+    let (send_done, recv_done) = oneshot::channel();
+    // let (mid_s, mut mid_r) = unbounded_channel::<std::io::Result<(DirEntry, Metadata)>>();
+    // spawn_thread("middle-thread", move || {
+    //     while let Some(r) = mid_r.blocking_recv() {
+    //         let Ok((entry, m)) = r else {
+    //             continue;
+    //         };
+    //
+    //         let f = gio::File::for_path(entry.path());
+    //         // let p = ParsedString::from(entry.file_name());
+    //
+    //         let info = f
+    //             .query_info(
+    //                 ATTRIBUTES.as_str(),
+    //                 FileQueryInfoFlags::empty(),
+    //                 Option::<&Cancellable>::None,
+    //             )
+    //             .unwrap();
+    //
+    //         let mimetype = info.attribute_string(FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE);
+    //
+    //         if let Some(mtype) = mimetype {
+    //             if !mtype.starts_with("image") && !mtype.starts_with("video") {
+    //                 println!("{:?} {mtype}, {:?}", entry.path(), m.modified().unwrap());
+    //             }
+    //         }
+    //
+    //         if sender.send(Ok((entry, m.clone()))).is_err() {
+    //             // No need to log here
+    //             return;
+    //         }
+    //     }
+    // });
+    //
+    // let sender = mid_s;
+
+    //spawn_thread("read-dir", move || {
+    READ_POOL.spawn(move || {
+        let rdir = match std::fs::read_dir(&path) {
+            Ok(rdir) => rdir,
+            Err(e) => {
+                error!("Unexpected error opening directory {path:?} {e}");
+                drop(sender.send(ReadResult::DirError(e)));
+                return;
+            }
+        };
+
+        rdir.take_while(|_| !closing::closed()).par_bridge().for_each(|dirent| {
+            let dirent = match dirent {
+                Ok(e) => e,
+                Err(e) => {
+                    error!("Unexpected error reading directory {path:?} {e}");
+                    drop(sender.send(ReadResult::DirError(e)));
+                    return;
+                }
+            };
+
+            let entry = match Entry::new(dirent.path()) {
+                Ok(entry) => entry,
+                Err(e) => {
+                    error!("Unexpected error reading file info {:?} {e}", dirent.path());
+                    drop(sender.send(ReadResult::EntryError(dirent.path(), e)));
+                    return;
+                }
+            };
+
+            if sender.send(ReadResult::Entry(entry)).is_err() && !closing::closed() {
+                error!("Channel unexpectedly closed while reading directory");
+                closing::close();
+            }
+        });
+
+        let _ignored = send_done.send(());
+    });
+
+    recv_done
+}
+
+async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiAction>) {
+    debug!("Starting to read directory {path:?}");
+    println!("Starting");
+
+    let start = Instant::now();
+    let mut entries = Vec::new();
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+
+    let h = read_dir_sync(path.clone(), sender);
+
+    // If we don't load everything in one second, it is a slow directory
+    let fast_deadline = Instant::now() + FAST_TIMEOUT;
+
+    select! {
+        biased;
+        _ = closing::closed_fut() => drop(receiver),
+        _ = async {
+            while let Some(r) = receiver.recv().await {
+                match r {
+                    ReadResult::Entry(ent) => {
+                        entries.push(ent);
+                    }
+                    ReadResult::DirError(e) => {
+                        todo!()
+                    }
+                    ReadResult::EntryError(p, e) => {
+                        todo!()
+                    }
+                }
+            }
+        } => {
+            println!("fast directory: {:?} {}", start.elapsed(), entries.len());
+            // Send off a full snapshot
+            if let Err(e) = gui_sender.send(full_snap(path, entries)) {
+                if !closing::closed() {
+                    error!("{e}");
+                }
+                return
+            }
+        }
+        _ = sleep_until(fast_deadline) => {
+            println!("slow directory: {:?} {}", start.elapsed(), entries.len());
+
+            if let Err(e) = gui_sender.send(start_snap(path.clone(), entries)) {
+                if !closing::closed() {
+                    error!("{e}");
+                }
+                return;
+            }
+
+            // Send off an initial batch, the gui may elect not to show anything if it's tiny
+            read_slow_dir(path, receiver, gui_sender).await;
+        }
+    };
+
+    // Technically this blocks, but it's more a formality by this point
+    // h.join().unwrap();
+    h.await.unwrap();
+    println!("done {:?}", start.elapsed());
+}
+
+async fn read_slow_dir(
+    path: Arc<Path>,
+    mut receiver: UnboundedReceiver<ReadResult>,
+    gui_sender: glib::Sender<GuiAction>,
+) {
+    let start = Instant::now();
+    println!("Starting batches for slow dir");
+    let mut batch_size = INITIAL_BATCH;
+    let mut next_size = INITIAL_BATCH;
+
+
+    loop {
+        let batch_start = Instant::now();
+        let mut batch = Vec::new();
+        let mut deadline_passed = false;
+
+        // Wait until at least one item is ready before starting timeouts
+        select! {
+            _ = closing::closed_fut() => return drop(receiver),
+            done = async {
+                loop {
+                    let Some(r) = receiver.recv().await else {
+                        break true;
+                    };
+
+                    match r {
+                        ReadResult::Entry(ent) => {
+                            batch.push(ent);
+                            if batch.len() >= batch_size {
+                                break false;
+                            }
+                        }
+                        ReadResult::DirError(e) => {
+                            todo!()
+                        }
+                        ReadResult::EntryError(p, e) => {
+                            todo!()
+                        }
+                    }
+                }
+            } => {
+                if done {
+                    println!(
+                        "slow directory done: {:?}/{:?} {}/{batch_size}",
+                        batch_start.elapsed(),
+                        start.elapsed(),
+                        batch.len()
+                    );
+
+                    if let Err(e) = gui_sender.send(end_snap(path, batch)) {
+                        if !closing::closed() {
+                            error!("{e}");
+                        }
+                    }
+
+                    return
+                }
+
+                trace!("Batch of {} ready for sending, consuming ready values", batch.len());
+            }
+        }
+
+        let batch_deadline = Instant::now() + BATCH_TIMEOUT;
+        // Allow up to 5ms between entries, until we hit batch_deadline, then only consume
+        // immediately ready values. This avoids the case where we get multiple small batches in a
+        // row.
+
+        'batch: loop {
+            select! {
+                biased;
+                done = async {
+                    match receiver.recv().await {
+                        None => true,
+                        Some(ReadResult::Entry(ent)) => {
+                            batch.push(ent);
+                            false
+                        }
+                        Some(ReadResult::DirError(e)) => {
+                            todo!()
+                        }
+                        Some(ReadResult::EntryError(p, e)) => {
+                            todo!()
+                        }
+                    }
+                } => {
+                    if done {
+                        println!(
+                            "slow directory done: {:?}/{:?} {}/{batch_size}",
+                            batch_start.elapsed(),
+                            start.elapsed(),
+                            batch.len()
+                        );
+                        if let Err(e) = gui_sender.send(end_snap(path, batch)) {
+                            if !closing::closed() {
+                                error!("{e}");
+                            }
+                        }
+                        // Send final snapshot
+                        return
+                    }
+                }
+
+                _ = closing::closed_fut() => return drop(receiver),
+                _ = sleep_until(batch_deadline), if !deadline_passed => {
+                    deadline_passed = true;
+                }
+                _ = sleep(Duration::from_millis(5)), if !deadline_passed => {
+                    println!(
+                        "slow directory batch done: {:?}/{:?} {}/{batch_size}",
+                        batch_start.elapsed(),
+                        start.elapsed(),
+                        batch.len()
+                    );
+
+                    if let Err(e) = gui_sender.send(mid_snap(path.clone(), batch)) {
+                        if !closing::closed() {
+                            error!("{e}");
+                        }
+                        return
+                    }
+
+                    break 'batch;
+                },
+                _ = ready(()), if deadline_passed => {
+                    println!(
+                        "slow directory batch done: {:?}/{:?} {}/{batch_size}",
+                        batch_start.elapsed(),
+                        start.elapsed(),
+                        batch.len()
+                    );
+
+                    if let Err(e) = gui_sender.send(mid_snap(path.clone(), batch)) {
+                        if !closing::closed() {
+                            error!("{e}");
+                        }
+                        return
+                    }
+
+                    break 'batch;
+                }
+            }
+        }
+
+
+        next_size += batch_size;
+        batch_size = next_size - batch_size;
+    }
+}
+
+
+impl Manager {
+    pub(super) fn start_read_dir(&self, path: Arc<Path>) {
+        // Assume we don't need to worry about cancellation for this
+        spawn_local(read_dir_sync_thread(path, self.gui_sender.clone()));
+    }
+}
