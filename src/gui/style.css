@@ -32,6 +32,10 @@ child:selected {
 }
 
 
+gridview child box {
+  border-spacing: 0;
+}
+
 /* Fix some parts of the title bar not being clickable by moving the padding to the interactive element. */
 headerbar {
   padding: 0;

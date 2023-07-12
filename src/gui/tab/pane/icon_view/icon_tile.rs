@@ -6,6 +6,15 @@ use gtk::traits::WidgetExt;
 
 use crate::com::EntryObject;
 
+
+thread_local! {
+   static PANGO_ATTRIBUTES: AttrList = {
+        let pango_list = AttrList::new();
+        pango_list.insert(AttrInt::new_insert_hyphens(false));
+        pango_list
+   }
+}
+
 mod imp {
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;
@@ -15,16 +24,12 @@ mod imp {
     #[template(file = "icon_tile.ui")]
     pub struct IconTile {
         #[template_child]
+        pub image: TemplateChild<gtk::Image>,
+        #[template_child]
         pub name: TemplateChild<gtk::Inscription>,
         // pub name: TemplateChild<gtk::Label>,
-        // #[template_child]
-        // pub name2: TemplateChild<gtk::Label>,
-        // #[template_child]
-        // pub description: TemplateChild<gtk::Label>,
         #[template_child]
-        pub image: TemplateChild<gtk::Image>,
-        // #[template_child]
-        // pub image2: TemplateChild<gtk::Image>,
+        pub size: TemplateChild<gtk::Inscription>,
     }
 
     #[glib::object_subclass]
@@ -67,28 +72,22 @@ impl Default for IconTile {
 impl IconTile {
     pub fn new() -> Self {
         let s: Self = glib::Object::new();
-        let pango_list = AttrList::new();
-        pango_list.insert(AttrInt::new_insert_hyphens(false));
-
-        s.imp().name.set_attributes(Some(&pango_list));
-
+        PANGO_ATTRIBUTES.with(|pa| s.imp().name.set_attributes(Some(pa)));
         s
     }
 
     pub fn set_entry(&self, entry: &EntryObject) {
         let imp = self.imp();
-        // TODO -- do something about this to_string_lossy
-        imp.name.set_text(Some(&entry.name.to_string_lossy()));
-        // imp.name.set_text(&entry.name.to_string_lossy());
-        // imp.name.set_text(&app_info.name());
-        // imp.name2.set_text(&app_info.name());
-        // if let Some(desc) = entry.description() {
-        // imp.description.set_text(&desc);
-        // }
-        // let start = Instant::now();
+
         imp.image.set_from_gicon(entry.icon());
-        // imp.image.set_from_icon_name(Some("text-rust"));
-        // println!("icon load {:?}", start.elapsed());
-        // imp.image2.set_from_gicon(&icon);
+
+        // TODO -- do something about this to_string_lossy, especially if we're never using the
+        // OsString portion anywhere.
+        let disp_string = entry.name.to_string_lossy();
+        imp.name.set_text(Some(&disp_string));
+        // imp.name.set_text(&disp_string);
+        imp.name.set_tooltip_text(Some(&disp_string));
+
+        imp.size.set_text(Some(&entry.long_size_string()));
     }
 }

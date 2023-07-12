@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::Parser;
+use dirs::{config_dir, data_dir};
 use gtk::gdk;
 use once_cell::sync::Lazy;
 use path_clean::PathClean;
@@ -24,29 +25,29 @@ pub struct Opt {
     pub file_name: Option<PathBuf>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct Shortcut {
-    pub action: String,
-    pub key: String,
-    pub modifiers: Option<String>,
-}
+// #[derive(Debug, Deserialize)]
+// pub struct Shortcut {
+//     pub action: String,
+//     pub key: String,
+//     pub modifiers: Option<String>,
+// }
+//
+// #[derive(Debug, Deserialize)]
+// #[serde(rename_all = "lowercase")]
+// pub enum ContextMenuGroup {
+//     Section(String),
+//     Submenu(String),
+// }
+//
+// #[derive(Debug, Deserialize)]
+// pub struct ContextMenuEntry {
+//     pub action: String,
+//     pub name: String,
+//     #[serde(default, flatten)]
+//     pub group: Option<ContextMenuGroup>,
+// }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ContextMenuGroup {
-    Section(String),
-    Submenu(String),
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ContextMenuEntry {
-    pub action: String,
-    pub name: String,
-    #[serde(default, flatten)]
-    pub group: Option<ContextMenuGroup>,
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct Config {
     // pub target_resolution: Res,
     // #[serde(default, deserialize_with = "empty_string_is_none")]
@@ -57,47 +58,27 @@ pub struct Config {
     #[serde(default)]
     pub unique: bool,
 
-    pub preload_ahead: usize,
-    pub preload_behind: usize,
-
     #[serde(default, deserialize_with = "empty_string_is_none")]
     pub background_colour: Option<gdk::RGBA>,
 
-    #[serde(default = "three_hundred")]
-    pub scroll_amount: NonZeroU32,
-
-    #[serde(default, deserialize_with = "zero_is_none")]
-    pub upscale_timeout: Option<NonZeroU64>,
-
+    // #[serde(default = "three_hundred")]
+    // pub scroll_amount: NonZeroU32,
     #[serde(default, deserialize_with = "zero_is_none")]
     pub idle_timeout: Option<NonZeroU64>,
 
-    #[serde(default)]
-    pub shortcuts: Vec<Shortcut>,
-    #[serde(default)]
-    pub context_menu: Vec<ContextMenuEntry>,
-
-    #[serde(default)]
-    pub allow_external_extractors: bool,
+    #[serde(default, deserialize_with = "empty_path_is_none")]
+    pub action_directory: Option<PathBuf>,
 
     #[serde(default, deserialize_with = "empty_path_is_none")]
-    pub alternate_upscaler: Option<PathBuf>,
+    pub database: Option<PathBuf>,
+    // #[serde(default)]
+    // pub shortcuts: Vec<Shortcut>,
+    // #[serde(default)]
+    // pub context_menu: Vec<ContextMenuEntry>,
+
     // TODO -- with preloading this is probably unnecessary
-    #[serde(default)]
-    pub force_rgba: bool,
-    #[serde(default)]
-    pub prescale: usize,
-    #[serde(default, deserialize_with = "empty_path_is_none")]
-    pub socket_dir: Option<PathBuf>,
-
-    #[serde(default = "two")]
-    pub extraction_threads: NonZeroUsize,
-    #[serde(default = "half_threads")]
-    pub loading_threads: NonZeroUsize,
-    #[serde(default = "one")]
-    pub upscaling_threads: NonZeroUsize,
-    #[serde(default = "half_threads_four")]
-    pub downscaling_threads: NonZeroUsize,
+    // #[serde(default, deserialize_with = "empty_path_is_none")]
+    // pub socket_dir: Option<PathBuf>,
 }
 
 fn one() -> NonZeroUsize {
@@ -173,8 +154,13 @@ pub static CONFIG: Lazy<Config> =
             error!("Error parsing config: {e}");
             panic!("Error parsing config: {e}");
         }
+        Err(awconf::Error::Utf8Error(e)) => {
+            error!("Error parsing config: {e}");
+            panic!("Error parsing config: {e}");
+        }
         Err(e) => {
-            panic!("Error loading config file: {e:#?}")
+            warn!("Error loading config file, using default instead: {e:#?}");
+            Config::default()
         }
     });
 

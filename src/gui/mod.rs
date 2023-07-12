@@ -147,9 +147,9 @@ impl Gui {
         let mut path = OPTIONS
             .file_name
             .clone()
-            .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()));
+            .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()))
+            .clean();
 
-        path = path.clean();
         if path.is_relative() {
             // prepending "/" is likely to be wrong, but eh.
             let mut abs = current_dir().unwrap_or_else(|_| "/".into());

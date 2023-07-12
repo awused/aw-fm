@@ -79,6 +79,7 @@ pub enum EntryKind {
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub kind: EntryKind,
+    // This is an absolute but NOT canonicalized path.
     pub abs_path: PathBuf,
     // It's kind of expensive to do this but necessary as an mtime/ctime tiebreaker anyway.
     // TODO -- is this really name, or should it be rel_path
@@ -177,6 +178,23 @@ impl Entry {
             mime,
             icon,
         })
+    }
+
+    // This could be a compact string/small string but possibly not worth the dependency on its own
+    pub fn size_string(&self) -> String {
+        match self.kind {
+            EntryKind::File { size } => humansize::format_size(size, humansize::WINDOWS),
+            EntryKind::Directory { contents } => format!("{contents}"),
+            EntryKind::Uninitialized => unreachable!(),
+        }
+    }
+
+    pub fn long_size_string(&self) -> String {
+        match self.kind {
+            EntryKind::File { size } => humansize::format_size(size, humansize::WINDOWS),
+            EntryKind::Directory { contents } => format!("{contents} items"),
+            EntryKind::Uninitialized => unreachable!(),
+        }
     }
 }
 

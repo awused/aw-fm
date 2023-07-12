@@ -76,12 +76,7 @@ pub(super) fn new(selection: &MultiSelection) -> ColumnView {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let entry = item.item().unwrap().downcast::<EntryObject>().unwrap();
         let child = item.child().unwrap().downcast::<StringCell>().unwrap();
-        let text = match entry.kind {
-            EntryKind::File { size } => humansize::format_size(size, humansize::WINDOWS),
-            EntryKind::Directory { contents } => format!("{contents}"),
-            EntryKind::Uninitialized => unreachable!(),
-        };
-        child.set_text(&text, None);
+        child.set_text(&entry.size_string(), None);
     });
 
     let size_column = ColumnViewColumn::new(Some("Size"), Some(size_factory));

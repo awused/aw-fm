@@ -192,11 +192,7 @@ impl Tab {
         Arc::ptr_eq(&self.path, &other.path)
     }
 
-    fn matches_path(&self, other: &Path) -> bool {
-        &*self.path == other
-    }
-
-    fn new(id: TabId, path: PathBuf, element: ()) -> Self {
+    fn new(id: TabId, path: PathBuf, element: (), existing_tabs: &[Self]) -> Self {
         // Clean the path without resolving symlinks.
         let mut path = path.clean();
         if path.is_relative() {
@@ -215,7 +211,7 @@ impl Tab {
 
         let contents = Contents::default();
 
-        Self {
+        let mut t = Self {
             id,
             path,
             metadata,
@@ -226,7 +222,11 @@ impl Tab {
             future: Vec::new(),
             tab_element: element,
             pane: OnceCell::new(),
-        }
+        };
+
+        t.copy_from_donor(existing_tabs, &[]);
+
+        t
     }
 
     fn cloned(id: TabId, source: &Self, element: ()) -> Self {
@@ -249,10 +249,14 @@ impl Tab {
 
     fn copy_from_donor(&mut self, left_tabs: &[Self], right_tabs: &[Self]) {
         for t in left_tabs.iter().chain(right_tabs) {
-            if t.matches_path(&self.path) {
+            // Check for value equality, not reference equality
+            if *self.path == *t.path {
                 self.path = t.path.clone();
                 self.loading = t.loading.clone();
                 self.contents = t.contents.clone();
+
+                let comparator = self.metadata.comparator();
+                self.contents.list.sort(comparator);
                 return;
             }
         }
@@ -510,7 +514,7 @@ impl TabsList {
         pane_container.set_vexpand(true);
 
         Self {
-            tabs: vec![Tab::new(TabId(0), path, first_tab_element)],
+            tabs: vec![Tab::new(TabId(0), path, first_tab_element, &[])],
             active: 0,
             next_id: NonZeroU64::new(1).unwrap(),
             tabs_container,
@@ -585,9 +589,8 @@ impl TabsList {
     fn open_tab(&mut self, path: PathBuf) {
         let id = TabId(self.next_id.get());
         self.next_id = self.next_id.checked_add(1).unwrap();
-        let mut new_tab = Tab::new(id, path, ());
+        let mut new_tab = Tab::new(id, path, (), &self.tabs);
 
-        new_tab.copy_from_donor(&self.tabs, &[]);
         self.tabs.insert(self.active + 1, new_tab);
     }
 

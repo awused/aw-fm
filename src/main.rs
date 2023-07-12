@@ -6,7 +6,7 @@
 #[macro_use]
 extern crate log;
 
-// The tikv fork may not be easily buildable for Windows.
+// The tikv fork may not be easily buildable for Windows
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
@@ -35,12 +35,15 @@ mod elapsedlogger;
 mod closing;
 mod com;
 mod config;
+mod database;
 mod gui;
 mod manager;
 mod natsort;
 // mod pools;
 // mod socket;
 // mod state_cache;
+//
+
 
 fn spawn_thread<F, T>(name: &str, f: F) -> JoinHandle<T>
 where
@@ -61,7 +64,6 @@ fn main() {
 
     let mut i = 0;
 
-    //
     // iter.par_bridge().for_each(|x| {
     //     if !x.unwrap().metadata().unwrap().is_file() {
     //         println!("Not file");

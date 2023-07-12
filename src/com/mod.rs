@@ -13,6 +13,7 @@ use derive_more::{Deref, DerefMut, From};
 use gtk::gio::{self, Cancellable, FileQueryInfoFlags};
 use gtk::glib::Object;
 use gtk::prelude::{Cast, FileExt};
+use path_clean::PathClean;
 use tokio::sync::oneshot;
 
 pub use self::entry::*;
@@ -135,7 +136,7 @@ impl Toggle {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum ManagerAction {
     Open(Arc<Path>),
     // Refresh(Arc<Path>),
@@ -201,15 +202,15 @@ pub enum GuiAction {
     Quit,
 }
 
-#[derive(Deref, Default, DerefMut, From)]
-pub struct DebugIgnore<T>(pub T);
-
-impl<T> fmt::Debug for DebugIgnore<T> {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Result::Ok(())
-    }
-}
-
+// #[derive(Deref, Default, DerefMut, From)]
+// pub struct DebugIgnore<T>(pub T);
+//
+// impl<T> fmt::Debug for DebugIgnore<T> {
+//     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         fmt::Result::Ok(())
+//     }
+// }
+//
 // #[derive(Debug)]
 // pub struct DedupedVec<T> {
 //     deduped: Vec<T>,

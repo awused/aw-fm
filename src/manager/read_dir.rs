@@ -32,7 +32,6 @@ use crate::com::{DirSnapshot, Entry, EntryObject, GuiAction, SnapshotKind};
 use crate::natsort::ParsedString;
 
 
-// DO NOT COMMIT
 static FAST_TIMEOUT: Duration = Duration::from_millis(1000);
 // Aim to send batches at least this large to the gui.
 // Subsequent batches grow larger to avoid taking quadratic time.
@@ -113,11 +112,7 @@ pub const fn end_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
 }
 
 
-fn read_dir_sync(
-    path: Arc<Path>,
-    sender: UnboundedSender<ReadResult>,
-    // ) -> JoinHandle<()> {
-) -> oneshot::Receiver<()> {
+fn read_dir_sync(path: Arc<Path>, sender: UnboundedSender<ReadResult>) -> oneshot::Receiver<()> {
     let (send_done, recv_done) = oneshot::channel();
     // let (mid_s, mut mid_r) = unbounded_channel::<std::io::Result<(DirEntry, Metadata)>>();
     // spawn_thread("middle-thread", move || {
@@ -154,7 +149,6 @@ fn read_dir_sync(
     //
     // let sender = mid_s;
 
-    //spawn_thread("read-dir", move || {
     READ_POOL.spawn(move || {
         let rdir = match std::fs::read_dir(&path) {
             Ok(rdir) => rdir,
@@ -198,7 +192,6 @@ fn read_dir_sync(
 
 async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiAction>) {
     debug!("Starting to read directory {path:?}");
-    println!("Starting");
 
     let start = Instant::now();
     let mut entries = Vec::new();
@@ -227,9 +220,9 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
                 }
             }
         } => {
-            println!("fast directory: {:?} {}", start.elapsed(), entries.len());
+            trace!("Fast directory completed in {:?} with {} entries", start.elapsed(), entries.len());
             // Send off a full snapshot
-            if let Err(e) = gui_sender.send(full_snap(path, entries)) {
+            if let Err(e) = gui_sender.send(full_snap(path.clone(), entries)) {
                 if !closing::closed() {
                     error!("{e}");
                 }
@@ -237,7 +230,7 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
             }
         }
         _ = sleep_until(fast_deadline) => {
-            println!("slow directory: {:?} {}", start.elapsed(), entries.len());
+            trace!("Starting slow directory handling at {} entries", entries.len());
 
             if let Err(e) = gui_sender.send(start_snap(path.clone(), entries)) {
                 if !closing::closed() {
@@ -247,14 +240,13 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
             }
 
             // Send off an initial batch, the gui may elect not to show anything if it's tiny
-            read_slow_dir(path, receiver, gui_sender).await;
+            read_slow_dir(path.clone(), receiver, gui_sender).await;
         }
     };
 
     // Technically this blocks, but it's more a formality by this point
-    // h.join().unwrap();
     h.await.unwrap();
-    println!("done {:?}", start.elapsed());
+    debug!("Done reading directory {:?} in {:?}", path, start.elapsed());
 }
 
 async fn read_slow_dir(
@@ -263,10 +255,8 @@ async fn read_slow_dir(
     gui_sender: glib::Sender<GuiAction>,
 ) {
     let start = Instant::now();
-    println!("Starting batches for slow dir");
     let mut batch_size = INITIAL_BATCH;
     let mut next_size = INITIAL_BATCH;
-
 
     loop {
         let batch_start = Instant::now();
@@ -299,8 +289,8 @@ async fn read_slow_dir(
                 }
             } => {
                 if done {
-                    println!(
-                        "slow directory done: {:?}/{:?} {}/{batch_size}",
+                    trace!(
+                        "Slow directory done in {:?}/{:?} final batch: {}/{batch_size}",
                         batch_start.elapsed(),
                         start.elapsed(),
                         batch.len()
@@ -314,8 +304,6 @@ async fn read_slow_dir(
 
                     return
                 }
-
-                trace!("Batch of {} ready for sending, consuming ready values", batch.len());
             }
         }
 
@@ -343,8 +331,8 @@ async fn read_slow_dir(
                     }
                 } => {
                     if done {
-                        println!(
-                            "slow directory done: {:?}/{:?} {}/{batch_size}",
+                        trace!(
+                            "Slow directory done in {:?}/{:?} final batch: {}/{batch_size}",
                             batch_start.elapsed(),
                             start.elapsed(),
                             batch.len()
@@ -364,8 +352,8 @@ async fn read_slow_dir(
                     deadline_passed = true;
                 }
                 _ = sleep(Duration::from_millis(5)), if !deadline_passed => {
-                    println!(
-                        "slow directory batch done: {:?}/{:?} {}/{batch_size}",
+                    trace!(
+                        "Slow directory batch done in {:?}/{:?} batch: {}/{batch_size}",
                         batch_start.elapsed(),
                         start.elapsed(),
                         batch.len()
@@ -381,8 +369,8 @@ async fn read_slow_dir(
                     break 'batch;
                 },
                 _ = ready(()), if deadline_passed => {
-                    println!(
-                        "slow directory batch done: {:?}/{:?} {}/{batch_size}",
+                    trace!(
+                        "Slow directory batch done in {:?}/{:?} batch: {}/{batch_size}",
                         batch_start.elapsed(),
                         start.elapsed(),
                         batch.len()
