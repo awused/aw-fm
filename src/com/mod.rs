@@ -29,8 +29,8 @@ mod res;
 #[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum DisplayMode {
-    Icons,
     #[default]
+    Icons,
     List,
 }
 
@@ -55,9 +55,9 @@ pub enum SortDir {
 #[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum DisplayHidden {
-    #[default]
     // Default, -- would be the global setting, if/when we have one
     False,
+    #[default]
     True,
 }
 
@@ -79,9 +79,9 @@ impl SortSettings {
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DirSettings {
-    pub mode: DisplayMode,
+    pub display_mode: DisplayMode,
     pub sort: SortSettings,
-    pub display_hidden: DisplayHidden,
+    // pub display_hidden: DisplayHidden,
 }
 
 

@@ -148,19 +148,6 @@ impl Gui {
         manager_sender: Rc<UnboundedSender<MAWithResponse>>,
         gui_receiver: &Cell<Option<glib::Receiver<GuiAction>>>,
     ) -> Rc<Self> {
-        let mut path = OPTIONS
-            .file_name
-            .clone()
-            .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()))
-            .clean();
-
-        if path.is_relative() {
-            // prepending "/" is likely to be wrong, but eh.
-            let mut abs = current_dir().unwrap_or_else(|_| "/".into());
-            abs.push(path);
-            path = abs.clean();
-        }
-
         let window = gtk::ApplicationWindow::new(application);
 
         let (event_sender, event_receiver) = glib::MainContext::channel(glib::PRIORITY_HIGH);
@@ -188,7 +175,7 @@ impl Gui {
             overlay: gtk::Overlay::new(),
             menu: OnceCell::default(),
 
-            tabs: RefCell::new(TabsList::new(path)),
+            tabs: RefCell::new(TabsList::new_uninit()),
             watcher: notify::recommended_watcher(move |ev| {
                 // TODO -- translate all events into more basic Add/Remove/Update enums for paths
                 // with entries.
@@ -267,6 +254,21 @@ impl Gui {
     }
 
     fn setup(self: &Rc<Self>) {
+        let mut path = OPTIONS
+            .file_name
+            .clone()
+            .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()))
+            .clean();
+
+        if path.is_relative() {
+            // prepending "/" is likely to be wrong, but eh.
+            let mut abs = current_dir().unwrap_or_else(|_| "/".into());
+            abs.push(path);
+            path = abs.clean();
+        }
+
+        self.tabs.borrow_mut().initialize(path);
+
         self.layout();
         // self.setup_interaction();
 
@@ -397,7 +399,7 @@ impl Gui {
         let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
         // vbox.set_vexpand(true);
 
-        self.tabs.borrow_mut().initialize(&vbox);
+        self.tabs.borrow_mut().layout(&vbox);
 
         // vbox.prepend(&self.overlay);
 

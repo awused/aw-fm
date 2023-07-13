@@ -209,7 +209,8 @@ impl Tab {
         let path: Arc<Path> = path.into();
 
         // fetch metatada synchronously, even with a donor
-        let metadata = DirSettings::default();
+        let settings = GUI.with(|g| g.get().unwrap().database.get(&path));
+        GUI.with(|g| g.get().unwrap().database.store(&path, settings));
 
         let state = LoadingState::Unloaded;
 
@@ -218,7 +219,7 @@ impl Tab {
         let mut t = Self {
             id,
             path,
-            settings: metadata,
+            settings,
             loading: state,
             contents,
             view_state: None,
@@ -508,18 +509,17 @@ impl DerefMut for TabsList {
 
 
 impl TabsList {
-    pub(super) fn new(path: PathBuf) -> Self {
+    pub(super) fn new_uninit() -> Self {
         let tabs_container = Box::new(Orientation::Horizontal, 0);
         tabs_container.set_hexpand(true);
 
-        let first_tab_element = ();
 
         let pane_container = Box::new(Orientation::Horizontal, 0);
         pane_container.set_hexpand(true);
         pane_container.set_vexpand(true);
 
         Self {
-            tabs: vec![Tab::new(TabId(0), path, first_tab_element, &[])],
+            tabs: Vec::new(),
             active: 0,
             next_id: NonZeroU64::new(1).unwrap(),
             tabs_container,
@@ -527,9 +527,18 @@ impl TabsList {
         }
     }
 
-    pub(super) fn initialize(&mut self, parent: &Box) {
+    pub(super) fn initialize(&mut self, path: PathBuf) {
+        assert!(self.tabs.is_empty());
+
+        let first_tab_element = ();
+
+        self.tabs.push(Tab::new(TabId(0), path, first_tab_element, &[]));
+    }
+
+    pub(super) fn layout(&mut self, parent: &Box) {
         parent.append(&self.tabs_container);
         parent.append(&self.pane_container);
+
         self.tabs[self.active].load(&mut [], &mut []);
         self.tabs[self.active].display(&self.pane_container);
         // Open and activate first and only tab

@@ -1,26 +1,15 @@
 use std::cell::RefCell;
 use std::mem::ManuallyDrop;
+use std::os::unix::prelude::OsStrExt;
+use std::path::Path;
 use std::time::Instant;
 
 use dirs::data_dir;
 use rusqlite::types::{FromSql, FromSqlError};
 use rusqlite::{params, Connection, OpenFlags, ToSql};
 
-use crate::com::DisplayMode;
+use crate::com::{DirSettings, DisplayHidden, DisplayMode, SortDir, SortMode, SortSettings};
 use crate::config::CONFIG;
-
-
-impl ToSql for DisplayMode {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(self.as_ref().into())
-    }
-}
-
-impl FromSql for DisplayMode {
-    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
-    }
-}
 
 
 #[derive(Debug)]
@@ -69,20 +58,23 @@ fn update_to(con: &mut Connection, version: u32, initial_version: u32, sql: &str
 }
 
 fn update_to_current(con: &mut Connection) {
-    let v = get_version(con);
+    let initial_version = get_version(con);
 
+    // For now, assume all dir settings are always set.
+    // This only needs to change if default globakl options become configurable, and even then we
+    // can just make the default parameter the global option.
     update_to(
         con,
         1,
-        0,
+        initial_version,
         r#"
 CREATE TABLE metadata(key TEXT, value TEXT, PRIMARY KEY(key));
 CREATE TABLE dir_settings(
-    path TEXT, -- may be invalid utf-8, but sqlite should pass it through cleanly
-    display TEXT,
-    sort_mode TEXT,
-    sort_direction TEXT,
-    -- display_hidden TEXT,
+    path TEXT NOT NULL, -- may be invalid utf-8, but sqlite should pass it through cleanly
+    display_mode TEXT NOT NULL,
+    sort_mode TEXT NOT NULL,
+    sort_direction TEXT NOT NULL,
+    -- display_hidden TEXT NOT NULL,
     PRIMARY KEY(path)
 );
             "#,
@@ -133,5 +125,110 @@ impl DBCon {
     pub fn destroy(&self) {
         debug!("Tearing down database connection");
         self.0.borrow_mut().take().unwrap().close().unwrap();
+    }
+
+    pub fn get(&self, path: &Path) -> DirSettings {
+        trace!("Fetching settings for {path:?}");
+
+        let b = self.0.borrow();
+        let con = b.as_ref().unwrap();
+
+        con.query_row(
+            "SELECT display_mode, sort_mode, sort_direction FROM dir_settings WHERE PATH = ?",
+            [path.as_os_str().as_bytes()],
+            |row| {
+                Ok(DirSettings {
+                    display_mode: row.get(0)?,
+                    sort: SortSettings {
+                        mode: row.get(1)?,
+                        direction: row.get(2)?,
+                    },
+                })
+            },
+        )
+        .unwrap_or_else(|e| {
+            if e == rusqlite::Error::QueryReturnedNoRows {
+                trace!("No saved settings for {path:?}");
+            } else {
+                error!("Error reading saved settings for {path:?}: {e}");
+            }
+            DirSettings::default()
+        })
+    }
+
+    pub fn store(&self, path: &Path, settings: DirSettings) {
+        trace!("Storing settings for {path:?}");
+        // TODO -- If settings are default, remove the row
+
+        let b = self.0.borrow();
+        let con = b.as_ref().unwrap();
+
+        con.execute(
+            r#"
+INSERT OR REPLACE INTO
+    dir_settings(path, display_mode, sort_mode, sort_direction)
+VALUES
+    (?, ?, ?, ?);"#,
+            params![
+                path.as_os_str().as_bytes(),
+                settings.display_mode,
+                settings.sort.mode,
+                settings.sort.direction,
+            ],
+        )
+        .unwrap_or_else(|e| {
+            error!("Error writing directory settings for {path:?} to DB: {e}");
+            0
+        });
+    }
+}
+
+
+// If many of these are needed, this can be done trivially in a macro
+impl ToSql for DisplayMode {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_ref().into())
+    }
+}
+
+impl FromSql for DisplayMode {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
+    }
+}
+
+impl ToSql for SortMode {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_ref().into())
+    }
+}
+
+impl FromSql for SortMode {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
+    }
+}
+
+impl ToSql for SortDir {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_ref().into())
+    }
+}
+
+impl FromSql for SortDir {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
+    }
+}
+
+impl ToSql for DisplayHidden {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_ref().into())
+    }
+}
+
+impl FromSql for DisplayHidden {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
     }
 }
