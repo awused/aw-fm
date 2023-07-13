@@ -5,9 +5,16 @@ use gtk::{glib, CompositeTemplate};
 use crate::com::EntryObject;
 
 mod imp {
+    use std::cell::{Cell, RefCell};
+
+    use chrono::{Local, TimeZone};
+    use gtk::glib::SignalHandlerId;
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
+
+    use super::EntryString;
+    use crate::com::Entry;
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(file = "string_cell.ui")]
@@ -20,6 +27,8 @@ mod imp {
         // pub description: TemplateChild<gtk::Label>,
         // #[template_child]
         // pub image2: TemplateChild<gtk::Image>,
+        pub(super) kind: Cell<EntryString>,
+        pub update_connection: RefCell<Option<SignalHandlerId>>,
     }
 
     #[glib::object_subclass]
@@ -46,6 +55,35 @@ mod imp {
     }
 
     impl WidgetImpl for StringCell {}
+
+    impl StringCell {
+        pub(super) fn update_contents(&self, entry: &Entry) {
+            match self.kind.get() {
+                EntryString::Unset => unreachable!(),
+                EntryString::Name => {
+                    self.contents.set_text(Some(&entry.name.to_string_lossy()));
+                }
+                EntryString::Size => {
+                    self.contents.set_text(Some(&entry.size_string()));
+                }
+                EntryString::Modified => {
+                    // Only use seconds for columns
+                    let localtime = Local.timestamp_opt(entry.mtime.sec as i64, 0).unwrap();
+                    let text = localtime.format("%Y-%m-%d %H:%M:%S");
+                    self.contents.set_text(Some(&format!("{text}")));
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) enum EntryString {
+    #[default]
+    Unset,
+    Name,
+    Size,
+    Modified,
 }
 
 glib::wrapper! {
@@ -55,13 +93,15 @@ glib::wrapper! {
 
 impl Default for StringCell {
     fn default() -> Self {
-        Self::new()
+        Self::new(EntryString::Unset)
     }
 }
 
 impl StringCell {
-    pub fn new() -> Self {
-        glib::Object::new()
+    pub(super) fn new(kind: EntryString) -> Self {
+        let obj: Self = glib::Object::new();
+        obj.imp().kind.set(kind);
+        obj
     }
 
     pub fn align_end(&self, chars: u32) {
@@ -69,19 +109,24 @@ impl StringCell {
         self.imp().contents.set_min_chars(chars);
     }
 
-    pub fn set_text(&self, text: &str, tooltip: Option<&str>) {
+    pub fn bind(&self, obj: &EntryObject) {
         let imp = self.imp();
-        // TODO -- do something about this to_string_lossy
-        imp.contents.set_text(Some(text));
-        imp.contents.set_tooltip_text(tooltip);
-        // imp.name.set_text(&app_info.name());
-        // imp.name2.set_text(&app_info.name());
-        // if let Some(desc) = entry.description() {
-        // imp.description.set_text(&desc);
-        // }
-        // let start = Instant::now();
-        // imp.image.set_from_icon_name(Some("text-rust"));
-        // println!("icon load {:?}", start.elapsed());
-        // imp.image2.set_from_gicon(&icon);
+        imp.update_contents(&obj.get());
+
+        // Don't need to be weak refs
+        let self_ref = self.clone();
+        let x = obj.connect_local("update", false, move |entry| {
+            let obj: EntryObject = entry[0].get().unwrap();
+            self_ref.imp().update_contents(&obj.get());
+            trace!("Update for visible entry {:?} in column view", obj.get());
+            None
+        });
+
+        assert!(imp.update_connection.replace(Some(x)).is_none())
+    }
+
+    pub fn unbind(&self, obj: &EntryObject) {
+        let signal = self.imp().update_connection.take().unwrap();
+        obj.disconnect(signal);
     }
 }

@@ -2,16 +2,18 @@ use std::borrow::Borrow;
 use std::cell::{Cell, OnceCell, Ref, RefCell};
 use std::collections::VecDeque;
 use std::env::current_dir;
+use std::ffi::OsString;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gtk::gio::ListStore;
 use gtk::glib::Object;
-use gtk::prelude::{ListModelExt, StaticType};
+use gtk::prelude::{Cast, ListModelExt, StaticType};
 use gtk::traits::{AdjustmentExt, BoxExt, WidgetExt};
 use gtk::{glib, Box, MultiSelection, Orientation, ScrolledWindow};
 use notify::{Event, RecursiveMode, Watcher};
@@ -20,8 +22,10 @@ use path_clean::PathClean;
 use self::pane::Pane;
 use super::GUI;
 use crate::com::{
-    DirMetadata, DirSnapshot, EntryObject, GuiAction, GuiActionContext, ManagerAction, SnapshotKind,
+    DirSettings, DirSnapshot, EntryObject, FileTime, GuiAction, GuiActionContext, ManagerAction,
+    SnapshotKind,
 };
+use crate::natsort::ParsedString;
 
 mod pane;
 
@@ -174,7 +178,7 @@ pub(super) struct Tab {
     path: Arc<Path>,
     // visible: bool, -- whether the tab contents are currently visible -- only needed to support
     // paned views.
-    metadata: DirMetadata,
+    settings: DirSettings,
     loading: LoadingState,
     contents: Contents,
     // TODO -- this should only store snapshots and be sporadically updated/absent
@@ -205,7 +209,7 @@ impl Tab {
         let path: Arc<Path> = path.into();
 
         // fetch metatada synchronously, even with a donor
-        let metadata = DirMetadata::default();
+        let metadata = DirSettings::default();
 
         let state = LoadingState::Unloaded;
 
@@ -214,7 +218,7 @@ impl Tab {
         let mut t = Self {
             id,
             path,
-            metadata,
+            settings: metadata,
             loading: state,
             contents,
             view_state: None,
@@ -236,7 +240,7 @@ impl Tab {
         Self {
             id,
             path: source.path.clone(),
-            metadata: source.metadata,
+            settings: source.settings,
             loading: source.loading.clone(),
             contents: source.contents.clone(),
             view_state,
@@ -255,7 +259,7 @@ impl Tab {
                 self.loading = t.loading.clone();
                 self.contents = t.contents.clone();
 
-                let comparator = self.metadata.comparator();
+                let comparator = self.settings.sort.comparator();
                 self.contents.list.sort(comparator);
                 return;
             }
@@ -369,17 +373,18 @@ impl Tab {
             SnapshotKind::Middle | SnapshotKind::End => {}
         }
 
-
-        let comparator = self.metadata.comparator();
-        // for e in snap.entries {
-        // self.contents.list.insert_sorted(&EntryObject::new(e), &comparator);
-        // }
-        // DO NOT COMMIT
         self.contents.list.extend(snap.entries.into_iter().map(EntryObject::new));
-        self.contents.list.sort(&comparator);
+        self.contents.list.sort(self.settings.sort.comparator());
 
-        // self.pane.get().unwrap().scroller.vadjustment().set_value(0.5);
-        drop(comparator);
+        // let a = self.contents.list.item(0).unwrap();
+        // let settings = self.settings;
+        // glib::timeout_add_local_once(Duration::from_secs(5), move || {
+        //     let b = a.downcast::<EntryObject>().unwrap();
+        //     let mut c = b.get().clone();
+        //     c.name = ParsedString::from(OsString::from("asdf"));
+        //     error!("Updating file for no reason");
+        //     b.update(c, settings.sort);
+        // });
 
         match snap.kind {
             SnapshotKind::Complete | SnapshotKind::End => {
@@ -594,14 +599,24 @@ impl TabsList {
         self.tabs.insert(self.active + 1, new_tab);
     }
 
-    fn close_tab(&mut self, index: usize) {
+    pub(super) fn close_tab(&mut self, index: usize) {
+        // TODO -- If all tabs are active
         if self.tabs.len() == 1 {
             self.open_tab(".".into());
         }
 
         self.tabs.remove(index);
+        let was_active = index == self.active;
         if index <= self.active {
             self.active = self.active.saturating_sub(1);
+        }
+
+        if was_active {
+            // TODO -- handle case where multiple tabs are active in panes
+            // Should grab the next
+            let (left, new_active, right) = self.split_around_mut(self.active);
+            new_active.load(left, right);
+            self.tabs[self.active].display(&self.pane_container);
         }
     }
 }

@@ -10,7 +10,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ahash::AHashMap;
 use gnome_desktop::traits::DesktopThumbnailFactoryExt;
@@ -34,6 +34,7 @@ use self::tab::{Tab, TabsList};
 // use self::layout::{LayoutContents, LayoutManager};
 use super::com::*;
 use crate::config::{CONFIG, OPTIONS};
+use crate::database::DBCon;
 // use crate::state_cache::{save_settings, State, STATE};
 use crate::{closing, config};
 
@@ -43,6 +44,7 @@ pub static WINDOW_ID: OnceLock<String> = OnceLock::new();
 
 // The Rc<> ends up more ergonomic in most cases but it's too much of a pain to pass things into
 // GObjects.
+// Rc<RefCell<Option<Gui>>> might work better in some cases.
 thread_local!(static GUI: OnceCell<Rc<Gui>> = OnceCell::default());
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -65,6 +67,8 @@ struct Gui {
     // Tabs can recursively look for each other.
     tabs: RefCell<TabsList>,
     watcher: RefCell<RecommendedWatcher>,
+
+    database: DBCon,
 
     page_num: gtk::Label,
     page_name: gtk::Label,
@@ -176,6 +180,7 @@ impl Gui {
         //     }
         // })
         // .unwrap();
+        let database = DBCon::connect();
 
         let rc = Rc::new(Self {
             window,
@@ -185,12 +190,16 @@ impl Gui {
 
             tabs: RefCell::new(TabsList::new(path)),
             watcher: notify::recommended_watcher(move |ev| {
+                // TODO -- translate all events into more basic Add/Remove/Update enums for paths
+                // with entries.
                 if let Err(e) = event_sender.send(ev) {
                     error!("Error in watcher: {e}");
                 }
             })
             .unwrap()
             .into(),
+
+            database,
 
             page_num: gtk::Label::new(None),
             page_name: gtk::Label::new(None),
@@ -224,12 +233,13 @@ impl Gui {
 
         rc.menu.set(menu::GuiMenu::new(&rc)).unwrap();
 
-        #[cfg(windows)]
         let g = rc.clone();
         application.connect_shutdown(move |_a| {
             info!("Shutting down application");
             #[cfg(windows)]
             g.win32.teardown();
+
+            g.database.destroy();
 
             closing::close();
         });
@@ -413,8 +423,12 @@ impl Gui {
                 );
 
                 let g = self.clone();
-                glib::idle_add_local_once(move || g.tabs.borrow_mut().apply_snapshot(snap));
-                // g.tabs.borrow_mut().apply_snapshot(snap);
+                g.tabs.borrow_mut().apply_snapshot(snap);
+
+                // glib::timeout_add_local_once(Duration::from_secs(20), move || {
+                //     g.tabs.borrow_mut().close_tab(0);
+                // });
+                // // g.tabs.borrow_mut().apply_snapshot(snap);
             }
             IdleUnload => {}
             Quit => {

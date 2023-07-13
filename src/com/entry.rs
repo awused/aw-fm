@@ -1,3 +1,4 @@
+use std::borrow::BorrowMut;
 use std::cmp::Ordering;
 use std::fmt::{self, Formatter};
 use std::ops::Deref;
@@ -12,12 +13,13 @@ use gtk::gio::{
     FILE_ATTRIBUTE_TIME_CREATED, FILE_ATTRIBUTE_TIME_CREATED_USEC, FILE_ATTRIBUTE_TIME_MODIFIED,
     FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
 };
+use gtk::glib::subclass::Signal;
 use gtk::glib::{self, GStr, Object, Variant};
-use gtk::prelude::{FileExt, IconExt};
+use gtk::prelude::{FileExt, IconExt, ObjectExt};
 use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassIsExt};
 use once_cell::sync::Lazy;
 
-use super::{DirMetadata, SortDir, SortMode};
+use super::{DirSettings, SortDir, SortMode, SortSettings};
 use crate::natsort::{self, ParsedString};
 
 // In theory could use standard::edit-name and standard::display-name instead of taking
@@ -63,7 +65,7 @@ impl fmt::Debug for FileTime {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
     File {
         size: u64,
@@ -76,7 +78,7 @@ pub enum EntryKind {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub kind: EntryKind,
     // This is an absolute but NOT canonicalized path.
@@ -97,7 +99,7 @@ pub struct Entry {
 
 
 impl Entry {
-    pub fn cmp(&self, other: &Self, metadata: DirMetadata) -> Ordering {
+    pub fn cmp(&self, other: &Self, settings: SortSettings) -> Ordering {
         use EntryKind::*;
 
         let size_order = match (&self.kind, &other.kind) {
@@ -115,7 +117,7 @@ impl Entry {
         let name_order = || self.name.cmp(&other.name);
 
         // Use the other options as tie breakers, with the abs_path as a final tiebreaker.
-        let ordering = match metadata.sort {
+        let ordering = match settings.mode {
             SortMode::Name => name_order().then(m_order).then(b_order).then(size_order),
             SortMode::MTime => m_order.then(b_order).then_with(name_order).then(size_order),
             SortMode::Size => size_order.then_with(name_order).then(m_order).then(b_order),
@@ -123,7 +125,7 @@ impl Entry {
         }
         .then_with(|| self.abs_path.cmp(&other.abs_path));
 
-        if metadata.sort_dir == SortDir::Ascending {
+        if settings.direction == SortDir::Ascending {
             ordering
         } else {
             ordering.reverse()
@@ -202,23 +204,25 @@ impl Entry {
 // All the ugly GTK wrapper code below this
 
 mod internal {
-    use std::cell::OnceCell;
+    use std::cell::{OnceCell, Ref, RefCell};
     use std::ops::Deref;
 
     use gtk::gio::Icon;
     use gtk::glib;
-    use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass};
+    use gtk::glib::subclass::Signal;
+    use gtk::prelude::ObjectExt;
+    use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassExt};
+    use once_cell::sync::Lazy;
 
     #[derive(Debug)]
     struct Entry {
         entry: super::Entry,
-        icon: Icon,
+        // icon: Icon,
         // thumbnail: Option<>
     }
 
-
     #[derive(Debug, Default)]
-    pub struct Wrapper(OnceCell<Entry>);
+    pub struct Wrapper(RefCell<Option<Entry>>);
 
 
     #[glib::object_subclass]
@@ -228,26 +232,36 @@ mod internal {
         const NAME: &'static str = "awfmEntry";
     }
 
-    impl ObjectImpl for Wrapper {}
-
-    impl Deref for Wrapper {
-        type Target = super::Entry;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0.get().unwrap().entry
+    impl ObjectImpl for Wrapper {
+        fn signals() -> &'static [glib::subclass::Signal] {
+            static SIGNALS: Lazy<Vec<Signal>> =
+                Lazy::new(|| vec![Signal::builder("update").build()]);
+            SIGNALS.as_ref()
         }
     }
 
     impl Wrapper {
         pub(super) fn init(&self, entry: super::Entry) {
-            let icon = Icon::deserialize(&entry.icon).unwrap();
+            // let icon = Icon::deserialize(&entry.icon).unwrap();
 
-            let wrapped = Entry { entry, icon };
-            self.0.set(wrapped).unwrap();
+            // let wrapped = Entry { entry, icon };
+            let wrapped = Entry { entry };
+            assert!(self.0.replace(Some(wrapped)).is_none());
         }
 
-        pub fn icon(&self) -> &Icon {
-            &self.0.get().unwrap().icon
+        pub(super) fn update_inner(&self, entry: super::Entry) {
+            let wrapped = Entry { entry };
+            self.0.replace(Some(wrapped)).unwrap();
+            self.obj().emit_by_name::<()>("update", &[]);
+        }
+
+        pub fn get(&self) -> Ref<super::Entry> {
+            let b = self.0.borrow();
+            Ref::map(b, |o| &o.as_ref().unwrap().entry)
+        }
+
+        pub fn icon(&self) -> Icon {
+            Icon::deserialize(&self.get().icon).unwrap()
         }
     }
 }
@@ -268,10 +282,30 @@ impl EntryObject {
     pub fn new(entry: Entry) -> Self {
         let obj: Self = Object::new();
         obj.imp().init(entry);
+
         obj
     }
 
-    pub(super) fn cmp(&self, other: &Self, metadata: DirMetadata) -> Ordering {
-        self.imp().cmp(other.imp(), metadata)
+    // Returns true if resorting is required
+    pub fn update(&self, entry: Entry, settings: SortSettings) -> bool {
+        if *self.imp().get() == entry {
+            // No change we care about
+            trace!("Update for {:?} was unimportant", entry.abs_path);
+            return false;
+        }
+
+        let needs_resort = self.imp().get().cmp(&entry, settings).is_ne();
+
+        self.update_inner(entry);
+        // self.notify(pspec);
+        // self.dispatch_properties_changed(pspecs)
+        // let old = borrow.0.take();
+
+        // if
+        needs_resort
+    }
+
+    pub(super) fn cmp(&self, other: &Self, settings: SortSettings) -> Ordering {
+        self.imp().get().cmp(&other.imp().get(), settings)
     }
 }

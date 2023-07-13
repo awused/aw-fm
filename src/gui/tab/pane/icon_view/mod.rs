@@ -14,9 +14,6 @@ pub(super) fn new(selection: &MultiSelection) -> GridView {
     let factory = gtk::SignalListItemFactory::new();
 
     factory.connect_setup(move |_factory, item| {
-        // In gtk4 < 4.8, you don't need the following line
-        // as gtk used to pass GtkListItem directly. In order to make that API
-        // generic for potentially future new APIs, it was switched to taking a GObject in 4.8
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let row = IconTile::new();
         item.set_child(Some(&row));
@@ -24,23 +21,32 @@ pub(super) fn new(selection: &MultiSelection) -> GridView {
 
     // the bind stage is used for "binding" the data to the created widgets on the "setup" stage
     factory.connect_bind(move |_factory, item| {
-        let start = Instant::now();
-        // In gtk4 < 4.8, you don't need the following line
-        // as gtk used to pass GtkListItem directly. In order to make that API
-        // generic for potentially future new APIs, it was switched to taking a GObject in 4.8
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let entry = item.item().unwrap().downcast::<EntryObject>().unwrap();
-
+        println!("bind {entry:?}");
         let child = item.child().unwrap().downcast::<IconTile>().unwrap();
-        child.set_entry(&entry);
+
+        // entry.connect_notify_local(name, f)
+        child.bind(&entry);
         // info!("bind {:?}", start.elapsed());
+    });
+
+    factory.connect_unbind(move |_factory, item| {
+        let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+        let entry = item.item().unwrap().downcast::<EntryObject>().unwrap();
+        println!("unbind {item:?} {entry:?}");
+        let child = item.child().unwrap().downcast::<IconTile>().unwrap();
+
+        child.unbind(&entry);
     });
 
     let grid = GridView::new(Some(selection.clone()), Some(factory));
     // let grid = ListView::new(Some(selection.clone()), Some(factory));
     // grid.set_min_columns(2);
     // grid.set_max_columns(2);
-    grid.set_max_columns(128);
+    // We want this to grow as necessary, but setting this too high (>32) absolutely tanks
+    // performance.
+    grid.set_max_columns(16);
     grid.set_enable_rubberband(true);
     grid.set_vexpand(true);
 

@@ -52,7 +52,7 @@ impl Pane {
         scroller.set_hscrollbar_policy(gtk::PolicyType::Never);
         scroller.set_overlay_scrolling(false);
 
-        let contents = match tab.metadata.mode {
+        let contents = match tab.settings.mode {
             DisplayMode::Icons => {
                 let grid = icon_view::new(&tab.contents.selection);
                 scroller.set_child(Some(&grid));

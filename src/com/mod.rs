@@ -14,6 +14,8 @@ use gtk::gio::{self, Cancellable, FileQueryInfoFlags};
 use gtk::glib::Object;
 use gtk::prelude::{Cast, FileExt};
 use path_clean::PathClean;
+use rusqlite::ToSql;
+use strum_macros::{AsRefStr, EnumString};
 use tokio::sync::oneshot;
 
 pub use self::entry::*;
@@ -24,14 +26,16 @@ mod entry;
 mod res;
 
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum DisplayMode {
-    #[default]
     Icons,
+    #[default]
     List,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum SortMode {
     #[default]
     Name,
@@ -40,37 +44,44 @@ pub enum SortMode {
     BTime,
 }
 
-#[derive(Debug, PartialEq, Eq, Default, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Default, Clone, Copy, EnumString, AsRefStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum SortDir {
     #[default]
     Ascending,
     Descending,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum DisplayHidden {
     #[default]
-    Inherit,
+    // Default, -- would be the global setting, if/when we have one
     False,
     True,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct DirMetadata {
-    pub mode: DisplayMode,
-    pub sort: SortMode,
-    pub sort_dir: SortDir,
-    pub display_hidden: DisplayHidden,
+pub struct SortSettings {
+    pub mode: SortMode,
+    pub direction: SortDir,
 }
 
-impl DirMetadata {
-    pub fn comparator(&self) -> impl Fn(&Object, &Object) -> Ordering + '_ {
+impl SortSettings {
+    pub fn comparator(self) -> impl Fn(&Object, &Object) -> Ordering + 'static {
         move |a, b| {
             let a = a.downcast_ref::<EntryObject>().unwrap();
             let b = b.downcast_ref::<EntryObject>().unwrap();
-            a.cmp(b, *self)
+            a.cmp(b, self)
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DirSettings {
+    pub mode: DisplayMode,
+    pub sort: SortSettings,
+    pub display_hidden: DisplayHidden,
 }
 
 

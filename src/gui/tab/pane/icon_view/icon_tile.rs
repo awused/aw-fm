@@ -1,6 +1,7 @@
 use gtk::glib;
 use gtk::pango::ffi::pango_attr_insert_hyphens_new;
 use gtk::pango::{AttrInt, AttrList};
+use gtk::prelude::ObjectExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::WidgetExt;
 
@@ -16,9 +17,14 @@ thread_local! {
 }
 
 mod imp {
+    use std::cell::{Cell, RefCell};
+
+    use gtk::glib::SignalHandlerId;
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
+
+    use crate::com::EntryObject;
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(file = "icon_tile.ui")]
@@ -30,6 +36,8 @@ mod imp {
         // pub name: TemplateChild<gtk::Label>,
         #[template_child]
         pub size: TemplateChild<gtk::Inscription>,
+
+        pub update_connection: RefCell<Option<SignalHandlerId>>,
     }
 
     #[glib::object_subclass]
@@ -56,11 +64,32 @@ mod imp {
 
     impl WidgetImpl for IconTile {}
     impl BoxImpl for IconTile {}
+
+    impl IconTile {
+        pub(super) fn update_contents(&self, obj: &EntryObject) {
+            let entry = obj.get();
+
+            self.image.set_from_gicon(&obj.icon());
+
+            // TODO -- do something about this to_string_lossy, especially if we're never using the
+            // OsString portion anywhere.
+            let disp_string = entry.name.to_string_lossy();
+            self.name.set_text(Some(&disp_string));
+
+            // imp.name.set_text(&disp_string);
+
+            // Seems to cause it to lock up completely in large directories with sorting?
+            // Absolutely tanks performance either way.
+            // imp.name.set_tooltip_text(Some(&disp_string));
+
+            self.size.set_text(Some(&entry.long_size_string()));
+        }
+    }
 }
 
 glib::wrapper! {
     pub struct IconTile(ObjectSubclass<imp::IconTile>)
-        @extends gtk::Widget, gtk::Fixed;
+        @extends gtk::Widget, gtk::Box;
 }
 
 impl Default for IconTile {
@@ -76,18 +105,28 @@ impl IconTile {
         s
     }
 
-    pub fn set_entry(&self, entry: &EntryObject) {
+    pub fn bind(&self, obj: &EntryObject) {
         let imp = self.imp();
+        imp.update_contents(obj);
 
-        imp.image.set_from_gicon(entry.icon());
+        // Don't need to be weak refs
+        let self_ref = self.clone();
+        let x = obj.connect_local("update", false, move |entry| {
+            let obj: EntryObject = entry[0].get().unwrap();
+            self_ref.imp().update_contents(&obj);
+            trace!("Update for visible entry {:?} in icon view", obj.get());
+            None
+        });
 
-        // TODO -- do something about this to_string_lossy, especially if we're never using the
-        // OsString portion anywhere.
-        let disp_string = entry.name.to_string_lossy();
-        imp.name.set_text(Some(&disp_string));
-        // imp.name.set_text(&disp_string);
-        imp.name.set_tooltip_text(Some(&disp_string));
+        assert!(imp.update_connection.replace(Some(x)).is_none())
+    }
 
-        imp.size.set_text(Some(&entry.long_size_string()));
+    pub fn unbind(&self, obj: &EntryObject) {
+        let signal = self.imp().update_connection.take().unwrap();
+        obj.disconnect(signal);
+    }
+
+    pub fn assert_disconnected(&self) {
+        assert!(self.imp().update_connection.take().is_none());
     }
 }
