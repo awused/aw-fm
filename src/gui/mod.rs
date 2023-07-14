@@ -42,6 +42,14 @@ mod tab;
 
 pub static WINDOW_ID: OnceLock<String> = OnceLock::new();
 
+enum UpdateEvent {
+    // We don't really care about a creation vs update here, treat them all as a potential update.
+    // Races with reading the initial directory can cause us get a creation event for an entry we
+    // already have.
+    Entry(Entry),
+    Removed(PathBuf),
+}
+
 // The Rc<> ends up more ergonomic in most cases but it's too much of a pain to pass things into
 // GObjects.
 // Rc<RefCell<Option<Gui>>> might work better in some cases.
@@ -167,7 +175,6 @@ impl Gui {
         //     }
         // })
         // .unwrap();
-        let database = DBCon::connect();
 
         let rc = Rc::new(Self {
             window,
@@ -177,8 +184,6 @@ impl Gui {
 
             tabs: RefCell::new(TabsList::new_uninit()),
             watcher: notify::recommended_watcher(move |ev| {
-                // TODO -- translate all events into more basic Add/Remove/Update enums for paths
-                // with entries.
                 if let Err(e) = event_sender.send(ev) {
                     error!("Error in watcher: {e}");
                 }
@@ -186,7 +191,7 @@ impl Gui {
             .unwrap()
             .into(),
 
-            database,
+            database: DBCon::connect(),
 
             page_num: gtk::Label::new(None),
             page_name: gtk::Label::new(None),

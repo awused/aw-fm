@@ -22,8 +22,8 @@ use path_clean::PathClean;
 use self::pane::Pane;
 use super::GUI;
 use crate::com::{
-    DirSettings, DirSnapshot, EntryObject, FileTime, GuiAction, GuiActionContext, ManagerAction,
-    SnapshotKind,
+    DirSettings, DirSnapshot, EntryObject, EntryObjectSnapshot, FileTime, GuiAction,
+    GuiActionContext, ManagerAction, SnapshotId, SnapshotKind,
 };
 use crate::natsort::ParsedString;
 
@@ -63,13 +63,49 @@ impl WatchedDir {
 }
 
 
+// A new object needs to be copied between every relevant ListStore
+#[derive(Debug)]
+enum InsertOrDelete {
+    Insert(EntryObject),
+    Delete(EntryObject),
+}
+
+#[derive(Debug)]
+enum PartiallyAppliedEvent {
+    // Updates without sorting are fully applied
+    UpdateNeededSort,
+    Inse(EntryObject),
+    Removal(EntryObject),
+}
+
+
+// Applying an Event gives us an update, which may require a sort, or a new object, which always
+// requires a sort.
+// Removals do not require sorting on their own.
+#[derive(Debug)]
+enum PendingEvents {
+    Nothing,
+    Unapplied(Vec<Event>),
+    PartiallyApplied {
+        // Split apart from a Vec<PartiallyAppliedEvent> so we can handle these efficiently and
+        // safely.
+        // Sort if needed due to any updates first, then apply all insertions/removals efficiently
+        // on a sorted ListStore.
+        needed_sort: bool,
+        pending: Vec<InsertOrDelete>,
+    },
+}
+
+// Despite being complicated, this is Clone rather than being !Clone and using refcounting.
+// If the ListStores were all stored between tabs this, too, could be shared between tabs.
 #[derive(Debug, Default, Clone)]
 enum LoadingState {
     #[default]
     Unloaded,
     Loading {
         watch: Rc<WatchedDir>,
-        pending_events: Vec<Event>,
+        pending_events: Rc<RefCell<PendingEvents>>,
+        // needed_resort
         //pending_scroll: f64,
         // spinner: enum Displayed/pending
     },
@@ -85,12 +121,21 @@ impl LoadingState {
             Self::Loading { watch, .. } | Self::Loaded(watch) => Some(watch),
         }
     }
+
+    const fn loaded(&self) -> bool {
+        match self {
+            LoadingState::Unloaded | LoadingState::Loading { .. } => false,
+            LoadingState::Loaded(_) => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 struct HistoryEntry {
-    displayed_path: PathBuf,
-    location: Arc<Path>,
+    // This is intentionally not the same Arc<Path> we use for active tabs.
+    // If there is a matching tab when we activate this history entry, steal that Arc and state.
+    // If there is none, we need a new, fresh Arc<> that definitely has no pending snapshots.
+    location: Rc<Path>,
     scroll_pos: f64, // View snapshot?
 }
 
@@ -165,6 +210,9 @@ pub struct TabId(u64);
 // - All tabs open to the same directory share the same watcher
 // - All tabs open to the same directory share the same snapshots
 // - All tabs open to the same directory are in the same TabState
+// - All tabs open to the same directory share the same ListStore and DirSettings.
+//  - This forces sort order and display mode to be the same.
+//  - It's possible to avoid that, but it's just more code than it's worth for something so minor.
 // - Tabs cannot be unloaded, refreshed, or reopened while they're opening
 //   - Tabs can be closed while opening
 //
@@ -173,7 +221,6 @@ pub struct TabId(u64);
 #[derive(Debug)]
 pub(super) struct Tab {
     // displayed_path: PathBuf,
-    // TODO -- remove pub
     id: TabId,
     path: Arc<Path>,
     // visible: bool, -- whether the tab contents are currently visible -- only needed to support
@@ -274,8 +321,10 @@ impl Tab {
                 debug!("Opening directory for {:?}", self.path);
                 let watch = WatchedDir::start(self.path.clone());
 
-                // TODO -- open all the other matching tabs
-                let state = LoadingState::Loading { watch, pending_events: Vec::new() };
+                let state = LoadingState::Loading {
+                    watch,
+                    pending_events: Rc::new(PendingEvents::Nothing.into()),
+                };
 
                 // Clone the new state into all matching tabs
                 for t in left_tabs.iter_mut().chain(right_tabs).filter(|t| t.matches(self)) {
@@ -299,7 +348,7 @@ impl Tab {
         }
     }
 
-    pub(super) fn matches_snapshot(&self, snap: &DirSnapshot) -> bool {
+    pub(super) fn matches_snapshot(&self, snap: &SnapshotId) -> bool {
         if !Arc::ptr_eq(&self.path, &snap.path) {
             return false;
         }
@@ -310,45 +359,34 @@ impl Tab {
             (_, LoadingState::Unloaded) => {
                 // TODO -- find some decent way of preventing two identical tabs from opening to
                 // the same directory at once.
-                error!(
-                    "Received snapshot for an unloaded tab, this could cause weirdness unless \
-                     they're all unloaded."
-                );
-                // This might not be an error if all tabs have been inactivated.
-                // panic!("Received snapshot for an inactive tab")
-                false
+                unreachable!("Received {:?} snapshot for an unloaded tab", snap.kind);
             }
-            (Complete | Start, LoadingState::Loading { .. } | LoadingState::Loaded(_))
-            | (Middle | End, LoadingState::Loading { .. }) => true,
-            (Middle | End, LoadingState::Loaded(_)) => {
-                error!("Received {:?} snapshot for opened tab.", snap.kind);
-                false
+            (_, LoadingState::Loaded(_)) => {
+                unreachable!("Received {:?} snapshot for loaded tab.", snap.kind);
             }
+            (Complete | Start | Middle | End, LoadingState::Loading { .. }) => true,
         }
     }
 
-    // TODO -- Not terribly efficient if you have a great many tabs open to the same directory.
-    // Can do something clever with Rc<SomeState> and share it between tabs with equivalent
-    pub(super) fn apply_snapshot(&mut self, snap: DirSnapshot, active: bool) {
-        assert!(self.matches_snapshot(&snap));
+    // Complicated, but necessary to support having multiple open tabs to the same directory.
+    // If the ListStore were shared between tabs this would be simpler, but they'd all be sorted in
+    // the same order and be forced to use the same DirSettings.
+    pub(super) fn apply_snapshot(&mut self, snap: EntryObjectSnapshot, active: bool) {
+        assert!(self.matches_snapshot(&snap.id));
         debug!(
             "Applying {:?} snapshot for {:?} with {} items",
-            snap.kind,
+            snap.id.kind,
             self.path,
             snap.entries.len()
         );
 
-        match snap.kind {
+        match snap.id.kind {
             SnapshotKind::Complete => {
-                if active {
-                    self.save_view_snapshot();
-                }
                 self.contents.list.remove_all();
             }
             SnapshotKind::Start => {
                 match &self.loading {
-                    // Tabs must be moved to inactive explicitly
-                    LoadingState::Unloaded => unreachable!(),
+                    LoadingState::Unloaded | LoadingState::Loaded(_) => unreachable!(),
                     LoadingState::Loading { .. } => {
                         // For now, we don't support opening/refreshing directories while they're
                         // already being opened.
@@ -358,23 +396,14 @@ impl Tab {
                              is being opened twice at once"
                         );
                     }
-                    LoadingState::Loaded(watch) => {
-                        self.loading = LoadingState::Loading {
-                            watch: watch.clone(),
-                            pending_events: Vec::new(),
-                        }
-                    }
                 }
 
-                if active {
-                    self.save_view_snapshot();
-                }
                 self.contents.list.remove_all();
             }
             SnapshotKind::Middle | SnapshotKind::End => {}
         }
 
-        self.contents.list.extend(snap.entries.into_iter().map(EntryObject::new));
+        self.contents.list.extend(snap.entries.into_iter());
         self.contents.list.sort(self.settings.sort.comparator());
 
         // let a = self.contents.list.item(0).unwrap();
@@ -387,7 +416,7 @@ impl Tab {
         //     b.update(c, settings.sort);
         // });
 
-        match snap.kind {
+        match snap.id.kind {
             SnapshotKind::Complete | SnapshotKind::End => {
                 match std::mem::take(&mut self.loading) {
                     LoadingState::Unloaded | LoadingState::Loaded(_) => unreachable!(),
@@ -415,6 +444,32 @@ impl Tab {
         todo!()
     }
 
+    fn finish_event(&mut self, ev: &PartiallyAppliedEvent) {}
+
+    // Apply a single event, inefficient for many pending events but eh.
+    fn apply_single_event(&mut self, other_tabs: &mut [Self], ev: Event) {
+        assert!(self.matches_event(&ev));
+
+        match self.loading {
+            LoadingState::Unloaded => return,
+            LoadingState::Loading { pending_events, .. } => {
+                let mut pe = pending_events.borrow_mut();
+                match &mut *pe {
+                    // PartiallyApplied should be a transient state that never outlives a
+                    // Complete/End snapshot being finalized.
+                    PendingEvents::PartiallyApplied { .. } => unreachable!(),
+                    PendingEvents::Nothing => {
+                        *pe = PendingEvents::Unapplied(vec![ev]);
+                    }
+                    PendingEvents::Unapplied(pending) => pending.push(ev),
+                }
+
+                return;
+            }
+            LoadingState::Loaded(_) => {}
+        }
+    }
+
     fn navigate(&mut self, left_tabs: &[Self], right_tabs: &[Self]) {
         // Look for another matching tab and steal its state.
         // Only if that fails do we open a new watcher.
@@ -433,14 +488,8 @@ impl Tab {
         todo!()
     }
 
+    // Goes to the child directory if one was previous open or if there's only one.
     pub(super) fn child(&mut self) {
-        todo!()
-    }
-
-    pub(super) fn unload_if_not_matching(&mut self) {
-        // Transition tab to an Inactive state only if Opened
-        // Clear out all items
-        //
         todo!()
     }
 
@@ -459,7 +508,9 @@ impl Tab {
     }
 
     fn apply_view_snapshot(&mut self) {
-        let Some(view_state) = &self.view_state else { return };
+        let Some(view_state) = &self.view_state else {
+            return;
+        };
 
         GUI.with(|g| {
             // Only called on active tab
@@ -562,15 +613,18 @@ impl TabsList {
     }
 
     pub(super) fn apply_snapshot(&mut self, snap: DirSnapshot) {
-        let first_match = self.iter().position(|t| t.matches_snapshot(&snap));
+        let first_match = self.iter().position(|t| t.matches_snapshot(&snap.id));
         if let Some(i) = first_match {
+            let snap: EntryObjectSnapshot = snap.into();
+
             for (j, t) in &mut self.tabs[i + 1..]
                 .iter_mut()
                 .enumerate()
-                .filter(|(j, t)| t.matches_snapshot(&snap))
+                .filter(|(j, t)| t.matches_snapshot(&snap.id))
             {
                 t.apply_snapshot(snap.clone(), i + j + 1 == self.active);
             }
+
             self.tabs[i].apply_snapshot(snap, i == self.active);
         }
     }

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::mem::ManuallyDrop;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
+use std::str::FromStr;
 use std::time::Instant;
 
 use dirs::data_dir;
@@ -76,8 +77,7 @@ CREATE TABLE dir_settings(
     sort_direction TEXT NOT NULL,
     -- display_hidden TEXT NOT NULL,
     PRIMARY KEY(path)
-);
-            "#,
+);"#,
     );
 }
 
@@ -158,10 +158,18 @@ impl DBCon {
 
     pub fn store(&self, path: &Path, settings: DirSettings) {
         trace!("Storing settings for {path:?}");
-        // TODO -- If settings are default, remove the row
 
         let b = self.0.borrow();
         let con = b.as_ref().unwrap();
+
+        if settings == DirSettings::default() {
+            con.execute("DELETE FROM dir_settings WHERE path = ?;", [path.as_os_str().as_bytes()])
+                .unwrap_or_else(|e| {
+                    error!("Error clearing directory settings for {path:?} to DB: {e}");
+                    0
+                });
+            return;
+        }
 
         con.execute(
             r#"
@@ -184,7 +192,7 @@ VALUES
 }
 
 
-// If many of these are needed, this can be done trivially in a macro
+// If this is needed for a lot more types, this can be done with a macro.
 impl ToSql for DisplayMode {
     fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
         Ok(self.as_ref().into())

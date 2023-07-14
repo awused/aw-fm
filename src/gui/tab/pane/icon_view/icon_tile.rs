@@ -71,12 +71,8 @@ mod imp {
 
             self.image.set_from_gicon(&obj.icon());
 
-            // TODO -- do something about this to_string_lossy, especially if we're never using the
-            // OsString portion anywhere.
             let disp_string = entry.name.to_string_lossy();
             self.name.set_text(Some(&disp_string));
-
-            // imp.name.set_text(&disp_string);
 
             // Seems to cause it to lock up completely in large directories with sorting?
             // Absolutely tanks performance either way.

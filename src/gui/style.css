@@ -31,6 +31,10 @@ child:selected {
   background: none;
 }
 
+child:selected image {
+  filter: invert(30%);
+  /* opacity: 0.1; */
+}
 
 gridview child box {
   border-spacing: 0;

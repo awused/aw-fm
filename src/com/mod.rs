@@ -26,7 +26,7 @@ mod entry;
 mod res;
 
 
-#[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, EnumString, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum DisplayMode {
     #[default]
@@ -34,7 +34,7 @@ pub enum DisplayMode {
     List,
 }
 
-#[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, EnumString, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum SortMode {
     #[default]
@@ -61,7 +61,7 @@ pub enum DisplayHidden {
     True,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct SortSettings {
     pub mode: SortMode,
     pub direction: SortDir,
@@ -77,7 +77,7 @@ impl SortSettings {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct DirSettings {
     pub display_mode: DisplayMode,
     pub sort: SortSettings,
@@ -186,10 +186,33 @@ pub enum SnapshotKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct DirSnapshot {
+pub struct SnapshotId {
     pub kind: SnapshotKind,
     pub path: Arc<Path>,
-    pub entries: Vec<Entry>,
+}
+
+#[derive(Debug)]
+pub struct DirSnapshot {
+    pub id: SnapshotId,
+    entries: Vec<Entry>,
+}
+
+// Separate so that, as much as possible, we only ever have one real Entry per directory.
+// EntryObject uses GObject refcounting for cloning, which is cheaper and avoids the need to update
+// each tab individually.
+#[derive(Debug, Clone)]
+pub struct EntryObjectSnapshot {
+    pub id: SnapshotId,
+    pub entries: Vec<EntryObject>,
+}
+
+impl From<DirSnapshot> for EntryObjectSnapshot {
+    fn from(value: DirSnapshot) -> Self {
+        Self {
+            id: value.id,
+            entries: value.entries.into_iter().map(EntryObject::new).collect(),
+        }
+    }
 }
 
 

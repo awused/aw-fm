@@ -64,7 +64,7 @@ mod imp {
                     self.contents.set_text(Some(&entry.name.to_string_lossy()));
                 }
                 EntryString::Size => {
-                    self.contents.set_text(Some(&entry.size_string()));
+                    self.contents.set_text(Some(&entry.short_size_string()));
                 }
                 EntryString::Modified => {
                     // Only use seconds for columns

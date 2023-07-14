@@ -13,7 +13,12 @@ use gtk::{
 };
 
 use self::string_cell::{EntryString, StringCell};
-use crate::com::{DirSettings, Entry, EntryKind, EntryObject};
+use crate::com::{DirSettings, Entry, EntryKind, EntryObject, SortDir, SortMode};
+
+const NAME: &str = "Name";
+const SIZE: &str = "Size";
+const DATE_MODIFIED: &str = "Date Modified";
+
 
 // Does absolutely nothing, except exist
 const fn dummy_sort_fn(a: &Object, b: &Object) -> gtk::Ordering {
@@ -62,7 +67,7 @@ pub(super) fn new(selection: &MultiSelection) -> ColumnView {
     });
     setup_string_binds(&name_factory);
 
-    let name_column = ColumnViewColumn::new(Some("Name"), Some(name_factory));
+    let name_column = ColumnViewColumn::new(Some(NAME), Some(name_factory));
     name_column.set_expand(true);
     name_column.set_sorter(Some(&dummy_sorter));
 
@@ -76,7 +81,7 @@ pub(super) fn new(selection: &MultiSelection) -> ColumnView {
     });
     setup_string_binds(&size_factory);
 
-    let size_column = ColumnViewColumn::new(Some("Size"), Some(size_factory));
+    let size_column = ColumnViewColumn::new(Some(SIZE), Some(size_factory));
     size_column.set_sorter(Some(&dummy_sorter));
     size_column.set_fixed_width(110);
 
@@ -89,7 +94,7 @@ pub(super) fn new(selection: &MultiSelection) -> ColumnView {
     });
     setup_string_binds(&modified_factory);
 
-    let modified_column = ColumnViewColumn::new(Some("Date Modified"), Some(modified_factory));
+    let modified_column = ColumnViewColumn::new(Some(DATE_MODIFIED), Some(modified_factory));
     modified_column.set_sorter(Some(&dummy_sorter));
     modified_column.set_fixed_width(200);
     // Icon -- combine into name column?
@@ -103,10 +108,6 @@ pub(super) fn new(selection: &MultiSelection) -> ColumnView {
 
     // let grid = GridView::new(Some(selection.clone()), Some(factory));
     // let grid = ListView::new(Some(selection.clone()), Some(factory));
-    // grid.set_min_columns(2);
-    // grid.set_max_columns(2);
-    // grid.set_enable_rubberband(true);
-    // grid.set_vexpand(true);
 
     let column_view = ColumnView::new(Some(selection.clone()));
     column_view.set_show_column_separators(true);
@@ -120,10 +121,26 @@ pub(super) fn new(selection: &MultiSelection) -> ColumnView {
     column_view.append_column(&modified_column);
 
     let sorter = column_view.sorter().unwrap().downcast::<ColumnViewSorter>().unwrap();
-    sorter.connect_changed(|a, b| {
-        println!("{:?}", a.n_sort_columns());
-        println!("{:?}", a.nth_sort_column(0));
-        println!("Sorter changed {a:?}");
+    sorter.connect_changed(|sorter, b| {
+        let (col, direction) = sorter.nth_sort_column(0);
+        let col = col.unwrap().title().unwrap();
+        trace!("Sorter changed: {col:?} {direction:?}");
+
+        let sort_mode = match col.as_str() {
+            NAME => SortMode::Name,
+            SIZE => SortMode::Size,
+            DATE_MODIFIED => SortMode::MTime,
+            _ => unreachable!(),
+        };
+
+        let sort_dir = match direction {
+            gtk::SortType::Ascending => SortDir::Ascending,
+            gtk::SortType::Descending => SortDir::Descending,
+            _ => unreachable!(),
+        };
+        println!("{sort_mode:?}, {sort_dir:?}");
+        // println!("{:?}", c.n_sort_columns());
+        // println!("{:?}", a.nth_sort_column(0));
     });
     let cview = column_view.clone();
     column_view.connect_sorter_notify(|a| {

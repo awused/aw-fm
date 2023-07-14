@@ -4,6 +4,7 @@ use std::fmt::{self, Formatter};
 use std::ops::Deref;
 use std::path::PathBuf;
 
+use gtk::gdk_pixbuf::Pixbuf;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
     self, Cancellable, FileInfo, FileQueryInfoFlags, Icon,
@@ -14,7 +15,7 @@ use gtk::gio::{
     FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
 };
 use gtk::glib::subclass::Signal;
-use gtk::glib::{self, GStr, Object, Variant};
+use gtk::glib::{self, GStr, Object, Variant, WeakRef};
 use gtk::prelude::{FileExt, IconExt, ObjectExt};
 use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassIsExt};
 use once_cell::sync::Lazy;
@@ -78,7 +79,8 @@ pub enum EntryKind {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Does NOT implement Clone so we can rely on GObject refcounting to minimize copies.
+#[derive(Debug, PartialEq, Eq)]
 pub struct Entry {
     pub kind: EntryKind,
     // This is an absolute but NOT canonicalized path.
@@ -99,6 +101,8 @@ pub struct Entry {
 
 
 impl Entry {
+    // If this ever changes so that we don't use all other options as potential tiebreakers in all
+    // cases, the "needs_resort" logic in EntryObject::update below will need updating.
     pub fn cmp(&self, other: &Self, settings: SortSettings) -> Ordering {
         use EntryKind::*;
 
@@ -183,7 +187,7 @@ impl Entry {
     }
 
     // This could be a compact string/small string but possibly not worth the dependency on its own
-    pub fn size_string(&self) -> String {
+    pub fn short_size_string(&self) -> String {
         match self.kind {
             EntryKind::File { size } => humansize::format_size(size, humansize::WINDOWS),
             EntryKind::Directory { contents } => format!("{contents}"),
@@ -200,6 +204,16 @@ impl Entry {
     }
 }
 
+#[derive(Debug, Default)]
+pub enum Thumbnail {
+    #[default]
+    Uninitialized,
+    Loaded(Pixbuf),
+    // Outdated(Pixbuf),
+    // Unloaded(WeakRef<Pixbuf>),
+    Failed,
+}
+
 
 // All the ugly GTK wrapper code below this
 
@@ -214,11 +228,13 @@ mod internal {
     use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassExt};
     use once_cell::sync::Lazy;
 
+    use super::Thumbnail;
+
     #[derive(Debug)]
     struct Entry {
         entry: super::Entry,
         // icon: Icon,
-        // thumbnail: Option<>
+        thumbnail: Thumbnail,
     }
 
     #[derive(Debug, Default)]
@@ -229,7 +245,7 @@ mod internal {
     impl ObjectSubclass for Wrapper {
         type Type = super::EntryObject;
 
-        const NAME: &'static str = "awfmEntry";
+        const NAME: &'static str = "aw-fm-Entry";
     }
 
     impl ObjectImpl for Wrapper {
@@ -245,12 +261,15 @@ mod internal {
             // let icon = Icon::deserialize(&entry.icon).unwrap();
 
             // let wrapped = Entry { entry, icon };
-            let wrapped = Entry { entry };
+            let wrapped = Entry { entry, thumbnail: Thumbnail::default() };
             assert!(self.0.replace(Some(wrapped)).is_none());
         }
 
         pub(super) fn update_inner(&self, entry: super::Entry) {
-            let wrapped = Entry { entry };
+            // TODO -- this is where we'd be able to use "Outdated"
+            // Every time there is an update, we have an opportunity to try the thumbnail again if
+            // it failed.
+            let wrapped = Entry { entry, thumbnail: Thumbnail::default() };
             self.0.replace(Some(wrapped)).unwrap();
             self.obj().emit_by_name::<()>("update", &[]);
         }
@@ -288,6 +307,8 @@ impl EntryObject {
 
     // Returns true if resorting is required
     pub fn update(&self, entry: Entry, settings: SortSettings) -> bool {
+        let old = self.imp().get();
+        assert!(old.abs_path == entry.abs_path);
         if *self.imp().get() == entry {
             // No change we care about
             trace!("Update for {:?} was unimportant", entry.abs_path);
