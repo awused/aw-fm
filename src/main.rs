@@ -28,8 +28,6 @@ use gtk::{gio, glib, IconLookupFlags, IconTheme, Settings};
 use once_cell::sync::Lazy;
 use rayon::prelude::{ParallelBridge, ParallelIterator};
 
-// use self::com::MAWithResponse;
-
 mod elapsedlogger;
 
 mod closing;
@@ -39,10 +37,6 @@ mod database;
 mod gui;
 mod manager;
 mod natsort;
-// mod pools;
-// mod socket;
-// mod state_cache;
-//
 
 
 fn spawn_thread<F, T>(name: &str, f: F) -> JoinHandle<T>
@@ -56,38 +50,13 @@ where
         .unwrap_or_else(|_| panic!("Error spawning thread {name}"))
 }
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-type Fut<T> = Pin<Box<dyn Future<Output = T>>>;
+// type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+// type Fut<T> = Pin<Box<dyn Future<Output = T>>>;
 
 fn main() {
     elapsedlogger::init_logging();
-
-    let mut i = 0;
-
-    // iter.par_bridge().for_each(|x| {
-    //     if !x.unwrap().metadata().unwrap().is_file() {
-    //         println!("Not file");
-    //     }
-    // });
-
-    #[cfg(target_family = "unix")]
-    unsafe {
-        // This sets a restrictive umask to prevent other users from reading anything written by
-        // this program. Images can be private and sockets can be used to run arbitrary
-        // executables.
-        // libc::umask(0o077);
-        // Tune memory trimming, otherwise the resident memory set tends to explode in size. The
-        // default behaviour is dynamic and seems very poorly tuned for applications like an
-        // image viewer.
-        // #[cfg(target_env = "gnu")]
-        // libc::mallopt(libc::M_TRIM_THRESHOLD, 128 * 1024);
-    }
-
-
     config::init();
 
-    // All GTK calls that could possibly be reached before this completes (pixbuf, channel sends)
-    // are safe to call off the main thread and before GTK is initialzed.
     gtk::init().expect("GTK could not be initialized");
 
     let (manager_sender, manager_receiver) = tokio::sync::mpsc::unbounded_channel();

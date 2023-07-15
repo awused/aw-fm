@@ -25,7 +25,7 @@ use crate::closing;
 use crate::com::{DirSnapshot, Entry, EntryObject, GuiAction, SnapshotKind};
 use crate::natsort::ParsedString;
 
-#[cfg(not(feature = "forced-slow"))]
+#[cfg(not(feature = "debug-forced-slow"))]
 mod constants {
     use std::time::Duration;
 
@@ -39,7 +39,7 @@ mod constants {
 }
 
 // For testing, force directories to load very slowly
-#[cfg(feature = "forced-slow")]
+#[cfg(feature = "debug-forced-slow")]
 mod constants {
     use std::time::Duration;
 
@@ -238,6 +238,11 @@ async fn read_slow_dir(
                 }
             } => {
                 if done {
+                    #[cfg(feature = "debug-forced-slow")]
+                    {
+                        sleep_until(Instant::now() + BATCH_TIMEOUT).await;
+                    }
+
                     trace!(
                         "Slow directory done in {:?}/{:?} final batch: {}/{batch_size}",
                         batch_start.elapsed(),
@@ -258,7 +263,7 @@ async fn read_slow_dir(
 
         let batch_deadline = Instant::now() + BATCH_TIMEOUT;
 
-        #[cfg(feature = "forced-slow")]
+        #[cfg(feature = "debug-forced-slow")]
         {
             sleep_until(batch_deadline).await;
 

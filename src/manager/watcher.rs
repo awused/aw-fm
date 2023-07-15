@@ -2,6 +2,7 @@ use std::collections::hash_map;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use gtk::glib::Sender;
 use notify::event::{ModifyKind, RenameMode};
 use notify::RecursiveMode::NonRecursive;
 use notify::{Event, EventKind, Watcher};
@@ -10,8 +11,9 @@ use tokio::time::{Duration, Instant};
 use super::Manager;
 use crate::com::{Entry, GuiAction, Update};
 
+// Use our own debouncer as the existing notify debouncers leave a lot to be desired.
+// Send the first event immediately and then at most one event per period.
 const DEBOUNCE_DURATION: Duration = Duration::from_millis(500);
-
 
 impl Manager {
     pub(super) fn watch_dir(&mut self, path: &Path) {
@@ -28,9 +30,9 @@ impl Manager {
         }
     }
 
-    pub(super) fn send_update(&mut self, path: PathBuf) {
+    fn send_update(gui_sender: &Sender<GuiAction>, path: PathBuf) {
         match Entry::new(path) {
-            Ok(entry) => Self::send_gui(&self.gui_sender, GuiAction::Update(Update::Entry(entry))),
+            Ok(entry) => Self::send_gui(gui_sender, GuiAction::Update(Update::Entry(entry))),
             Err((path, e)) => {
                 error!("Error handling file update {path:?}: {e:?}");
                 // todo!();
@@ -98,30 +100,32 @@ impl Manager {
             }
         }
 
-        self.send_update(path)
+        Self::send_update(&self.gui_sender, path)
     }
 
     pub(super) fn handle_pending_updates(&mut self) {
         let now = Instant::now();
         let mut next_tick = now + DEBOUNCE_DURATION;
-        let mut keys = Vec::new();
+        let mut remove_keys = Vec::new();
 
         // TODO -- this would match drain_filter
-        for (k, (expiry, _pending)) in &self.recent_mutations {
-            if expiry < &now {
-                // Wasteful clone, but very short lived
-                keys.push(k.clone());
-            } else if expiry < &next_tick {
+        for (path, (expiry, pending)) in &mut self.recent_mutations {
+            if *expiry < now {
+                if *pending {
+                    trace!("Sending debounced update for {path:?}");
+                    Self::send_update(&self.gui_sender, path.clone());
+                    *pending = false;
+                } else {
+                    // Wasteful clone, but very short lived
+                    remove_keys.push(path.clone());
+                }
+            } else if *expiry < next_tick {
                 next_tick = *expiry;
             }
         }
 
-        for path in keys {
-            let (_, pending) = self.recent_mutations.remove(&path).unwrap();
-            if pending {
-                trace!("Sending debounced update for {path:?}");
-                self.send_update(path)
-            }
+        for path in remove_keys {
+            self.recent_mutations.remove(&path).unwrap();
         }
 
 

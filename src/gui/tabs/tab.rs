@@ -53,6 +53,10 @@ impl Drop for WatchedDir {
                 None,
             ));
         });
+
+        // TODO -- trigger a cleanup of dangling EntityObject weak refs
+        // Doing it here should be okay, but would need to ensure that all liststores are cleared
+        // out first.
     }
 }
 
@@ -178,7 +182,7 @@ pub(in crate::gui) struct Tab {
     // visible: bool, -- whether the tab contents are currently visible -- only needed to support
     // paned views.
     settings: DirSettings,
-    state: Rc<RefCell<DirState>>,
+    dir_state: Rc<RefCell<DirState>>,
     contents: Contents,
     // TODO -- this should only store snapshots and be sporadically updated/absent
     view_state: Option<SavedViewState>,
@@ -214,7 +218,7 @@ impl Tab {
         // fetch metatada synchronously, even with a donor
         let settings = GUI.with(|g| g.get().unwrap().database.get(&path));
 
-        let state = Rc::new(RefCell::new(DirState::Unloaded));
+        let dir_state = Rc::new(RefCell::new(DirState::Unloaded));
 
         let contents = Contents::default();
 
@@ -222,7 +226,7 @@ impl Tab {
             id,
             path,
             settings,
-            state,
+            dir_state,
             contents,
             view_state: None,
             history: VecDeque::new(),
@@ -244,7 +248,7 @@ impl Tab {
             id,
             path: source.path.clone(),
             settings: source.settings,
-            state: source.state.clone(),
+            dir_state: source.dir_state.clone(),
             contents: source.contents.clone(),
             view_state,
             history: source.history.clone(),
@@ -259,7 +263,7 @@ impl Tab {
             // Check for value equality, not reference equality
             if *self.path == *t.path {
                 self.path = t.path.clone();
-                self.state = t.state.clone();
+                self.dir_state = t.dir_state.clone();
                 self.contents = t.contents.clone();
 
                 let comparator = self.settings.sort.comparator();
@@ -270,15 +274,15 @@ impl Tab {
     }
 
     pub(super) fn load(&mut self, left_tabs: &mut [Self], right_tabs: &mut [Self]) {
-        let mut sb = self.state.borrow_mut();
-        let state = &mut *sb;
-        match state {
+        let mut sb = self.dir_state.borrow_mut();
+        let dstate = &mut *sb;
+        match dstate {
             DirState::Loading { .. } | DirState::Loaded(_) => return,
             DirState::Unloaded => {
                 debug!("Opening directory for {:?}", self.path);
                 let watch = WatchedDir::start(self.path.clone());
 
-                *state = DirState::Loading { watch, pending_updates: Vec::new() };
+                *dstate = DirState::Loading { watch, pending_updates: Vec::new() };
             }
         }
         drop(sb);
@@ -297,7 +301,7 @@ impl Tab {
 
         use SnapshotKind::*;
 
-        let sb = self.state.borrow();
+        let sb = self.dir_state.borrow();
 
         match (&snap.kind, &*sb) {
             (_, DirState::Unloaded) => {
@@ -357,30 +361,28 @@ impl Tab {
         self.apply_obj_snapshot(snap);
 
         if snap_kind.finished() {
-            let mut sb = self.state.borrow_mut();
+            let mut sb = self.dir_state.borrow_mut();
             let updates = match std::mem::take(&mut *sb) {
                 DirState::Unloaded | DirState::Loaded(_) => unreachable!(),
                 DirState::Loading { watch, pending_updates } => {
                     *sb = DirState::Loaded(watch);
                     pending_updates
-                    // TODO -- apply pending_events
-                    // if unapplied -> pending_events = PartiallyApplied
                 }
             };
 
             drop(sb);
 
-            // TODO -- stop showing spinners.
             for u in updates {
                 self.apply_update(right_tabs, u);
             }
+            // TODO -- stop showing spinners.
             info!("Finished loading {:?}", self.path);
         }
     }
 
     pub(super) fn matches_update(&self, ev: &Update) -> bool {
         // Not watching anything -> cannot match an update
-        let Some(watch) = self.state.borrow().watched() else {
+        let Some(watch) = self.dir_state.borrow().watched() else {
             return false;
         };
 
@@ -452,7 +454,7 @@ impl Tab {
     pub(super) fn apply_update(&mut self, right_tabs: &mut [Self], up: Update) {
         assert!(self.matches_update(&up));
 
-        let mut sb = self.state.borrow_mut();
+        let mut sb = self.dir_state.borrow_mut();
 
         match &mut *sb {
             DirState::Unloaded => unreachable!(),
@@ -608,13 +610,13 @@ impl Tab {
     pub(super) fn display(&mut self, parent: &gtk::Box) {
         self.pane.get_or_init(|| Pane::new(self)).display(parent);
 
-        if matches!(&*self.state.borrow(), DirState::Loaded(_)) {
+        if matches!(&*self.dir_state.borrow(), DirState::Loaded(_)) {
             self.apply_view_snapshot();
         }
     }
 
     fn hide(&mut self) {
-        if matches!(&*self.state.borrow(), DirState::Loaded(_)) {
+        if matches!(&*self.dir_state.borrow(), DirState::Loaded(_)) {
             self.take_view_snapshot();
         }
     }
