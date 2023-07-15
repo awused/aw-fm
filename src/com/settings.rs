@@ -10,8 +10,8 @@ use super::EntryObject;
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy, EnumString, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum DisplayMode {
-    #[default]
     Icons,
+    #[default]
     List,
 }
 

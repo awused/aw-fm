@@ -176,7 +176,7 @@ impl TabsList {
         };
 
         let (_, tab, right_tabs) = self.split_around_mut(index);
-        tab.apply_single_update(right_tabs, update);
+        tab.apply_update(right_tabs, update);
     }
 
     fn navigate(&mut self, id: TabId) {

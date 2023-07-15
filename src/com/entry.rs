@@ -294,10 +294,10 @@ mod internal {
     }
 }
 
+// This does burn a bit of memory, but it avoids any costly linear searches on updates.
 thread_local! {
-    static GLOBAL_LUT: RefCell<AHashMap<PathBuf, WeakRef<EntryObject>>> = {
-        AHashMap::new().into()
-    }
+    static ALL_ENTRY_OBJECTS: RefCell<AHashMap<PathBuf, WeakRef<EntryObject>>> =
+        AHashMap::new().into();
 }
 
 glib::wrapper! {
@@ -317,17 +317,18 @@ impl EntryObject {
         let obj: Self = Object::new();
         obj.imp().init(entry);
 
-        GLOBAL_LUT.with(|m| {
+        ALL_ENTRY_OBJECTS.with(|m| {
             let old = m.borrow_mut().insert(obj.get().abs_path.clone(), obj.downgrade());
-            if let Some(old) = old {
-                assert!(old.upgrade().is_none());
-            }
+
+            // If an old matching EntryObject existed, it must be gone by now.
+            debug_assert!(old.as_ref().and_then(WeakRef::upgrade).is_none())
         });
+
         obj
     }
 
     pub fn lookup(path: &Path) -> Option<Self> {
-        GLOBAL_LUT.with(|m| m.borrow().get(path).and_then(WeakRef::upgrade))
+        ALL_ENTRY_OBJECTS.with(|m| m.borrow().get(path).and_then(WeakRef::upgrade))
     }
 
     // Returns the old value only if an update happened.
@@ -344,23 +345,25 @@ impl EntryObject {
 
         trace!("Update for {:?}", entry.abs_path);
         Some(self.update_inner(entry))
-        // self.notify(pspec);
-        // self.dispatch_properties_changed(pspecs)
-        // let old = borrow.0.take();
-
-        // if
     }
 
     pub(super) fn cmp(&self, other: &Self, settings: SortSettings) -> Ordering {
         self.imp().get().cmp(&other.imp().get(), settings)
     }
 
-    // Can be used for an efficient binary search when applying an update to multiple tabs.
-    // pub(super) fn cmp_to_previous(&self, old: &Entry, settings: SortSettings) -> Ordering {
-    // Return if the abs_paths are equal, otherwise fall back to cmp()
-    // }
-
     pub(super) fn matches_entry(&self, new: &Entry) -> bool {
         return self.imp().get().abs_path == new.abs_path;
     }
+
+    // Called when this object should be destroyed and we want to be certain.
+    pub fn assert_destroyed(self) {
+        assert_eq!(self.ref_count(), 1);
+        let weak = ALL_ENTRY_OBJECTS.with(|m| m.borrow_mut().remove(&self.get().abs_path).unwrap());
+        drop(self);
+
+        debug_assert!(weak.upgrade().is_none());
+    }
+
+    // pub fn cleanup_dangling_weak_refs() {
+    // }
 }

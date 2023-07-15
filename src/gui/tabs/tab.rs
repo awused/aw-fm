@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::cell::{Cell, OnceCell, Ref, RefCell};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -58,65 +57,42 @@ impl Drop for WatchedDir {
 }
 
 impl WatchedDir {
-    fn start(path: Arc<Path>) -> Rc<Self> {
+    fn start(path: Arc<Path>) -> Self {
         GUI.with(|g| {
             let g = g.get().unwrap();
             g.send_manager((ManagerAction::Open(path.clone()), GuiActionContext::default(), None));
         });
 
-        Rc::new(Self { path })
+        Self { path }
     }
 }
 
-
-// A new object needs to be copied between every relevant ListStore
-#[derive(Debug)]
-enum InsertOrDelete {
-    Insert(EntryObject),
-    Delete(EntryObject),
-}
 
 #[derive(Debug)]
 enum PartiallyAppliedUpdate {
     // Updates without any potential sort change (rare) would be fully applied, but usually mtime
     // will change, so no sense worrying about it.
-    Mutate(Entry),
-    InsertOrDelete(InsertOrDelete),
+    Mutate(Entry, EntryObject),
+    Insert(EntryObject),
+    Delete(EntryObject),
 }
 
 
-// Applying an Event gives us an update, which may require a sort, or a new object, which always
-// requires a sort.
-// Removals do not require sorting on their own.
-#[derive(Debug)]
-enum PendingUpdates {
-    Nothing,
-    Unapplied(Vec<Update>),
-    // We always sort when appending a snapshot, so there's no need for tracking whether some
-    // of the updates were mutations.
-    PartiallyApplied(Vec<InsertOrDelete>),
-}
-
-// Despite being complicated, this is Clone rather than being !Clone and using refcounting.
-// If the ListStores were all stored between tabs this, too, could be shared between tabs.
-#[derive(Debug, Default, Clone)]
-enum LoadingState {
+#[derive(Debug, Default)]
+enum DirState {
     #[default]
     Unloaded,
     Loading {
-        watch: Rc<WatchedDir>,
-        pending_events: Rc<RefCell<PendingUpdates>>,
-        // needed_resort
-        //pending_scroll: f64,
-        // spinner: enum Displayed/pending
+        watch: WatchedDir,
+        pending_updates: Vec<Update>,
     },
     // ReOpening{} -- Transitions to Opening once a Start arrives, or Opened with Complete
     // UnloadedWhileOpening -- takes snapshots and drops them
-    Loaded(Rc<WatchedDir>),
+    Loaded(WatchedDir),
 }
 
-impl LoadingState {
-    fn watched(&self) -> Option<&WatchedDir> {
+impl DirState {
+    const fn watched(&self) -> Option<&WatchedDir> {
         match self {
             Self::Unloaded => None,
             Self::Loading { watch, .. } | Self::Loaded(watch) => Some(watch),
@@ -202,7 +178,7 @@ pub(in crate::gui) struct Tab {
     // visible: bool, -- whether the tab contents are currently visible -- only needed to support
     // paned views.
     settings: DirSettings,
-    loading: LoadingState,
+    state: Rc<RefCell<DirState>>,
     contents: Contents,
     // TODO -- this should only store snapshots and be sporadically updated/absent
     view_state: Option<SavedViewState>,
@@ -238,7 +214,7 @@ impl Tab {
         // fetch metatada synchronously, even with a donor
         let settings = GUI.with(|g| g.get().unwrap().database.get(&path));
 
-        let loading = LoadingState::Unloaded;
+        let state = Rc::new(RefCell::new(DirState::Unloaded));
 
         let contents = Contents::default();
 
@@ -246,7 +222,7 @@ impl Tab {
             id,
             path,
             settings,
-            loading,
+            state,
             contents,
             view_state: None,
             history: VecDeque::new(),
@@ -268,7 +244,7 @@ impl Tab {
             id,
             path: source.path.clone(),
             settings: source.settings,
-            loading: source.loading.clone(),
+            state: source.state.clone(),
             contents: source.contents.clone(),
             view_state,
             history: source.history.clone(),
@@ -283,7 +259,7 @@ impl Tab {
             // Check for value equality, not reference equality
             if *self.path == *t.path {
                 self.path = t.path.clone();
-                self.loading = t.loading.clone();
+                self.state = t.state.clone();
                 self.contents = t.contents.clone();
 
                 let comparator = self.settings.sort.comparator();
@@ -294,28 +270,23 @@ impl Tab {
     }
 
     pub(super) fn load(&mut self, left_tabs: &mut [Self], right_tabs: &mut [Self]) {
-        match self.loading {
-            LoadingState::Loading { .. } | LoadingState::Loaded(_) => (),
-            LoadingState::Unloaded => {
+        let mut sb = self.state.borrow_mut();
+        let state = &mut *sb;
+        match state {
+            DirState::Loading { .. } | DirState::Loaded(_) => return,
+            DirState::Unloaded => {
                 debug!("Opening directory for {:?}", self.path);
                 let watch = WatchedDir::start(self.path.clone());
 
-                let state = LoadingState::Loading {
-                    watch,
-                    pending_events: Rc::new(PendingUpdates::Nothing.into()),
-                };
-
-                // Clone the new state into all matching tabs
-                for t in left_tabs.iter_mut().chain(right_tabs).filter(|t| t.matches(self)) {
-                    assert!(
-                        matches!(t.loading, LoadingState::Unloaded),
-                        "Loading a directory with other tabs that were not unloaded"
-                    );
-                    t.loading = state.clone();
-                }
-
-                self.loading = state;
+                *state = DirState::Loading { watch, pending_updates: Vec::new() };
             }
+        }
+        drop(sb);
+
+        // TODO -- spinners
+        //self.show_spinner()
+        for t in left_tabs.iter_mut().chain(right_tabs).filter(|t| t.matches(self)) {
+            //t.show_spinner();
         }
     }
 
@@ -326,16 +297,18 @@ impl Tab {
 
         use SnapshotKind::*;
 
-        match (&snap.kind, &self.loading) {
-            (_, LoadingState::Unloaded) => {
+        let sb = self.state.borrow();
+
+        match (&snap.kind, &*sb) {
+            (_, DirState::Unloaded) => {
                 // TODO -- find some decent way of preventing two identical tabs from opening to
                 // the same directory at once.
                 unreachable!("Received {:?} snapshot for an unloaded tab", snap.kind);
             }
-            (_, LoadingState::Loaded(_)) => {
+            (_, DirState::Loaded(_)) => {
                 unreachable!("Received {:?} snapshot for loaded tab.", snap.kind);
             }
-            (Complete | Start | Middle | End, LoadingState::Loading { .. }) => true,
+            (Complete | Start | Middle | End, DirState::Loading { .. }) => true,
         }
     }
 
@@ -366,63 +339,62 @@ impl Tab {
         //     error!("Updating file for no reason");
         //     b.update(c, settings.sort);
         // });
-
-        if snap.id.kind.finished() {
-            match std::mem::take(&mut self.loading) {
-                LoadingState::Unloaded | LoadingState::Loaded(_) => unreachable!(),
-                LoadingState::Loading { watch, pending_events } => {
-                    self.loading = LoadingState::Loaded(watch);
-                    // TODO -- apply pending_events
-                    // if unapplied -> pending_events = PartiallyApplied
-                }
-            }
-
-            // TODO -- if active apply view snapshot
-            // If no view snapshot, scroll to top.
-            // if active {
-            //     self.apply_view_snapshot();
-            // }
-        }
     }
 
     pub(super) fn apply_snapshot(&mut self, right_tabs: &mut [Self], snap: DirSnapshot) {
         assert!(self.matches_snapshot(&snap.id));
+        let start = Instant::now();
         let snap: EntryObjectSnapshot = snap.into();
+        println!("Mapped in {:?}", start.elapsed());
 
-        // The actual tab order doesn't matter, so long as it's applied to every matching tab.
-        for t in right_tabs.iter_mut().filter(|t| t.matches_snapshot(&snap.id)) {
+        // The actual tab order doesn't matter here, so long as it's applied to every matching tab.
+        for t in right_tabs.iter_mut().filter(|t| self.matches(t)) {
             t.apply_obj_snapshot(snap.clone());
         }
 
+        let snap_kind = snap.id.kind;
+
         self.apply_obj_snapshot(snap);
+
+        if snap_kind.finished() {
+            let mut sb = self.state.borrow_mut();
+            let updates = match std::mem::take(&mut *sb) {
+                DirState::Unloaded | DirState::Loaded(_) => unreachable!(),
+                DirState::Loading { watch, pending_updates } => {
+                    *sb = DirState::Loaded(watch);
+                    pending_updates
+                    // TODO -- apply pending_events
+                    // if unapplied -> pending_events = PartiallyApplied
+                }
+            };
+
+            drop(sb);
+
+            // TODO -- stop showing spinners.
+            for u in updates {
+                self.apply_update(right_tabs, u);
+            }
+            info!("Finished loading {:?}", self.path);
+        }
     }
 
     pub(super) fn matches_update(&self, ev: &Update) -> bool {
         // Not watching anything -> cannot match an update
-        let Some(watch) = self.loading.watched() else {
+        let Some(watch) = self.state.borrow().watched() else {
             return false;
         };
 
         Some(&*self.path) == ev.path().parent()
     }
 
-    fn finish_update(&mut self, ev: &PartiallyAppliedUpdate) {}
-
-    // Make a best-effort attempt to find the existing item efficiently, then fall back to a
-    // naive linear search if we don't find it.
-    // The list may not still be in sorted order, so it's possible for binary searching to fail.
-    //
-    // Mtime sort mode makes this particularly annoying, but given that the most recently updated
-    // item is also pretty likely to be the next updated item, this is worth attempting.
-    //
-    // The only sure-fire mechanism is keeping a hashmap, which isn't the worst idea but
-    // possibly isn't necessary.
-    fn search_by_maybe_mismatched_entry(&self, entry: &Entry) -> Option<usize> {
+    // Look for the location in the list.
+    // The list may no longer be sorted because of an update, but except for the single update to
+    // "entry's EntryObject" the list must be sorted.
+    // So using the old, pre-update version of entry we can search for the old location.
+    fn position_by_sorted_entry(&self, entry: &Entry) -> u32 {
         let mut start = 0;
         let mut end = self.contents.list.n_items();
-        if end == 0 {
-            return None;
-        }
+        assert_ne!(end, 0);
 
         let comp = self.settings.sort.comparator();
 
@@ -433,7 +405,8 @@ impl Tab {
 
             let inner = obj.get();
             if inner.abs_path == entry.abs_path {
-                return Some(mid as usize);
+                // The equality check below may fail even with abs_path being equal due to updates.
+                return mid;
             }
 
             match entry.cmp(&inner, self.settings.sort) {
@@ -443,59 +416,61 @@ impl Tab {
             }
         }
 
-        // Names can't change, because that just becomes a new file.
-        // Assuming a file can't atomically become a directory and vice versa, this is safe.
-        if self.settings.sort.mode == SortMode::Name {
-            return None;
+        // The old object MUST exist in all relevant liststores, so this should not fail.
+        unreachable!()
+    }
+
+    fn reinsert_updated(&mut self, old: &Entry, new: &EntryObject) {
+        let i = self.position_by_sorted_entry(old);
+
+        let was_selected = self.contents.selection.is_selected(i);
+
+        // After removing the lone updated item, the list is guaranteed to be sorted.
+        // So we can reinsert it much more cheaply than sorting the entire list again.
+        self.contents.list.remove(i);
+        let new_idx = self.contents.list.insert_sorted(new, self.settings.sort.comparator());
+
+        if was_selected {
+            self.contents.selection.select_item(new_idx, false);
         }
-
-        self.linear_search_path(&entry.abs_path)
     }
 
-    // Last resort/fallback search
-    fn linear_search_path(&self, path: &Path) -> Option<usize> {
-        self.contents
-            .list
-            .iter::<EntryObject>()
-            .position(|r| r.unwrap().get().abs_path == path)
+    fn finish_update(&mut self, update: &PartiallyAppliedUpdate) {
+        match update {
+            PartiallyAppliedUpdate::Mutate(old, new) => self.reinsert_updated(old, new),
+            PartiallyAppliedUpdate::Insert(new) => {
+                let comp = self.settings.sort.comparator();
+                self.contents.list.insert_sorted(new, comp);
+            }
+            PartiallyAppliedUpdate::Delete(old) => {
+                let i = self.position_by_sorted_entry(&old.get());
+                self.contents.list.remove(i);
+            }
+        }
     }
 
-    // Apply a single event, inefficient for many pending events but eh.
-    pub(super) fn apply_single_update(&mut self, right_tabs: &mut [Self], ev: Update) {
-        assert!(self.matches_update(&ev));
+    pub(super) fn apply_update(&mut self, right_tabs: &mut [Self], up: Update) {
+        assert!(self.matches_update(&up));
 
-        match &mut self.loading {
-            LoadingState::Unloaded => unreachable!(),
-            LoadingState::Loading { pending_events, .. } => {
-                let mut pe = pending_events.borrow_mut();
-                match &mut *pe {
-                    // PartiallyApplied should be a transient state that never outlives a
-                    // Complete/End snapshot being finalized.
-                    PendingUpdates::PartiallyApplied(_) => unreachable!(),
-                    PendingUpdates::Nothing => {
-                        *pe = PendingUpdates::Unapplied(vec![ev]);
-                    }
-                    PendingUpdates::Unapplied(pending) => pending.push(ev),
-                }
+        let mut sb = self.state.borrow_mut();
 
+        match &mut *sb {
+            DirState::Unloaded => unreachable!(),
+            DirState::Loading { pending_updates, .. } => {
+                pending_updates.push(up);
                 return;
             }
-            LoadingState::Loaded(_) => {}
+            DirState::Loaded(_) => {}
         }
+        drop(sb);
 
 
         let start = Instant::now();
-        let index = match &ev {
-            Update::Entry(entry) => self.search_by_maybe_mismatched_entry(entry),
-            Update::Removed(path) => self.linear_search_path(path),
-        };
+        let existing = EntryObject::lookup(up.path());
         println!("{:?}", start.elapsed());
 
-        let partial = match (ev, index) {
-            (Update::Entry(entry), Some(i)) => {
-                let obj = self.contents.list.item(i as u32).unwrap();
-                let obj = obj.downcast::<EntryObject>().unwrap();
-
+        let partial = match (up, existing) {
+            (Update::Entry(entry), Some(obj)) => {
                 let Some(old) = obj.update(entry) else {
                     // An unimportant update.
                     // No need to check other tabs.
@@ -503,45 +478,45 @@ impl Tab {
                 };
 
                 println!("{:?}", start.elapsed());
-                let was_selected = self.contents.selection.is_selected(i as u32);
-                self.contents.list.remove(i as u32);
-
-                // After removing the lone updated item, the list is guaranteed to be sorted.
-                // So we can reinsert it much more cheaply than sorting the entire list again.
-                let new_idx =
-                    self.contents.list.insert_sorted(&obj, self.settings.sort.comparator());
-                if was_selected {
-                    self.contents.selection.select_item(new_idx, false);
-                }
+                self.reinsert_updated(&old, &obj);
 
                 println!("{:?}", start.elapsed());
                 trace!("Updated {:?} from event", old.abs_path);
-                PartiallyAppliedUpdate::Mutate(old)
+                PartiallyAppliedUpdate::Mutate(old, obj)
             }
             (Update::Entry(entry), None) => {
                 let new = EntryObject::new(entry);
 
-                self.contents.list.insert_sorted(&new, self.settings.sort.comparator());
+                let comp = self.settings.sort.comparator();
+                self.contents.list.insert_sorted(&new, comp);
 
                 trace!("Inserted {:?} from event", new.get().abs_path);
-                PartiallyAppliedUpdate::InsertOrDelete(InsertOrDelete::Insert(new))
+                PartiallyAppliedUpdate::Insert(new)
             }
-            (Update::Removed(path), Some(i)) => {
-                let obj = self.contents.list.item(i as u32).unwrap();
-                let obj = obj.downcast::<EntryObject>().unwrap();
-                self.contents.list.remove(i as u32);
+            (Update::Removed(path), Some(obj)) => {
+                let i = self.position_by_sorted_entry(&obj.get());
+                self.contents.list.remove(i);
 
                 trace!("Removed {:?} from event", path);
-                PartiallyAppliedUpdate::InsertOrDelete(InsertOrDelete::Delete(obj))
+                PartiallyAppliedUpdate::Delete(obj)
             }
             (Update::Removed(path), None) => {
-                // Unusual case
+                // Unusual case, probably shouldn't happen.
+                // Maybe if something is removed while loading the directory.
                 warn!("Got removal for {path:?} which wasn't present");
                 return;
             }
         };
 
-        error!("TODO  -- finish applying update to other tabs {partial:?}");
+
+        for t in right_tabs.iter_mut().filter(|t| self.matches(t)) {
+            t.finish_update(&partial);
+        }
+
+        // TODO -- The thumbnailer needs to be careful to only hold onto weak refs.
+        if let PartiallyAppliedUpdate::Delete(obj) = partial {
+            obj.assert_destroyed();
+        }
     }
 
     // Need to handle this to avoid the case where a directory is "Loaded" but no watcher is
@@ -633,13 +608,13 @@ impl Tab {
     pub(super) fn display(&mut self, parent: &gtk::Box) {
         self.pane.get_or_init(|| Pane::new(self)).display(parent);
 
-        if matches!(self.loading, LoadingState::Loaded(_)) {
+        if matches!(&*self.state.borrow(), DirState::Loaded(_)) {
             self.apply_view_snapshot();
         }
     }
 
     fn hide(&mut self) {
-        if matches!(self.loading, LoadingState::Loaded(_)) {
+        if matches!(&*self.state.borrow(), DirState::Loaded(_)) {
             self.take_view_snapshot();
         }
     }
