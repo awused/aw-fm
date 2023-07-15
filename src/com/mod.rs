@@ -13,6 +13,7 @@ use derive_more::{Deref, DerefMut, From};
 use gtk::gio::{self, Cancellable, FileQueryInfoFlags};
 use gtk::glib::Object;
 use gtk::prelude::{Cast, FileExt};
+use gtk::SortType;
 use path_clean::PathClean;
 use rusqlite::ToSql;
 use strum_macros::{AsRefStr, EnumString};
@@ -20,68 +21,32 @@ use tokio::sync::oneshot;
 
 pub use self::entry::*;
 pub use self::res::*;
+pub use self::settings::*;
+pub use self::snapshot::*;
 use crate::natsort::{self, ParsedString};
 
 mod entry;
 mod res;
+mod settings;
+mod snapshot;
 
 
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, EnumString, AsRefStr)]
-#[strum(serialize_all = "lowercase")]
-pub enum DisplayMode {
-    #[default]
-    Icons,
-    List,
+#[derive(Debug)]
+pub enum Update {
+    // We don't really care about a creation vs update here, treat them all as a potential update.
+    // Races with reading the initial directory can cause us get a creation event for an entry we
+    // already have.
+    Entry(Entry),
+    Removed(PathBuf),
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy, EnumString, AsRefStr)]
-#[strum(serialize_all = "lowercase")]
-pub enum SortMode {
-    #[default]
-    Name,
-    MTime,
-    Size,
-    BTime,
-}
-
-#[derive(Debug, PartialEq, Eq, Default, Clone, Copy, EnumString, AsRefStr)]
-#[strum(serialize_all = "lowercase")]
-pub enum SortDir {
-    #[default]
-    Ascending,
-    Descending,
-}
-
-#[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
-#[strum(serialize_all = "lowercase")]
-pub enum DisplayHidden {
-    // Default, -- would be the global setting, if/when we have one
-    False,
-    #[default]
-    True,
-}
-
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
-pub struct SortSettings {
-    pub mode: SortMode,
-    pub direction: SortDir,
-}
-
-impl SortSettings {
-    pub fn comparator(self) -> impl Fn(&Object, &Object) -> Ordering + 'static {
-        move |a, b| {
-            let a = a.downcast_ref::<EntryObject>().unwrap();
-            let b = b.downcast_ref::<EntryObject>().unwrap();
-            a.cmp(b, self)
+impl Update {
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Entry(e) => &e.abs_path,
+            Self::Removed(path) => path,
         }
     }
-}
-
-#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
-pub struct DirSettings {
-    pub display_mode: DisplayMode,
-    pub sort: SortSettings,
-    // pub display_hidden: DisplayHidden,
 }
 
 
@@ -89,67 +54,12 @@ pub type CommandResponder = oneshot::Sender<serde_json::Value>;
 
 pub type MAWithResponse = (ManagerAction, GuiActionContext, Option<CommandResponder>);
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum Toggle {
-    Change,
-    On,
-    Off,
-}
-
-impl TryFrom<&str> for Toggle {
-    type Error = ();
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        if value.eq_ignore_ascii_case("toggle") {
-            Ok(Self::Change)
-        } else if value.eq_ignore_ascii_case("on") {
-            Ok(Self::On)
-        } else if value.eq_ignore_ascii_case("off") {
-            Ok(Self::Off)
-        } else {
-            Err(())
-        }
-    }
-}
-
-impl Toggle {
-    // Returns true if something happened.
-    #[must_use]
-    pub fn apply(self, v: &mut bool) -> bool {
-        match (self, *v) {
-            (Self::Change, _) | (Self::On, false) | (Self::Off, true) => {
-                *v = !*v;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    // Returns true if something happened.
-    #[must_use]
-    pub fn apply_cell(self, v: &Cell<bool>) -> bool {
-        let val = v.get();
-        match (self, val) {
-            (Self::Change, _) | (Self::On, false) | (Self::Off, true) => {
-                v.set(!val);
-                true
-            }
-            _ => false,
-        }
-    }
-
-    pub fn run_if_change(self, v: bool, became_true: impl FnOnce(), became_false: impl FnOnce()) {
-        match (self, v) {
-            (Self::Change | Self::On, false) => became_true(),
-            (Self::Change | Self::Off, true) => became_false(),
-            _ => {}
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum ManagerAction {
     Open(Arc<Path>),
+    // Watch(Arc<Path>),
+    Close(Arc<Path>),
     // Refresh(Arc<Path>),
     // Close(PathBuf),
     // StartSearch(),
@@ -177,50 +87,12 @@ pub struct WorkParams {
 pub struct GuiActionContext {}
 
 
-#[derive(Debug, Clone)]
-pub enum SnapshotKind {
-    Complete,
-    Start,
-    Middle,
-    End,
-}
-
-#[derive(Debug, Clone)]
-pub struct SnapshotId {
-    pub kind: SnapshotKind,
-    pub path: Arc<Path>,
-}
-
-#[derive(Debug)]
-pub struct DirSnapshot {
-    pub id: SnapshotId,
-    entries: Vec<Entry>,
-}
-
-// Separate so that, as much as possible, we only ever have one real Entry per directory.
-// EntryObject uses GObject refcounting for cloning, which is cheaper and avoids the need to update
-// each tab individually.
-#[derive(Debug, Clone)]
-pub struct EntryObjectSnapshot {
-    pub id: SnapshotId,
-    pub entries: Vec<EntryObject>,
-}
-
-impl From<DirSnapshot> for EntryObjectSnapshot {
-    fn from(value: DirSnapshot) -> Self {
-        Self {
-            id: value.id,
-            entries: value.entries.into_iter().map(EntryObject::new).collect(),
-        }
-    }
-}
-
-
 #[derive(Debug)]
 pub enum GuiAction {
     // Subscription(Arc<WatchedDir>),
     // Metadata,
     Snapshot(DirSnapshot),
+    Update(Update),
     // FullSnapshot(Arc<Path>, Vec<Entry>),
     // PartialSnapshot(Start/Middle/End, Files)
 
@@ -232,19 +104,19 @@ pub enum GuiAction {
 
     //State(GuiState, GuiActionContext),
     //Action(String, CommandResponder),
-    IdleUnload,
+    // IdleUnload,
     Quit,
 }
 
-// #[derive(Deref, Default, DerefMut, From)]
-// pub struct DebugIgnore<T>(pub T);
-//
-// impl<T> fmt::Debug for DebugIgnore<T> {
-//     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         fmt::Result::Ok(())
-//     }
-// }
-//
+#[derive(Deref, Default, DerefMut, From)]
+pub struct DebugIgnore<T>(pub T);
+
+impl<T> fmt::Debug for DebugIgnore<T> {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Result::Ok(())
+    }
+}
+
 // #[derive(Debug)]
 // pub struct DedupedVec<T> {
 //     deduped: Vec<T>,
@@ -281,6 +153,64 @@ pub enum GuiAction {
 //         DedupedVec {
 //             deduped: self.deduped.iter().map(f).collect(),
 //             indices: self.indices.clone(),
+//         }
+//     }
+// }
+
+// #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+// pub enum Toggle {
+//     Change,
+//     On,
+//     Off,
+// }
+//
+// impl TryFrom<&str> for Toggle {
+//     type Error = ();
+//
+//     fn try_from(value: &str) -> Result<Self, Self::Error> {
+//         if value.eq_ignore_ascii_case("toggle") {
+//             Ok(Self::Change)
+//         } else if value.eq_ignore_ascii_case("on") {
+//             Ok(Self::On)
+//         } else if value.eq_ignore_ascii_case("off") {
+//             Ok(Self::Off)
+//         } else {
+//             Err(())
+//         }
+//     }
+// }
+//
+// impl Toggle {
+//     // Returns true if something happened.
+//     #[must_use]
+//     pub fn apply(self, v: &mut bool) -> bool {
+//         match (self, *v) {
+//             (Self::Change, _) | (Self::On, false) | (Self::Off, true) => {
+//                 *v = !*v;
+//                 true
+//             }
+//             _ => false,
+//         }
+//     }
+//
+//     // Returns true if something happened.
+//     #[must_use]
+//     pub fn apply_cell(self, v: &Cell<bool>) -> bool {
+//         let val = v.get();
+//         match (self, val) {
+//             (Self::Change, _) | (Self::On, false) | (Self::Off, true) => {
+//                 v.set(!val);
+//                 true
+//             }
+//             _ => false,
+//         }
+//     }
+//
+//     pub fn run_if_change(self, v: bool, became_true: impl FnOnce(), became_false: impl FnOnce())
+// {         match (self, v) {
+//             (Self::Change | Self::On, false) => became_true(),
+//             (Self::Change | Self::Off, true) => became_false(),
+//             _ => {}
 //         }
 //     }
 // }

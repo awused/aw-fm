@@ -9,7 +9,7 @@ use gtk::traits::{EventControllerExt, GestureSingleExt, PopoverExt, RootExt, Wid
 use gtk::{GestureClick, PopoverMenu, PositionType};
 
 use super::Gui;
-use crate::com::Toggle;
+// use crate::com::Toggle;
 use crate::config::CONFIG;
 
 #[derive(Debug)]
@@ -32,16 +32,16 @@ pub(super) struct GuiMenu {
 
 // TODO -- this can be redone with enums static mappings
 fn action_for(mut command: &str) -> (&str, Option<Variant>) {
-    if let Some((cmd, arg)) = command.split_once(' ') {
-        if let Ok(arg) = Toggle::try_from(arg.trim_start()) {
-            match arg {
-                Toggle::Change => command = cmd,
-                // These don't work, can't be bothered to figure them out.
-                Toggle::On | Toggle::Off => {}
-            }
-        }
-    }
-
+    // if let Some((cmd, arg)) = command.split_once(' ') {
+    //     if let Ok(arg) = Toggle::try_from(arg.trim_start()) {
+    //         match arg {
+    //             Toggle::Change => command = cmd,
+    //             // These don't work, can't be bothered to figure them out.
+    //             Toggle::On | Toggle::Off => {}
+    //         }
+    //     }
+    // }
+    //
 
     match command {
         "ToggleMangaMode" | "MangaMode" => ("manga", None),

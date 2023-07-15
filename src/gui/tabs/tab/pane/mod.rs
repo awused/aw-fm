@@ -1,18 +1,20 @@
 use gtk::prelude::Cast;
 use gtk::traits::{BoxExt, WidgetExt};
-use gtk::{ColumnView, GridView, ListView, Orientation, ScrolledWindow, Widget};
+use gtk::{ColumnView, GridView, ListView, MultiSelection, Orientation, ScrolledWindow, Widget};
 
+use self::details::DetailsView;
+use self::icon_view::IconView;
 use super::Tab;
-use crate::com::DisplayMode;
+use crate::com::{DirSettings, DisplayMode, SortSettings};
 
-mod column_view;
+mod details;
 mod icon_view;
 
 #[derive(Debug)]
 enum Contents {
-    Icons(GridView),
+    Icons(IconView),
     // Icons(ListView),
-    Details(ColumnView),
+    Details(DetailsView),
 }
 
 
@@ -24,13 +26,15 @@ pub(super) struct Pane {
     pub(super) scroller: ScrolledWindow,
     contents: Contents,
     bottom_bar: (),
+
     tab: super::TabId,
+    selection: MultiSelection,
 }
 
 impl Drop for Pane {
     fn drop(&mut self) {
         self.scroller
-            .connect_destroy(|_| error!("TODO -- remove me: confirmed destroyed"));
+            .connect_destroy(|_| error!("TODO -- remove me: confirmed pane destroyed"));
         // TODO -- confirm everything else gets destroyed as expected.
         if let Some(parent) = self.pane.parent() {
             let parent = parent.downcast_ref::<gtk::Box>().unwrap();
@@ -41,7 +45,7 @@ impl Drop for Pane {
 
 impl Pane {
     pub(super) fn new(tab: &Tab) -> Self {
-        debug!("Creating pane for {:?}: {:?}", tab.id, tab.path);
+        debug!("Creating {:?} pane for {:?}: {:?}", tab.settings.display_mode, tab.id, tab.path);
         let pane = gtk::Box::new(Orientation::Vertical, 0);
         pane.set_hexpand(true);
         pane.set_vexpand(true);
@@ -54,15 +58,14 @@ impl Pane {
 
         let contents = match tab.settings.display_mode {
             DisplayMode::Icons => {
-                let grid = icon_view::new(&tab.contents.selection);
-                scroller.set_child(Some(&grid));
-                Contents::Icons(grid)
+                Contents::Icons(IconView::new(&scroller, tab.id, &tab.contents.selection))
             }
-            DisplayMode::List => {
-                let column_view = column_view::new(&tab.contents.selection);
-                scroller.set_child(Some(&column_view));
-                Contents::Details(column_view)
-            }
+            DisplayMode::List => Contents::Details(DetailsView::new(
+                &scroller,
+                tab.id,
+                tab.settings,
+                &tab.contents.selection,
+            )),
         };
 
         let bottom_bar = ();
@@ -78,6 +81,7 @@ impl Pane {
             contents,
             bottom_bar,
             tab: tab.id,
+            selection: tab.contents.selection.clone(),
         }
     }
 
@@ -90,12 +94,24 @@ impl Pane {
         }
     }
 
-    pub(super) fn hide(&self) {
-        if let Some(parent) = self.pane.parent() {
-            let parent = parent.downcast_ref::<gtk::Box>().unwrap();
-            parent.remove(&self.pane);
-        } else {
-            error!("Called hide() on pane that wasn't visible");
+    pub(super) fn update_sort(&self, sort: SortSettings) {
+        match &self.contents {
+            Contents::Icons(_) => {}
+            Contents::Details(details) => details.update_sort(sort),
         }
+    }
+
+    pub(super) fn update_mode(&mut self, settings: DirSettings) {
+        self.contents = match settings.display_mode {
+            DisplayMode::Icons => {
+                Contents::Icons(IconView::new(&self.scroller, self.tab, &self.selection))
+            }
+            DisplayMode::List => Contents::Details(DetailsView::new(
+                &self.scroller,
+                self.tab,
+                settings,
+                &self.selection,
+            )),
+        };
     }
 }

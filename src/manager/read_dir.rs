@@ -7,14 +7,8 @@ use std::sync::Arc;
 use std::thread::{self};
 use std::time::{Duration, SystemTime};
 
+use constants::*;
 use futures_util::StreamExt;
-use gtk::gio::{
-    FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE, FILE_ATTRIBUTE_STANDARD_ICON,
-    FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
-    FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON, FILE_ATTRIBUTE_TIME_CREATED,
-    FILE_ATTRIBUTE_TIME_CREATED_USEC, FILE_ATTRIBUTE_TIME_MODIFIED,
-    FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
-};
 use gtk::glib::{self, GStr};
 use gtk::prelude::FileExt;
 use once_cell::sync::Lazy;
@@ -31,30 +25,28 @@ use crate::closing;
 use crate::com::{DirSnapshot, Entry, EntryObject, GuiAction, SnapshotKind};
 use crate::natsort::ParsedString;
 
+#[cfg(not(feature = "forced-slow"))]
+mod constants {
+    use std::time::Duration;
 
-static FAST_TIMEOUT: Duration = Duration::from_millis(1000);
-// Aim to send batches at least this large to the gui.
-// Subsequent batches grow larger to avoid taking quadratic time.
-static INITIAL_BATCH: usize = 100;
-// The timeout after which we send a completed batch as soon as no more items are immediately
-// available.
-static BATCH_TIMEOUT: Duration = Duration::from_millis(100);
+    pub static FAST_TIMEOUT: Duration = Duration::from_millis(1000);
+    // Aim to send batches at least this large to the gui.
+    // Subsequent batches grow larger to avoid taking quadratic time.
+    pub static INITIAL_BATCH: usize = 100;
+    // The timeout after which we send a completed batch as soon as no more items are immediately
+    // available.
+    pub static BATCH_TIMEOUT: Duration = Duration::from_millis(100);
+}
 
-static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
-    [
-        FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE,
-        FILE_ATTRIBUTE_STANDARD_ICON,
-        FILE_ATTRIBUTE_STANDARD_IS_SYMLINK,
-        FILE_ATTRIBUTE_STANDARD_SIZE,
-        FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
-        FILE_ATTRIBUTE_TIME_MODIFIED,
-        FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
-        FILE_ATTRIBUTE_TIME_CREATED,
-        FILE_ATTRIBUTE_TIME_CREATED_USEC,
-    ]
-    .map(GStr::as_str)
-    .join(",")
-});
+// For testing, force directories to load very slowly
+#[cfg(feature = "forced-slow")]
+mod constants {
+    use std::time::Duration;
+
+    pub static FAST_TIMEOUT: Duration = Duration::from_millis(0);
+    pub static INITIAL_BATCH: usize = 1;
+    pub static BATCH_TIMEOUT: Duration = Duration::from_millis(5000);
+}
 
 fn handle_panic(_e: Box<dyn Any + Send>) {
     error!("Unexpected panic in thread {}", thread::current().name().unwrap_or("unnamed"));
@@ -88,66 +80,24 @@ enum ReadResult {
 }
 
 pub const fn full_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
-    GuiAction::Snapshot(DirSnapshot {
-        kind: SnapshotKind::Complete,
-        path,
-        entries,
-    })
+    GuiAction::Snapshot(DirSnapshot::new(SnapshotKind::Complete, path, entries))
 }
 
 pub const fn start_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
-    GuiAction::Snapshot(DirSnapshot { kind: SnapshotKind::Start, path, entries })
+    GuiAction::Snapshot(DirSnapshot::new(SnapshotKind::Start, path, entries))
 }
 
 pub const fn mid_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
-    GuiAction::Snapshot(DirSnapshot {
-        kind: SnapshotKind::Middle,
-        path,
-        entries,
-    })
+    GuiAction::Snapshot(DirSnapshot::new(SnapshotKind::Middle, path, entries))
 }
 
 pub const fn end_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
-    GuiAction::Snapshot(DirSnapshot { kind: SnapshotKind::End, path, entries })
+    GuiAction::Snapshot(DirSnapshot::new(SnapshotKind::End, path, entries))
 }
 
 
 fn read_dir_sync(path: Arc<Path>, sender: UnboundedSender<ReadResult>) -> oneshot::Receiver<()> {
     let (send_done, recv_done) = oneshot::channel();
-    // let (mid_s, mut mid_r) = unbounded_channel::<std::io::Result<(DirEntry, Metadata)>>();
-    // spawn_thread("middle-thread", move || {
-    //     while let Some(r) = mid_r.blocking_recv() {
-    //         let Ok((entry, m)) = r else {
-    //             continue;
-    //         };
-    //
-    //         let f = gio::File::for_path(entry.path());
-    //         // let p = ParsedString::from(entry.file_name());
-    //
-    //         let info = f
-    //             .query_info(
-    //                 ATTRIBUTES.as_str(),
-    //                 FileQueryInfoFlags::empty(),
-    //                 Option::<&Cancellable>::None,
-    //             )
-    //             .unwrap();
-    //
-    //         let mimetype = info.attribute_string(FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE);
-    //
-    //         if let Some(mtype) = mimetype {
-    //             if !mtype.starts_with("image") && !mtype.starts_with("video") {
-    //                 println!("{:?} {mtype}, {:?}", entry.path(), m.modified().unwrap());
-    //             }
-    //         }
-    //
-    //         if sender.send(Ok((entry, m.clone()))).is_err() {
-    //             // No need to log here
-    //             return;
-    //         }
-    //     }
-    // });
-    //
-    // let sender = mid_s;
 
     READ_POOL.spawn(move || {
         let rdir = match std::fs::read_dir(&path) {
@@ -171,9 +121,9 @@ fn read_dir_sync(path: Arc<Path>, sender: UnboundedSender<ReadResult>) -> onesho
 
             let entry = match Entry::new(dirent.path()) {
                 Ok(entry) => entry,
-                Err(e) => {
-                    error!("Unexpected error reading file info {:?} {e}", dirent.path());
-                    drop(sender.send(ReadResult::EntryError(dirent.path(), e)));
+                Err((path, e)) => {
+                    error!("Unexpected error reading file info {path:?} {e}");
+                    drop(sender.send(ReadResult::EntryError(path, e)));
                     return;
                 }
             };
@@ -263,7 +213,6 @@ async fn read_slow_dir(
         let mut batch = Vec::new();
         let mut deadline_passed = false;
 
-        // Wait until at least one item is ready before starting timeouts
         select! {
             _ = closing::closed_fut() => return drop(receiver),
             done = async {
@@ -308,10 +257,26 @@ async fn read_slow_dir(
         }
 
         let batch_deadline = Instant::now() + BATCH_TIMEOUT;
+
+        #[cfg(feature = "forced-slow")]
+        {
+            sleep_until(batch_deadline).await;
+
+            if let Err(e) = gui_sender.send(mid_snap(path.clone(), batch)) {
+                if !closing::closed() {
+                    error!("{e}");
+                }
+                return;
+            }
+
+            next_size += batch_size;
+            batch_size = next_size - batch_size;
+            continue;
+        }
+
         // Allow up to 5ms between entries, until we hit batch_deadline, then only consume
         // immediately ready values. This avoids the case where we get multiple small batches in a
         // row.
-
         'batch: loop {
             select! {
                 biased;

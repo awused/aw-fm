@@ -25,12 +25,11 @@ use gtk::{
     gdk, gio, glib, Align, EventControllerScroll, EventControllerScrollFlags, GridView,
     MultiSelection, ScrolledWindow,
 };
-use notify::RecommendedWatcher;
 // use once_cell::unsync::OnceCell;
 use path_clean::PathClean;
 use tokio::sync::mpsc::UnboundedSender;
 
-use self::tab::{Tab, TabsList};
+use self::tabs::TabsList;
 // use self::layout::{LayoutContents, LayoutManager};
 use super::com::*;
 use crate::config::{CONFIG, OPTIONS};
@@ -38,17 +37,9 @@ use crate::database::DBCon;
 // use crate::state_cache::{save_settings, State, STATE};
 use crate::{closing, config};
 
-mod tab;
+mod tabs;
 
 pub static WINDOW_ID: OnceLock<String> = OnceLock::new();
-
-enum UpdateEvent {
-    // We don't really care about a creation vs update here, treat them all as a potential update.
-    // Races with reading the initial directory can cause us get a creation event for an entry we
-    // already have.
-    Entry(Entry),
-    Removed(PathBuf),
-}
 
 // The Rc<> ends up more ergonomic in most cases but it's too much of a pain to pass things into
 // GObjects.
@@ -74,7 +65,6 @@ struct Gui {
     // RefCell<Vec<Tab>>>
     // Tabs can recursively look for each other.
     tabs: RefCell<TabsList>,
-    watcher: RefCell<RecommendedWatcher>,
 
     database: DBCon,
 
@@ -158,24 +148,6 @@ impl Gui {
     ) -> Rc<Self> {
         let window = gtk::ApplicationWindow::new(application);
 
-        let (event_sender, event_receiver) = glib::MainContext::channel(glib::PRIORITY_HIGH);
-
-        // let debouncer = new_debouncer(Duration::from_secs(10), None, move |events| {
-        //     let events = match events {
-        //         Ok(events) => events,
-        //         Err(e) => {
-        //             error!("Error in watcher: {e:?}");
-        //             return;
-        //         }
-        //     };
-        //     for ev in events {
-        //         if let Err(e) = event_sender.send(ev) {
-        //             error!("Error in watcher: {e}");
-        //         }
-        //     }
-        // })
-        // .unwrap();
-
         let rc = Rc::new(Self {
             window,
             win_state: Cell::default(),
@@ -183,13 +155,6 @@ impl Gui {
             menu: OnceCell::default(),
 
             tabs: RefCell::new(TabsList::new_uninit()),
-            watcher: notify::recommended_watcher(move |ev| {
-                if let Err(e) = event_sender.send(ev) {
-                    error!("Error in watcher: {e}");
-                }
-            })
-            .unwrap()
-            .into(),
 
             database: DBCon::connect(),
 
@@ -245,9 +210,6 @@ impl Gui {
             .take()
             .expect("Activated application twice. This should never happen.")
             .attach(None, move |gu| g.handle_update(gu));
-
-        let g = rc.clone();
-        event_receiver.attach(None, move |ev| g.handle_event(ev));
 
         rc.setup();
 
@@ -421,14 +383,6 @@ impl Gui {
             //     // self.run_command(&a, Some(fin));
             // }
             Snapshot(snap) => {
-                trace!(
-                    "{:?} {:?}: {} - {:?}",
-                    snap.kind,
-                    snap.path,
-                    snap.entries.len(),
-                    &snap.entries.get(0)
-                );
-
                 let g = self.clone();
                 g.tabs.borrow_mut().apply_snapshot(snap);
 
@@ -437,28 +391,16 @@ impl Gui {
                 // });
                 // // g.tabs.borrow_mut().apply_snapshot(snap);
             }
-            IdleUnload => {}
+            Update(update) => {
+                self.tabs.borrow_mut().handle_update(update);
+            }
+            // IdleUnload => {}
             Quit => {
                 self.window.close();
                 closing::close();
                 return glib::Continue(false);
             }
         }
-        glib::Continue(true)
-    }
-
-    fn handle_event(self: &Rc<Self>, ev: Result<notify::Event, notify::Error>) -> glib::Continue {
-        match ev {
-            Ok(ev) => {
-                println!("{ev:?}");
-            }
-            Err(e) => {
-                let msg = format!("Error watching directories {e}");
-                error!("{msg}");
-                self.convey_error(msg);
-            }
-        }
-
         glib::Continue(true)
     }
 

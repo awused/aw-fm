@@ -76,7 +76,7 @@ mod imp {
 
             // Seems to cause it to lock up completely in large directories with sorting?
             // Absolutely tanks performance either way.
-            // imp.name.set_tooltip_text(Some(&disp_string));
+            // self.name.set_tooltip_text(Some(&disp_string));
 
             self.size.set_text(Some(&entry.long_size_string()));
         }
@@ -110,7 +110,7 @@ impl IconTile {
         let x = obj.connect_local("update", false, move |entry| {
             let obj: EntryObject = entry[0].get().unwrap();
             self_ref.imp().update_contents(&obj);
-            trace!("Update for visible entry {:?} in icon view", obj.get());
+            trace!("Update for visible entry {:?} in icon view", &*obj.get().name);
             None
         });
 

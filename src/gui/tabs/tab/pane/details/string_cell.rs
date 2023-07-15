@@ -118,7 +118,7 @@ impl StringCell {
         let x = obj.connect_local("update", false, move |entry| {
             let obj: EntryObject = entry[0].get().unwrap();
             self_ref.imp().update_contents(&obj.get());
-            trace!("Update for visible entry {:?} in column view", obj.get());
+            trace!("Update for visible entry {:?} in column view", &*obj.get().name);
             None
         });
 

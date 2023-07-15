@@ -1,9 +1,11 @@
 use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt::{self, Formatter};
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use ahash::AHashMap;
 use gtk::gdk_pixbuf::Pixbuf;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
@@ -136,15 +138,20 @@ impl Entry {
         }
     }
 
-    pub fn new(abs_path: PathBuf) -> Result<Self, gtk::glib::Error> {
+    pub fn new(abs_path: PathBuf) -> Result<Self, (PathBuf, gtk::glib::Error)> {
+        debug_assert!(abs_path.is_absolute());
+
         let name = abs_path.file_name().unwrap_or(abs_path.as_os_str());
         let name = natsort::key(name);
 
-        let info = gio::File::for_path(&abs_path).query_info(
+        let info = match gio::File::for_path(&abs_path).query_info(
             ATTRIBUTES.as_str(),
             FileQueryInfoFlags::empty(),
             Option::<&Cancellable>::None,
-        )?;
+        ) {
+            Ok(info) => info,
+            Err(e) => return Err((abs_path, e)),
+        };
 
         let mtime = FileTime {
             sec: info.attribute_uint64(FILE_ATTRIBUTE_TIME_MODIFIED),
@@ -167,7 +174,7 @@ impl Entry {
 
         let file_type = info.attribute_uint32(FILE_ATTRIBUTE_STANDARD_TYPE);
         let kind = if file_type == G_FILE_TYPE_DIRECTORY as u32 {
-            EntryKind::Directory { contents: size - 1 }
+            EntryKind::Directory { contents: size - 2 }
         } else {
             EntryKind::File { size }
         };
@@ -210,6 +217,7 @@ pub enum Thumbnail {
     Uninitialized,
     Loaded(Pixbuf),
     // Outdated(Pixbuf),
+    // Can do two-pass unloading for all images.
     // Unloaded(WeakRef<Pixbuf>),
     Failed,
 }
@@ -265,13 +273,14 @@ mod internal {
             assert!(self.0.replace(Some(wrapped)).is_none());
         }
 
-        pub(super) fn update_inner(&self, entry: super::Entry) {
+        pub(super) fn update_inner(&self, entry: super::Entry) -> super::Entry {
             // TODO -- this is where we'd be able to use "Outdated"
             // Every time there is an update, we have an opportunity to try the thumbnail again if
             // it failed.
             let wrapped = Entry { entry, thumbnail: Thumbnail::default() };
-            self.0.replace(Some(wrapped)).unwrap();
+            let old = self.0.replace(Some(wrapped)).unwrap();
             self.obj().emit_by_name::<()>("update", &[]);
+            old.entry
         }
 
         pub fn get(&self) -> Ref<super::Entry> {
@@ -282,6 +291,12 @@ mod internal {
         pub fn icon(&self) -> Icon {
             Icon::deserialize(&self.get().icon).unwrap()
         }
+    }
+}
+
+thread_local! {
+    static GLOBAL_LUT: RefCell<AHashMap<PathBuf, WeakRef<EntryObject>>> = {
+        AHashMap::new().into()
     }
 }
 
@@ -302,31 +317,50 @@ impl EntryObject {
         let obj: Self = Object::new();
         obj.imp().init(entry);
 
+        GLOBAL_LUT.with(|m| {
+            let old = m.borrow_mut().insert(obj.get().abs_path.clone(), obj.downgrade());
+            if let Some(old) = old {
+                assert!(old.upgrade().is_none());
+            }
+        });
         obj
     }
 
-    // Returns true if resorting is required
-    pub fn update(&self, entry: Entry, settings: SortSettings) -> bool {
+    pub fn lookup(path: &Path) -> Option<Self> {
+        GLOBAL_LUT.with(|m| m.borrow().get(path).and_then(WeakRef::upgrade))
+    }
+
+    // Returns the old value only if an update happened.
+    pub fn update(&self, entry: Entry) -> Option<Entry> {
         let old = self.imp().get();
         assert!(old.abs_path == entry.abs_path);
-        if *self.imp().get() == entry {
+        if *old == entry {
             // No change we care about
             trace!("Update for {:?} was unimportant", entry.abs_path);
-            return false;
+            return None;
         }
 
-        let needs_resort = self.imp().get().cmp(&entry, settings).is_ne();
+        drop(old);
 
-        self.update_inner(entry);
+        trace!("Update for {:?}", entry.abs_path);
+        Some(self.update_inner(entry))
         // self.notify(pspec);
         // self.dispatch_properties_changed(pspecs)
         // let old = borrow.0.take();
 
         // if
-        needs_resort
     }
 
     pub(super) fn cmp(&self, other: &Self, settings: SortSettings) -> Ordering {
         self.imp().get().cmp(&other.imp().get(), settings)
+    }
+
+    // Can be used for an efficient binary search when applying an update to multiple tabs.
+    // pub(super) fn cmp_to_previous(&self, old: &Entry, settings: SortSettings) -> Ordering {
+    // Return if the abs_paths are equal, otherwise fall back to cmp()
+    // }
+
+    pub(super) fn matches_entry(&self, new: &Entry) -> bool {
+        return self.imp().get().abs_path == new.abs_path;
     }
 }

@@ -4,14 +4,16 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use ahash::{AHashMap, AHashSet};
 use gtk::glib;
+use notify::{Event, RecommendedWatcher};
 use tempfile::TempDir;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::LocalSet;
-use tokio::time::timeout;
+use tokio::time::{sleep_until, timeout, Instant};
 
 use crate::com::{CommandResponder, GuiAction, GuiActionContext, MAWithResponse, ManagerAction};
 use crate::config::{CONFIG, OPTIONS};
@@ -20,6 +22,7 @@ use crate::{closing, spawn_thread};
 mod actions;
 mod monitor;
 mod read_dir;
+mod watcher;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 enum ManagerWork {
@@ -32,19 +35,24 @@ enum ManagerWork {
 }
 
 
-type Archives = Rc<RefCell<Vec<()>>>;
-
-// Manages IO work on directories
-// Compared to the manager in aw-man, this one is much dumber and more of the driving logic lives in
+// Manages I/O work on files and directories.
+// Compared to the manager in aw-man, this one is much dumber and all of the driving logic lives in
 // the gui thread. This thread just manages reading directory contents and sqlite and feeding data
 // to the gui without blocking it.
 #[derive(Debug)]
 struct Manager {
-    archives: Archives,
     temp_dir: TempDir,
     gui_sender: glib::Sender<GuiAction>,
 
     action_context: GuiActionContext,
+
+    // If there are pending mutations, we wait to clear and process them.
+    // If the boolean is true, there was a second event we debounced.
+    recent_mutations: AHashMap<PathBuf, (Instant, bool)>,
+    next_tick: Option<Instant>,
+
+    watcher: RecommendedWatcher,
+    notify_receiver: UnboundedReceiver<Event>,
 }
 
 pub fn run(
@@ -62,16 +70,14 @@ pub fn run(
     spawn_thread("manager", move || {
         let _cod = closing::CloseOnDrop::default();
         let m = Manager::new(gui_sender, tmp_dir);
-        let start = Instant::now();
-        run_local(m.run(manager_receiver), start);
+        run_local(m.run(manager_receiver));
         trace!("Exited IO manager thread");
     })
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn run_local(f: impl Future<Output = TempDir>, start: Instant) {
+async fn run_local(f: impl Future<Output = TempDir>) {
     // Set up a LocalSet so that spawn_local can be used for cleanup tasks.
-    println!("current_thread startup {:?}", start.elapsed());
     let local = LocalSet::new();
     let tdir = local.run_until(f).await;
 
@@ -89,30 +95,38 @@ async fn run_local(f: impl Future<Output = TempDir>, start: Instant) {
 
 impl Manager {
     fn new(gui_sender: glib::Sender<GuiAction>, temp_dir: TempDir) -> Self {
-        let mut archives = Vec::new();
-        let archives = Rc::new(RefCell::from(archives));
+        let (sender, notify_receiver) = tokio::sync::mpsc::unbounded_channel();
 
-        // let (sender, notify_receiver) = tokio::sync::mpsc::unbounded_channel();
-        //
-        // // TODO -- is there actually much benefit to routing this through the IO manager and not
-        // // just doing it from the gui thread?
-        // let watcher = notify::recommended_watcher(move |res| match res {
-        //     Ok(event) => sender.send(event).unwrap(),
-        //     Err(e) => println!("watch error: {e:?}"),
-        // })
-        // .unwrap();
+        let watcher = notify::recommended_watcher(move |res| {
+            let event = match res {
+                Ok(event) => event,
+                Err(e) => todo!(),
+            };
+
+            if let Err(e) = sender.send(event) {
+                if !closing::closed() {
+                    error!("Error sending from notify watcher: {e}");
+                }
+                closing::close();
+            }
+        })
+        .unwrap();
 
         Self {
-            archives,
             temp_dir,
             gui_sender,
 
             action_context: GuiActionContext::default(),
+
+            recent_mutations: AHashMap::new(),
+            next_tick: None,
+
+            watcher,
+            notify_receiver,
         }
     }
 
     async fn run(mut self, mut receiver: UnboundedReceiver<MAWithResponse>) -> TempDir {
-        error!("run started");
         // let path: PathBuf = "/storage/usr/desuwa/Hentai/Images".into();
         // let path: PathBuf = "/storage/cache/fm-test".into();
         // self.start_read_dir(Arc::from(path));
@@ -169,20 +183,26 @@ impl Manager {
                     biased;
                     _ = closing::closed_fut() => break 'main,
                     mtg = receiver.recv() => {
-                        if let Some((mtg, context, r)) = mtg {
-                            debug!("{mtg:?} {context:?}");
-                            self.action_context = context;
-                            self.handle_action(mtg, r);
-                        }
+                        let Some((mtg, context, r)) = mtg else {
+                            error!("Received nothing from gui thread. This should never happen");
+                            closing::close();
+                            break 'main;
+                        };
+                        self.action_context = context;
+                        self.handle_action(mtg, r);
                     }
-                    // ev = self.notify_receiver.recv() => {
-                    //     let Some(ev) = ev else {
-                    //         error!("Received nothing from notify watcher. This should never happen");
-                    //         closing::close();
-                    //         continue 'main;
-                    //     };
-                    //     debug!("{ev:?}");
-                    // }
+                    ev = self.notify_receiver.recv() => {
+                        let Some(ev) = ev else {
+                            error!("Received nothing from notify watcher. This should never happen");
+                            closing::close();
+                            break 'main;
+                        };
+                        self.handle_event(ev);
+                    }
+                    _ = async { sleep_until(self.next_tick.unwrap()).await },
+                            if self.next_tick.is_some() => {
+                        self.handle_pending_updates();
+                    }
                     // _ = self.do_work(Current, true), if current_work => {},
                     // comp = self.do_work(Finalize, current_work), if final_work =>
                     //     self.handle_completion(comp, self.finalize.clone().unwrap()),
@@ -196,6 +216,7 @@ impl Manager {
                     // _ = self.downscale_delay.wait_delay(), if delay_downscale => {
                     //     self.downscale_delay.clear();
                     // },
+                    // TODO -- move this to the GUI thread and have it drive unloading stuff
                     _ = idle_sleep(), if no_work && !idle && CONFIG.idle_timeout.is_some() => {
                         idle = true;
                         debug!("Entering idle mode.");
@@ -223,7 +244,11 @@ impl Manager {
         use ManagerAction::*;
 
         match ma {
-            Open(path) => self.start_read_dir(path),
+            Open(path) => {
+                self.watch_dir(&path);
+                self.start_read_dir(path);
+            }
+            Close(path) => self.unwatch_dir(&path),
         }
         // Execute(s, env) => self.execute(s, env, resp),
     }
