@@ -393,6 +393,9 @@ impl Tab {
             self.matching(right_tabs).for_each(Self::start_apply_view_state);
             // TODO -- stop showing spinners.
             info!("Finished loading {:?}", self.path);
+
+            // self.contents.list.remove_all();
+            // self.pane.take();
         }
     }
 
@@ -638,7 +641,7 @@ impl Tab {
         } else {
             error!("Unsetting GTK crash workaround");
             pane.scroller.set_vscrollbar_policy(gtk::PolicyType::Automatic);
-            glib::timeout_add_local_once(Duration::from_millis(50), finish);
+            glib::timeout_add_local_once(Duration::from_millis(300), finish);
         }
     }
 

@@ -45,7 +45,7 @@ mod constants {
 
     pub static FAST_TIMEOUT: Duration = Duration::from_millis(0);
     pub static INITIAL_BATCH: usize = 1;
-    pub static BATCH_TIMEOUT: Duration = Duration::from_millis(5000);
+    pub static BATCH_TIMEOUT: Duration = Duration::from_millis(1000);
 }
 
 fn handle_panic(_e: Box<dyn Any + Send>) {

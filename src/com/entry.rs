@@ -1,11 +1,12 @@
 use std::borrow::BorrowMut;
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
 use std::fmt::{self, Formatter};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use ahash::AHashMap;
+use gtk::gdk::Texture;
 use gtk::gdk_pixbuf::Pixbuf;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
@@ -22,6 +23,7 @@ use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassIsExt};
 use once_cell::sync::Lazy;
 
 use super::{DirSettings, SortDir, SortMode, SortSettings};
+use crate::gui::high_priority_thumb;
 use crate::natsort::{self, ParsedString};
 
 // In theory could use standard::edit-name and standard::display-name instead of taking
@@ -233,7 +235,8 @@ pub enum Thumbnail {
     // This is to avoid race conditions between an update being handled and a second update to the
     // file.
     Loading,
-    Loaded(Pixbuf),
+    // Loaded(Pixbuf),
+    Loaded(Texture),
     // Outdated(Pixbuf),
     // Can do two-pass unloading for all images.
     // Only marginally useful compared to completely unloading tabs.
@@ -248,6 +251,7 @@ mod internal {
     use std::cell::{OnceCell, Ref, RefCell};
     use std::ops::Deref;
 
+    use gtk::gdk::Texture;
     use gtk::gdk_pixbuf::Pixbuf;
     use gtk::gio::Icon;
     use gtk::glib;
@@ -316,28 +320,60 @@ mod internal {
             old.entry
         }
 
-        pub fn get(&self) -> Ref<super::Entry> {
+        pub(super) fn get(&self) -> Ref<super::Entry> {
             let b = self.0.borrow();
             Ref::map(b, |o| &o.as_ref().unwrap().entry)
         }
 
-        pub fn icon(&self) -> Icon {
-            Icon::deserialize(&self.get().icon).unwrap()
-        }
-
-        pub fn thumbnail(&self) -> Ref<Thumbnail> {
+        pub(super) fn thumbnail(&self) -> Ref<Thumbnail> {
             let b = self.0.borrow();
             Ref::map(b, |o| &o.as_ref().unwrap().thumbnail)
         }
 
-        pub fn should_request_low_priority_thumb(&self) -> bool {
+        pub(super) fn mark_thumbnail_loading(&self) -> bool {
+            let mut b = self.0.borrow_mut();
+            let mut thumb = &mut b.as_mut().unwrap().thumbnail;
+            match thumb {
+                Thumbnail::LowPriority | Thumbnail::HighPriority => {
+                    *thumb = Thumbnail::Loading;
+                    true
+                }
+                Thumbnail::Nothing
+                | Thumbnail::Loading
+                | Thumbnail::Loaded(_)
+                | Thumbnail::Failed => false,
+            }
+        }
+
+        // There is a minute risk of a race where we're loading a thumbnail for a file twice at
+        // once and the first one finishes second. The risk is so low and the outcome so minor it
+        // just isn't worth addressing.
+        pub(super) fn update_thumbnail(&self, pixbuf: Pixbuf) {
+            let mut b = self.0.borrow_mut();
+            let mut thumb = &mut b.as_mut().unwrap().thumbnail;
+
+            match thumb {
+                Thumbnail::Nothing
+                | Thumbnail::LowPriority
+                | Thumbnail::HighPriority
+                | Thumbnail::Failed => return,
+                Thumbnail::Loading | Thumbnail::Loaded(_) => {
+                    *thumb = Thumbnail::Loaded(Texture::for_pixbuf(&pixbuf));
+                }
+            }
+            println!("Pixbuf refs {}", pixbuf.ref_count());
+            drop(b);
+            self.obj().emit_by_name::<()>("update", &[]);
+        }
+
+        pub(super) fn should_request_low_priority_thumb(&self) -> bool {
             let mut b = self.0.borrow();
             let thumb = &b.as_ref().unwrap().thumbnail;
 
             matches!(thumb, Thumbnail::LowPriority)
         }
 
-        pub fn high_priority_thumb(&self) -> (bool, Option<Pixbuf>) {
+        pub(super) fn high_priority_thumb(&self) -> (bool, Option<Texture>) {
             let mut b = self.0.borrow_mut();
             let thumb = &mut b.as_mut().unwrap().thumbnail;
             match thumb {
@@ -365,14 +401,6 @@ glib::wrapper! {
     pub struct EntryObject(ObjectSubclass<internal::EntryWrapper>);
 }
 
-impl Deref for EntryObject {
-    type Target = internal::EntryWrapper;
-
-    fn deref(&self) -> &Self::Target {
-        self.imp()
-    }
-}
-
 impl EntryObject {
     pub fn new(entry: Entry) -> Self {
         let obj: Self = Object::new();
@@ -385,7 +413,7 @@ impl EntryObject {
             debug_assert!(old.as_ref().and_then(WeakRef::upgrade).is_none())
         });
 
-        if obj.should_request_low_priority_thumb() {
+        if obj.imp().should_request_low_priority_thumb() {
             error!("TODO -- set low priority thumbnail");
         }
 
@@ -410,9 +438,9 @@ impl EntryObject {
 
         trace!("Update for {:?}", entry.abs_path);
 
-        let old = self.update_inner(entry);
+        let old = self.imp().update_inner(entry);
 
-        if self.should_request_low_priority_thumb() {
+        if self.imp().should_request_low_priority_thumb() {
             error!("TODO -- set low priority thumbnail");
         }
 
@@ -423,17 +451,30 @@ impl EntryObject {
         self.imp().get().cmp(&other.imp().get(), settings)
     }
 
+    pub fn get(&self) -> Ref<'_, Entry> {
+        self.imp().get()
+    }
+
     // Gets the thumbnail. If the thumbnail has been requested at a low priority, bumps it to a
     // high priority.
-    pub fn thumbnail_for_display(&self) -> Option<Pixbuf> {
-        let (was_low, pb) = self.high_priority_thumb();
+    pub fn thumbnail_for_display(&self) -> Option<Texture> {
+        let (was_low, tex) = self.imp().high_priority_thumb();
         if was_low {
-            error!("TODO -- set high priority thumbnail");
+            high_priority_thumb(self.downgrade());
         }
-        if let Some(pb) = &pb {
-            println!("pixbuf refcount = {}", pb.ref_count());
-        }
-        pb
+        tex
+    }
+
+    pub fn mark_thumbnail_loading(&self) -> bool {
+        self.imp().mark_thumbnail_loading()
+    }
+
+    pub fn update_thumbnail(&self, pixbuf: Pixbuf) {
+        self.imp().update_thumbnail(pixbuf)
+    }
+
+    pub fn icon(&self) -> Icon {
+        Icon::deserialize(&self.get().icon).unwrap()
     }
 
     // Called when this object should be destroyed and we want to be certain.

@@ -150,6 +150,8 @@ dependencies = [
  "dirs",
  "env_logger",
  "futures-util",
+ "gdk-pixbuf 0.16.7",
+ "gio 0.16.7",
  "gnome-desktop",
  "gtk4",
  "humansize",

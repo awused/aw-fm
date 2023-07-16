@@ -40,7 +40,11 @@ tempfile = "3.6.0"
 tokio = { version = "1.29.1", features = ["fs", "net", "macros", "process", "rt", "sync", "time"] }
 
 
+# This is auto-generated, but pretty much left unmaintained and abandoned.
+# While it works it's fine, but likely want to just generate it myself.
 gnome-desktop = "0.4.0"
+old-gio = { package = "gio", version = "0.16.7" }
+old-pixbuf = { package = "gdk-pixbuf", version = "0.16.7" }
 
 
 [target.'cfg(unix)'.dependencies]

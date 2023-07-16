@@ -19,6 +19,7 @@ thread_local! {
 mod imp {
     use std::cell::{Cell, RefCell};
 
+    use gtk::gdk::Texture;
     use gtk::glib::SignalHandlerId;
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;
@@ -68,8 +69,9 @@ mod imp {
     impl IconTile {
         pub(super) fn update_contents(&self, obj: &EntryObject) {
             let thumb = obj.thumbnail_for_display();
-            if let Some(pb) = thumb {
-                self.image.set_from_pixbuf(Some(&pb));
+            if let Some(texture) = thumb {
+                // let texture = Texture::for_pixbuf(&pb);
+                self.image.set_from_paintable(Some(&texture));
             } else {
                 self.image.set_from_gicon(&obj.icon());
             }

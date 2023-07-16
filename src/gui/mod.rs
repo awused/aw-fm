@@ -18,7 +18,7 @@ use gnome_desktop::DesktopThumbnailFactory;
 use gtk::gdk::ModifierType;
 use gtk::gio::ffi::GListStore;
 use gtk::gio::{Cancellable, FileQueryInfoFlags, FILE_ATTRIBUTE_THUMBNAIL_PATH};
-use gtk::glib::Object;
+use gtk::glib::{Object, WeakRef};
 use gtk::prelude::*;
 use gtk::Orientation::Horizontal;
 use gtk::{
@@ -30,6 +30,7 @@ use path_clean::PathClean;
 use tokio::sync::mpsc::UnboundedSender;
 
 use self::tabs::TabsList;
+use self::thumbnailer::Thumbnailer;
 // use self::layout::{LayoutContents, LayoutManager};
 use super::com::*;
 use crate::config::{CONFIG, OPTIONS};
@@ -55,6 +56,10 @@ struct WindowState {
     memorized_size: crate::com::Res,
 }
 
+pub fn high_priority_thumb(weak: WeakRef<EntryObject>) {
+    GUI.with(|g| g.get().unwrap().thumbnailer.high_priority(weak));
+}
+
 
 #[derive(Debug)]
 struct Gui {
@@ -68,6 +73,7 @@ struct Gui {
     tabs: RefCell<TabsList>,
 
     database: DBCon,
+    thumbnailer: Thumbnailer,
 
     page_num: gtk::Label,
     page_name: gtk::Label,
@@ -158,6 +164,7 @@ impl Gui {
             tabs: RefCell::new(TabsList::new_uninit()),
 
             database: DBCon::connect(),
+            thumbnailer: Thumbnailer::new(),
 
             page_num: gtk::Label::new(None),
             page_name: gtk::Label::new(None),
