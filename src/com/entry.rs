@@ -11,8 +11,7 @@ use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
     self, Cancellable, FileInfo, FileQueryInfoFlags, Icon,
     FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE, FILE_ATTRIBUTE_STANDARD_ICON,
-    FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
-    FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON, FILE_ATTRIBUTE_STANDARD_TYPE,
+    FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE, FILE_ATTRIBUTE_STANDARD_TYPE,
     FILE_ATTRIBUTE_TIME_CREATED, FILE_ATTRIBUTE_TIME_CREATED_USEC, FILE_ATTRIBUTE_TIME_MODIFIED,
     FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
 };
@@ -34,11 +33,10 @@ static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
         FILE_ATTRIBUTE_STANDARD_ICON,
         FILE_ATTRIBUTE_STANDARD_IS_SYMLINK,
         FILE_ATTRIBUTE_STANDARD_SIZE,
-        FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
         FILE_ATTRIBUTE_TIME_MODIFIED,
         FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
-        FILE_ATTRIBUTE_TIME_CREATED,
-        FILE_ATTRIBUTE_TIME_CREATED_USEC,
+        // FILE_ATTRIBUTE_TIME_CREATED,
+        // FILE_ATTRIBUTE_TIME_CREATED_USEC,
     ]
     .map(GStr::as_str)
     .join(",")
@@ -88,10 +86,13 @@ pub struct Entry {
     // This is an absolute but NOT canonicalized path.
     pub abs_path: PathBuf,
     // It's kind of expensive to do this but necessary as an mtime/ctime tiebreaker anyway.
-    // TODO -- is this really name, or should it be rel_path
+    // TODO -- is this really name, or should it be rel_path for searching
     pub name: ParsedString,
     pub mtime: FileTime,
-    pub btime: FileTime,
+
+    // Doesn't work over NFS, could fall back to "changed" time but that's not what we really
+    // want. Given how I use my NAS this just isn't useful right now.
+    // pub btime: FileTime,
 
     // TODO -- Arc<> or some other mechanism for interning them, otherwise this is a large
     // number of wasted tiny allocations.
@@ -101,7 +102,8 @@ pub struct Entry {
     pub icon: Variant,
 }
 
-
+// Put methods in here only when they are used alongside multiple other fields on the Entry object.
+// Otherwise put them on Wrapper or EntryObject
 impl Entry {
     // If this ever changes so that we don't use all other options as potential tiebreakers in all
     // cases, the "needs_resort" logic in EntryObject::update below will need updating.
@@ -119,15 +121,15 @@ impl Entry {
         };
 
         let m_order = self.mtime.cmp(&other.mtime);
-        let b_order = self.btime.cmp(&other.btime);
+        // let b_order = self.btime.cmp(&other.btime);
         let name_order = || self.name.cmp(&other.name);
 
         // Use the other options as tie breakers, with the abs_path as a final tiebreaker.
         let ordering = match settings.mode {
-            SortMode::Name => name_order().then(m_order).then(b_order).then(size_order),
-            SortMode::MTime => m_order.then(b_order).then_with(name_order).then(size_order),
-            SortMode::Size => size_order.then_with(name_order).then(m_order).then(b_order),
-            SortMode::BTime => b_order.then(m_order).then_with(name_order).then(size_order),
+            SortMode::Name => name_order().then(m_order)/*.then(b_order)*/.then(size_order),
+            SortMode::MTime => m_order/*.then(b_order)*/.then_with(name_order).then(size_order),
+            SortMode::Size => size_order.then_with(name_order).then(m_order)/*.then(b_order)*/,
+            // SortMode::BTime => b_order.then(m_order).then_with(name_order).then(size_order),
         }
         .then_with(|| self.abs_path.cmp(&other.abs_path));
 
@@ -158,12 +160,10 @@ impl Entry {
             usec: info.attribute_uint32(FILE_ATTRIBUTE_TIME_MODIFIED_USEC),
         };
 
-        // Doesn't work over NFS, could fall back to "changed" time but that's not what we really
-        // want.
-        let btime = FileTime {
-            sec: info.attribute_uint64(FILE_ATTRIBUTE_TIME_CREATED),
-            usec: info.attribute_uint32(FILE_ATTRIBUTE_TIME_CREATED_USEC),
-        };
+        // let btime = FileTime {
+        //     sec: info.attribute_uint64(FILE_ATTRIBUTE_TIME_CREATED),
+        //     usec: info.attribute_uint32(FILE_ATTRIBUTE_TIME_CREATED_USEC),
+        // };
 
         let mime = info
             .attribute_string(FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE)
@@ -174,7 +174,8 @@ impl Entry {
 
         let file_type = info.attribute_uint32(FILE_ATTRIBUTE_STANDARD_TYPE);
         let kind = if file_type == G_FILE_TYPE_DIRECTORY as u32 {
-            EntryKind::Directory { contents: size - 2 }
+            // I think this is counting "." and ".." as members.
+            EntryKind::Directory { contents: size.saturating_sub(2) }
         } else {
             EntryKind::File { size }
         };
@@ -187,7 +188,7 @@ impl Entry {
             abs_path,
             name,
             mtime,
-            btime,
+            // btime,
             mime,
             icon,
         })
@@ -209,15 +210,33 @@ impl Entry {
             EntryKind::Uninitialized => unreachable!(),
         }
     }
+
+    pub const fn dir(&self) -> bool {
+        matches!(self.kind, EntryKind::Directory { .. })
+    }
+
+    pub const fn raw_size(&self) -> u64 {
+        match self.kind {
+            EntryKind::File { size } => size,
+            EntryKind::Directory { contents } => contents,
+            EntryKind::Uninitialized => unreachable!(),
+        }
+    }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub enum Thumbnail {
-    #[default]
-    Uninitialized,
+    Nothing,
+    LowPriority,
+    HighPriority,
+    // Only set by the thumbnailer when it starts to load the thumbnail for a file.
+    // This is to avoid race conditions between an update being handled and a second update to the
+    // file.
+    Loading,
     Loaded(Pixbuf),
     // Outdated(Pixbuf),
     // Can do two-pass unloading for all images.
+    // Only marginally useful compared to completely unloading tabs.
     // Unloaded(WeakRef<Pixbuf>),
     Failed,
 }
@@ -229,6 +248,7 @@ mod internal {
     use std::cell::{OnceCell, Ref, RefCell};
     use std::ops::Deref;
 
+    use gtk::gdk_pixbuf::Pixbuf;
     use gtk::gio::Icon;
     use gtk::glib;
     use gtk::glib::subclass::Signal;
@@ -237,6 +257,7 @@ mod internal {
     use once_cell::sync::Lazy;
 
     use super::Thumbnail;
+    use crate::com::EntryKind;
 
     #[derive(Debug)]
     struct Entry {
@@ -246,17 +267,17 @@ mod internal {
     }
 
     #[derive(Debug, Default)]
-    pub struct Wrapper(RefCell<Option<Entry>>);
+    pub struct EntryWrapper(RefCell<Option<Entry>>);
 
 
     #[glib::object_subclass]
-    impl ObjectSubclass for Wrapper {
+    impl ObjectSubclass for EntryWrapper {
         type Type = super::EntryObject;
 
         const NAME: &'static str = "aw-fm-Entry";
     }
 
-    impl ObjectImpl for Wrapper {
+    impl ObjectImpl for EntryWrapper {
         fn signals() -> &'static [glib::subclass::Signal] {
             static SIGNALS: Lazy<Vec<Signal>> =
                 Lazy::new(|| vec![Signal::builder("update").build()]);
@@ -264,12 +285,17 @@ mod internal {
         }
     }
 
-    impl Wrapper {
+    impl EntryWrapper {
         pub(super) fn init(&self, entry: super::Entry) {
-            // let icon = Icon::deserialize(&entry.icon).unwrap();
+            let thumbnail = match entry.kind {
+                EntryKind::File { .. } => Thumbnail::LowPriority,
+                EntryKind::Directory { .. } => Thumbnail::Nothing,
+                EntryKind::Uninitialized => unreachable!(),
+            };
 
-            // let wrapped = Entry { entry, icon };
-            let wrapped = Entry { entry, thumbnail: Thumbnail::default() };
+            // TODO -- other mechanisms to set thumbnails as Nothing, like mimetype or somesuch
+
+            let wrapped = Entry { entry, thumbnail };
             assert!(self.0.replace(Some(wrapped)).is_none());
         }
 
@@ -277,7 +303,14 @@ mod internal {
             // TODO -- this is where we'd be able to use "Outdated"
             // Every time there is an update, we have an opportunity to try the thumbnail again if
             // it failed.
-            let wrapped = Entry { entry, thumbnail: Thumbnail::default() };
+
+            let thumbnail = match entry.kind {
+                EntryKind::File { .. } => Thumbnail::LowPriority,
+                EntryKind::Directory { .. } => Thumbnail::Nothing,
+                EntryKind::Uninitialized => unreachable!(),
+            };
+
+            let wrapped = Entry { entry, thumbnail };
             let old = self.0.replace(Some(wrapped)).unwrap();
             self.obj().emit_by_name::<()>("update", &[]);
             old.entry
@@ -291,6 +324,34 @@ mod internal {
         pub fn icon(&self) -> Icon {
             Icon::deserialize(&self.get().icon).unwrap()
         }
+
+        pub fn thumbnail(&self) -> Ref<Thumbnail> {
+            let b = self.0.borrow();
+            Ref::map(b, |o| &o.as_ref().unwrap().thumbnail)
+        }
+
+        pub fn should_request_low_priority_thumb(&self) -> bool {
+            let mut b = self.0.borrow();
+            let thumb = &b.as_ref().unwrap().thumbnail;
+
+            matches!(thumb, Thumbnail::LowPriority)
+        }
+
+        pub fn high_priority_thumb(&self) -> (bool, Option<Pixbuf>) {
+            let mut b = self.0.borrow_mut();
+            let thumb = &mut b.as_mut().unwrap().thumbnail;
+            match thumb {
+                Thumbnail::LowPriority => {
+                    *thumb = Thumbnail::HighPriority;
+                    (true, None)
+                }
+                Thumbnail::Loaded(pb) => (false, Some(pb.clone())),
+                Thumbnail::Nothing
+                | Thumbnail::HighPriority
+                | Thumbnail::Failed
+                | Thumbnail::Loading => (false, None),
+            }
+        }
     }
 }
 
@@ -301,11 +362,11 @@ thread_local! {
 }
 
 glib::wrapper! {
-    pub struct EntryObject(ObjectSubclass<internal::Wrapper>);
+    pub struct EntryObject(ObjectSubclass<internal::EntryWrapper>);
 }
 
 impl Deref for EntryObject {
-    type Target = internal::Wrapper;
+    type Target = internal::EntryWrapper;
 
     fn deref(&self) -> &Self::Target {
         self.imp()
@@ -323,6 +384,10 @@ impl EntryObject {
             // If an old matching EntryObject existed, it must be gone by now.
             debug_assert!(old.as_ref().and_then(WeakRef::upgrade).is_none())
         });
+
+        if obj.should_request_low_priority_thumb() {
+            error!("TODO -- set low priority thumbnail");
+        }
 
         obj
     }
@@ -344,15 +409,31 @@ impl EntryObject {
         drop(old);
 
         trace!("Update for {:?}", entry.abs_path);
-        Some(self.update_inner(entry))
+
+        let old = self.update_inner(entry);
+
+        if self.should_request_low_priority_thumb() {
+            error!("TODO -- set low priority thumbnail");
+        }
+
+        Some(old)
     }
 
     pub(super) fn cmp(&self, other: &Self, settings: SortSettings) -> Ordering {
         self.imp().get().cmp(&other.imp().get(), settings)
     }
 
-    pub(super) fn matches_entry(&self, new: &Entry) -> bool {
-        return self.imp().get().abs_path == new.abs_path;
+    // Gets the thumbnail. If the thumbnail has been requested at a low priority, bumps it to a
+    // high priority.
+    pub fn thumbnail_for_display(&self) -> Option<Pixbuf> {
+        let (was_low, pb) = self.high_priority_thumb();
+        if was_low {
+            error!("TODO -- set high priority thumbnail");
+        }
+        if let Some(pb) = &pb {
+            println!("pixbuf refcount = {}", pb.ref_count());
+        }
+        pb
     }
 
     // Called when this object should be destroyed and we want to be certain.

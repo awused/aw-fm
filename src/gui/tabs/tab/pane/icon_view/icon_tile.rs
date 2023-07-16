@@ -1,9 +1,9 @@
-use gtk::glib;
 use gtk::pango::ffi::pango_attr_insert_hyphens_new;
 use gtk::pango::{AttrInt, AttrList};
-use gtk::prelude::ObjectExt;
+use gtk::prelude::{Cast, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::WidgetExt;
+use gtk::traits::{AccessibleExt, EventControllerExt, GestureExt, WidgetExt};
+use gtk::{glib, EventController, GestureClick};
 
 use crate::com::EntryObject;
 
@@ -24,7 +24,7 @@ mod imp {
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
-    use crate::com::EntryObject;
+    use crate::com::{EntryObject, Thumbnail};
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(file = "icon_tile.ui")]
@@ -67,9 +67,14 @@ mod imp {
 
     impl IconTile {
         pub(super) fn update_contents(&self, obj: &EntryObject) {
-            let entry = obj.get();
+            let thumb = obj.thumbnail_for_display();
+            if let Some(pb) = thumb {
+                self.image.set_from_pixbuf(Some(&pb));
+            } else {
+                self.image.set_from_gicon(&obj.icon());
+            }
 
-            self.image.set_from_gicon(&obj.icon());
+            let entry = obj.get();
 
             let disp_string = entry.name.to_string_lossy();
             self.name.set_text(Some(&disp_string));
@@ -98,6 +103,24 @@ impl IconTile {
     pub fn new() -> Self {
         let s: Self = glib::Object::new();
         PANGO_ATTRIBUTES.with(|pa| s.imp().name.set_attributes(Some(pa)));
+
+        // TODO
+        // Do not start drag and drop unless the mouse is actually "on" something, and not just
+        // dead space.
+        //
+        //
+        // let click = GestureClick::new();
+        // click.connect_pressed(|a, b, c, d| {
+        //     let parent = a.widget().downcast::<Self>().unwrap();
+        //     parent.imp().image.bounds()
+        //     println!("Click on {a:?}, {b:?}, {c:?}, {d:?}");
+        //     let ev = a.current_event().unwrap();
+        //
+        //     let up = a.upcast_ref::<EventController>();
+        //     up.current_event();
+        //     a.set_state(gtk::EventSequenceState::Claimed);
+        // });
+        // s.add_controller(click);
         s
     }
 

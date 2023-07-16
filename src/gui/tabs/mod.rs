@@ -163,7 +163,7 @@ impl TabsList {
             let last_index = None;
 
             #[allow(clippy::never_loop)]
-            // Technically could do better, but
+            // Technically could do better, but unlikely to ever matter.
             while let Some(index) = self.tabs.iter().position(|t| t.check_directory_deleted(path)) {
                 assert_ne!(Some(index), last_index); // Should never happen
                 error!("TODO -- handle directory deletion");
@@ -226,5 +226,14 @@ impl TabsList {
             new_active.load(left, right);
             self.tabs[self.active].display(&self.pane_container);
         }
+    }
+
+    // This is necessary to attempt to avoid a gtk crash
+    pub(super) fn finish_apply_view_state(&mut self, id: TabId) {
+        let Some(index) = self.position(id) else {
+            return;
+        };
+
+        self.tabs[index].finish_apply_view_state();
     }
 }

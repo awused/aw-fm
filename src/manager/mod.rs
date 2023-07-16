@@ -15,6 +15,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::LocalSet;
 use tokio::time::{sleep_until, timeout, Instant};
 
+use self::watcher::PendingUpdate;
 use crate::com::{CommandResponder, GuiAction, GuiActionContext, MAWithResponse, ManagerAction};
 use crate::config::{CONFIG, OPTIONS};
 use crate::{closing, spawn_thread};
@@ -48,7 +49,7 @@ struct Manager {
 
     // If there are pending mutations, we wait to clear and process them.
     // If the boolean is true, there was a second event we debounced.
-    recent_mutations: AHashMap<PathBuf, (Instant, bool)>,
+    recent_mutations: AHashMap<PathBuf, PendingUpdate>,
     next_tick: Option<Instant>,
 
     watcher: RecommendedWatcher,

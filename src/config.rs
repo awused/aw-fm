@@ -148,7 +148,7 @@ where
 pub static OPTIONS: Lazy<Opt> = Lazy::new(Opt::parse);
 
 pub static CONFIG: Lazy<Config> =
-    Lazy::new(|| match awconf::load_config::<Config>("aw-man", &OPTIONS.awconf) {
+    Lazy::new(|| match awconf::load_config::<Config>("aw-fm", &OPTIONS.awconf) {
         Ok(conf) => conf,
         Err(awconf::Error::Deserialization(e)) => {
             error!("Error parsing config: {e}");

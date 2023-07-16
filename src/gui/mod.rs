@@ -38,6 +38,7 @@ use crate::database::DBCon;
 use crate::{closing, config};
 
 mod tabs;
+mod thumbnailer;
 
 pub static WINDOW_ID: OnceLock<String> = OnceLock::new();
 

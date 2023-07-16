@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use gtk::gio::ListStore;
 use gtk::glib::Object;
 use gtk::prelude::{Cast, ListModelExt, ListModelExtManual, StaticType};
+use gtk::subclass::prelude::ObjectSubclassExt;
 use gtk::traits::{AdjustmentExt, BoxExt, SelectionModelExt, WidgetExt};
 use gtk::{glib, Box, MultiSelection, Orientation, ScrolledWindow};
 use path_clean::PathClean;
@@ -154,7 +155,7 @@ impl Clone for Contents {
 
 
 // Not kept up to date, maybe an enum?
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct SavedViewState {
     pub scroll_pos: f64,
     // Selected items?
@@ -191,7 +192,7 @@ pub(in crate::gui) struct Tab {
     tab_element: (),
     // Each tab can only be open in one pane at once.
     // In theory we could do many-to-many but it's too niche.
-    pane: OnceCell<Pane>,
+    pane: Option<Pane>,
 }
 
 impl Tab {
@@ -201,6 +202,10 @@ impl Tab {
 
     fn matches(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.path, &other.path)
+    }
+
+    fn matching<'a>(&'a self, other: &'a mut [Self]) -> impl Iterator<Item = &mut Self> {
+        other.iter_mut().filter(|t| self.matches(t))
     }
 
     pub(super) fn new(id: TabId, path: PathBuf, element: (), existing_tabs: &[Self]) -> Self {
@@ -232,7 +237,7 @@ impl Tab {
             history: VecDeque::new(),
             future: Vec::new(),
             tab_element: element,
-            pane: OnceCell::new(),
+            pane: None,
         };
 
         t.copy_from_donor(existing_tabs, &[]);
@@ -254,7 +259,7 @@ impl Tab {
             history: source.history.clone(),
             future: source.future.clone(),
             tab_element: element,
-            pane: OnceCell::new(),
+            pane: None,
         }
     }
 
@@ -289,7 +294,7 @@ impl Tab {
 
         // TODO -- spinners
         //self.show_spinner()
-        for t in left_tabs.iter_mut().chain(right_tabs).filter(|t| t.matches(self)) {
+        for t in self.matching(left_tabs).chain(self.matching(right_tabs)) {
             //t.show_spinner();
         }
     }
@@ -329,6 +334,14 @@ impl Tab {
             assert!(self.contents.list.n_items() == 0);
         }
 
+        if self.settings.display_mode == DisplayMode::Icons {
+            if let Some(pane) = &self.pane {
+                if pane.scroller.vscrollbar_policy() != gtk::PolicyType::Never {
+                    error!("Locking scrolling to work around gtk crash");
+                    pane.scroller.set_vscrollbar_policy(gtk::PolicyType::Never);
+                }
+            }
+        }
         self.contents.list.extend(snap.entries.into_iter());
         let start = Instant::now();
         self.contents.list.sort(self.settings.sort.comparator());
@@ -352,14 +365,14 @@ impl Tab {
         println!("Mapped in {:?}", start.elapsed());
 
         // The actual tab order doesn't matter here, so long as it's applied to every matching tab.
-        for t in right_tabs.iter_mut().filter(|t| self.matches(t)) {
-            t.apply_obj_snapshot(snap.clone());
-        }
+        // Avoid one clone by doing the other tabs first.
+        self.matching(right_tabs).for_each(|t| t.apply_obj_snapshot(snap.clone()));
 
         let snap_kind = snap.id.kind;
 
         self.apply_obj_snapshot(snap);
 
+        // If we're finished, update all tabs to reflect this.
         if snap_kind.finished() {
             let mut sb = self.dir_state.borrow_mut();
             let updates = match std::mem::take(&mut *sb) {
@@ -375,6 +388,9 @@ impl Tab {
             for u in updates {
                 self.apply_update(right_tabs, u);
             }
+
+            self.start_apply_view_state();
+            self.matching(right_tabs).for_each(Self::start_apply_view_state);
             // TODO -- stop showing spinners.
             info!("Finished loading {:?}", self.path);
         }
@@ -391,8 +407,8 @@ impl Tab {
 
     // Look for the location in the list.
     // The list may no longer be sorted because of an update, but except for the single update to
-    // "entry's EntryObject" the list must be sorted.
-    // So using the old, pre-update version of entry we can search for the old location.
+    // "entry's corresponding EntryObject" the list will be sorted.
+    // So using the old version of the entry we can search for the old location.
     fn position_by_sorted_entry(&self, entry: &Entry) -> u32 {
         let mut start = 0;
         let mut end = self.contents.list.n_items();
@@ -422,15 +438,26 @@ impl Tab {
         unreachable!()
     }
 
-    fn reinsert_updated(&mut self, old: &Entry, new: &EntryObject) {
-        let i = self.position_by_sorted_entry(old);
+    fn reinsert_updated(&mut self, sorted: &Entry, new: &EntryObject) {
+        let i = self.position_by_sorted_entry(sorted);
+
+        let comp = self.settings.sort.comparator();
+        if (i == 0
+            || comp(&self.contents.list.item(i - 1).unwrap(), new.upcast_ref::<Object>()).is_lt())
+            && (i == self.contents.list.n_items() - 1
+                || comp(&self.contents.list.item(i + 1).unwrap(), new.upcast_ref::<Object>())
+                    .is_gt())
+        {
+            debug!("Did not reinsert item as it was already in the correct position");
+            return;
+        }
 
         let was_selected = self.contents.selection.is_selected(i);
 
         // After removing the lone updated item, the list is guaranteed to be sorted.
         // So we can reinsert it much more cheaply than sorting the entire list again.
         self.contents.list.remove(i);
-        let new_idx = self.contents.list.insert_sorted(new, self.settings.sort.comparator());
+        let new_idx = self.contents.list.insert_sorted(new, comp);
 
         if was_selected {
             self.contents.selection.select_item(new_idx, false);
@@ -511,7 +538,7 @@ impl Tab {
         };
 
 
-        for t in right_tabs.iter_mut().filter(|t| self.matches(t)) {
+        for t in self.matching(right_tabs) {
             t.finish_update(&partial);
         }
 
@@ -540,13 +567,13 @@ impl Tab {
     pub(super) fn update_sort(&mut self, sort: SortSettings) {
         self.settings.sort = sort;
         self.contents.list.sort(self.settings.sort.comparator());
-        self.pane.get().unwrap().update_sort(sort);
+        self.pane.as_mut().unwrap().update_sort(sort);
         // TODO -- update database
     }
 
     pub(super) fn update_display_mode(&mut self, mode: DisplayMode) {
         self.settings.display_mode = mode;
-        self.pane.get_mut().unwrap().update_mode(self.settings);
+        self.pane.as_mut().unwrap().update_mode(self.settings);
         // TODO -- update database
     }
 
@@ -595,23 +622,39 @@ impl Tab {
         self.view_state = self.take_view_snapshot();
     }
 
-    fn apply_view_snapshot(&mut self) {
-        let Some(view_state) = &self.view_state else {
+    fn start_apply_view_state(&mut self) {
+        let Some(pane) = &self.pane else {
+            trace!("Ignoring start_apply_view_state on tab {:?} with no pane", self.id);
             return;
         };
 
-        GUI.with(|g| {
-            // Only called on active tab
-            error!("TODO -- apply_view_snapshot");
-        });
+        let id = self.id;
+        let finish =
+            move || GUI.with(|g| g.get().unwrap().tabs.borrow_mut().finish_apply_view_state(id));
+
+        if self.settings.display_mode != DisplayMode::Icons {
+            // Doing this immediately can cause it to be skipped
+            glib::idle_add_local_once(finish);
+        } else {
+            error!("Unsetting GTK crash workaround");
+            pane.scroller.set_vscrollbar_policy(gtk::PolicyType::Automatic);
+            glib::timeout_add_local_once(Duration::from_millis(50), finish);
+        }
     }
 
     // TODO -- include index or have the TabsList allocate boxes and pass those down.
     pub(super) fn display(&mut self, parent: &gtk::Box) {
-        self.pane.get_or_init(|| Pane::new(self)).display(parent);
+        if let Some(pane) = &self.pane {
+            trace!("Displaying existing pane");
+            pane.display(parent);
+        } else {
+            let pane = Pane::new(self);
+            pane.display(parent);
+            self.pane = Some(pane);
+        }
 
         if matches!(&*self.dir_state.borrow(), DirState::Loaded(_)) {
-            self.apply_view_snapshot();
+            self.start_apply_view_state();
         }
     }
 
@@ -619,5 +662,15 @@ impl Tab {
         if matches!(&*self.dir_state.borrow(), DirState::Loaded(_)) {
             self.take_view_snapshot();
         }
+    }
+
+    pub(super) fn finish_apply_view_state(&mut self) {
+        let Some(pane) = &self.pane else {
+            warn!("Pane was closed after we asked to apply view state");
+            return;
+        };
+        let view_state = self.view_state.take().unwrap_or_default();
+
+        pane.scroller.vadjustment().set_value(view_state.scroll_pos);
     }
 }

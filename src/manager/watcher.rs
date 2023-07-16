@@ -14,6 +14,28 @@ use crate::com::{Entry, GuiAction, Update};
 // Use our own debouncer as the existing notify debouncers leave a lot to be desired.
 // Send the first event immediately and then at most one event per period.
 const DEBOUNCE_DURATION: Duration = Duration::from_millis(500);
+// Used to optimize the common case where a bunch of notifies arrive basically instantly for one
+// file. Especially after creation.
+const DEDUPE_DELAY: Duration = Duration::from_millis(5);
+
+// Used so we tick less often and handle events as batches more.
+const BATCH_GRACE: Duration = Duration::from_millis(5);
+
+// Nothing -> Deduping
+// Deduping -> Expiring
+// Expiring -> Debouncing
+// Debouncing -> Expiring
+// Expiring -> nothing
+
+#[derive(Debug)]
+enum State {
+    Deduping,
+    Expiring,
+    Debounced,
+}
+
+#[derive(Debug)]
+pub struct PendingUpdate(Instant, State);
 
 impl Manager {
     pub(super) fn watch_dir(&mut self, path: &Path) {
@@ -42,17 +64,16 @@ impl Manager {
 
     pub(super) fn handle_event(&mut self, event: Event) {
         use notify::EventKind::*;
-        let now = Instant::now();
 
         match event.kind {
             // Access events are worthless
             // Other events are probably meaningless
             // For renames we use the single path events
             Access(_) | Other | Modify(ModifyKind::Name(RenameMode::Both)) => return,
+            // Creations jump the queue entirely.
             Create(_) | Modify(ModifyKind::Name(RenameMode::To)) => {
                 trace!("Create {:?}", event.paths);
                 assert_eq!(event.paths.len(), 1);
-
                 self.recent_mutations.remove(&event.paths[0]);
             }
             Remove(_) | Modify(ModifyKind::Name(RenameMode::From)) => {
@@ -68,71 +89,89 @@ impl Manager {
             }
             // Treat Any as a generic Modify
             Modify(_) | Any => {
-                trace!("Modification {:?}", event.kind);
+                trace!("Modify {:?}", event.kind);
             }
         }
 
         if event.paths.len() != 1 {
             error!(
-                "Received an event of kind {:?} with {}. Ignoring.",
+                "Received an event of kind {:?} with paths {}. Ignoring.",
                 event.kind,
                 event.paths.len()
             );
             return;
         }
+
+        let now = Instant::now();
         let mut event = event;
         let path = event.paths.pop().unwrap();
 
         match self.recent_mutations.entry(path.clone()) {
             hash_map::Entry::Occupied(occupied) => {
-                let (_, pending) = occupied.into_mut();
+                let PendingUpdate(expiry, state) = occupied.into_mut();
+                match state {
+                    State::Deduping => {
+                        trace!("Deduping event for {path:?}");
+                        return;
+                    }
+                    State::Expiring => {
+                        *state = State::Debounced;
+                        // Expiry remains the same, and next_tick should already be set.
+                        assert!(self.next_tick.is_some());
+                    }
+                    State::Debounced => {}
+                }
                 trace!("Debouncing event for {path:?}");
-                *pending = true;
-                return;
             }
             hash_map::Entry::Vacant(vacant) => {
-                let expiry = Instant::now() + DEBOUNCE_DURATION;
-                vacant.insert((expiry, false));
-                if self.next_tick.is_none() {
-                    // Add 10ms just so we can batch things more efficiently
-                    self.next_tick = Some(expiry + Duration::from_millis(10));
-                }
+                let expiry = Instant::now() + DEDUPE_DELAY + BATCH_GRACE;
+                vacant.insert(PendingUpdate(expiry, State::Deduping));
+
+                self.next_tick = self.next_tick.map_or(Some(expiry), |nt| Some(nt.min(expiry)));
             }
         }
-
-        Self::send_update(&self.gui_sender, path)
     }
 
     pub(super) fn handle_pending_updates(&mut self) {
         let now = Instant::now();
-        let mut next_tick = now + DEBOUNCE_DURATION;
-        let mut remove_keys = Vec::new();
+        let mut maybe_tick = now + DEBOUNCE_DURATION;
+        let mut expired_keys = Vec::new();
 
         // TODO -- this would match drain_filter
-        for (path, (expiry, pending)) in &mut self.recent_mutations {
+        for (path, PendingUpdate(expiry, state)) in &mut self.recent_mutations {
             if *expiry < now {
-                if *pending {
-                    trace!("Sending debounced update for {path:?}");
-                    Self::send_update(&self.gui_sender, path.clone());
-                    *pending = false;
-                } else {
-                    // Wasteful clone, but very short lived
-                    remove_keys.push(path.clone());
+                match state {
+                    State::Expiring => {
+                        // Wasteful clone, but very short lived
+                        expired_keys.push(path.clone());
+                        continue;
+                    }
+                    State::Deduping => {
+                        *state = State::Expiring;
+                        trace!("Sending update for {path:?}");
+                    }
+                    State::Debounced => {
+                        *state = State::Expiring;
+                        trace!("Sending debounced update for {path:?}");
+                    }
                 }
-            } else if *expiry < next_tick {
-                next_tick = *expiry;
+
+                *expiry += DEBOUNCE_DURATION;
+                maybe_tick = maybe_tick.min(*expiry);
+                Self::send_update(&self.gui_sender, path.clone());
+            } else if *expiry < maybe_tick {
+                maybe_tick = *expiry;
             }
         }
 
-        for path in remove_keys {
+        for path in expired_keys {
             self.recent_mutations.remove(&path).unwrap();
         }
-
 
         if self.recent_mutations.is_empty() {
             self.next_tick = None;
         } else {
-            self.next_tick = Some(next_tick + Duration::from_millis(10));
+            self.next_tick = Some(maybe_tick + BATCH_GRACE);
         }
     }
 }

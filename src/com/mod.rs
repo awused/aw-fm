@@ -11,8 +11,8 @@ use std::time::SystemTime;
 
 use derive_more::{Deref, DerefMut, From};
 use gtk::gio::{self, Cancellable, FileQueryInfoFlags};
-use gtk::glib::Object;
-use gtk::prelude::{Cast, FileExt};
+use gtk::glib::{Object, SignalHandlerId};
+use gtk::prelude::{Cast, FileExt, IsA, ObjectExt};
 use gtk::SortType;
 use path_clean::PathClean;
 use rusqlite::ToSql;
@@ -114,6 +114,24 @@ pub struct DebugIgnore<T>(pub T);
 impl<T> fmt::Debug for DebugIgnore<T> {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Result::Ok(())
+    }
+}
+
+// Makes sure to disconnect a signal handler when the rust object drops.
+#[derive(Debug)]
+pub struct Disconnector<T: IsA<Object>>(T, Option<SignalHandlerId>);
+
+impl<T: IsA<Object>> Drop for Disconnector<T> {
+    fn drop(&mut self) {
+        self.0.disconnect(self.1.take().unwrap());
+    }
+}
+
+// We CAN make something super safe that connects in here so that the signal ID is always correct
+// for this object, but just not worth it.
+impl<T: IsA<Object>> Disconnector<T> {
+    pub fn new(obj: &T, id: SignalHandlerId) -> Self {
+        Self(obj.clone(), Some(id))
     }
 }
 

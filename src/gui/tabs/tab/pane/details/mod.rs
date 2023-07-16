@@ -53,19 +53,17 @@ fn setup_string_binds(factory: &SignalListItemFactory) {
 
 fn set_sort(column_view: &ColumnView, sort: SortSettings) {
     let column_name = match sort.mode {
-        SortMode::Name => Some(NAME),
-        SortMode::MTime => Some(DATE_MODIFIED),
-        SortMode::Size => Some(SIZE),
-        SortMode::BTime => None,
+        SortMode::Name => NAME,
+        SortMode::MTime => DATE_MODIFIED,
+        SortMode::Size => SIZE,
     };
-    let binding = column_name.and_then(|name| {
-        column_view
-            .columns()
-            .iter()
-            .flatten()
-            .filter(|col: &ColumnViewColumn| col.title().is_some())
-            .find(|col: &ColumnViewColumn| col.title().unwrap().as_str() == name)
-    });
+
+    let binding = column_view
+        .columns()
+        .iter()
+        .flatten()
+        .filter(|col: &ColumnViewColumn| col.title().is_some())
+        .find(|col: &ColumnViewColumn| col.title().unwrap().as_str() == column_name);
     let column = binding.as_ref();
 
     column_view.sort_by_column(column, sort.direction.into());
