@@ -96,12 +96,6 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Fixed;
 }
 
-impl Default for StringCell {
-    fn default() -> Self {
-        Self::new(EntryString::Unset)
-    }
-}
-
 impl StringCell {
     pub(super) fn new(kind: EntryString) -> Self {
         let obj: Self = glib::Object::new();

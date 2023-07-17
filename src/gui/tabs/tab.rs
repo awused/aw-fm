@@ -30,7 +30,6 @@ use crate::natsort::ParsedString;
 
 mod pane;
 
-
 /* This efficiently supports multiple tabs being open to the same directory with different
  * settings.
  *

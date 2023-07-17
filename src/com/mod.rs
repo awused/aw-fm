@@ -58,9 +58,8 @@ pub type MAWithResponse = (ManagerAction, GuiActionContext, Option<CommandRespon
 #[derive(Debug)]
 pub enum ManagerAction {
     Open(Arc<Path>),
-    // Watch(Arc<Path>),
+    Refresh(Arc<Path>),
     Close(Arc<Path>),
-    // Refresh(Arc<Path>),
     // Close(PathBuf),
     // StartSearch(),
     // RefreshSearch(),

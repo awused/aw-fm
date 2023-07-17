@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- As long as this single file is manageable, there's no reason to split this into multiple templates. --!>
+<interface>
+  <template class="AwFmMainWindow" parent="GtkApplicationWindow">
+    <property name="title">aw-fm</property>
+    <property name="default-width">800</property>
+    <property name="default-height">600</property>
+
+    <child>
+      <object class="GtkOverlay">
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <style>
+                  <class name="left-bar"/>
+                </style>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+
+
+                <child>
+                  <object class="GtkListView" name="tabs">
+                    <property name="orientation">horizontal</property>
+                    <style>
+                      <class name="tabs-list"/>
+                    </style>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkBox" name="panes">
+                    <property name="orientation">horizontal</property>
+                    <property name="hexpand">true</property>
+                    <property name="vexpand">true</property>
+                    <style>
+                      <class name="panes"/>
+                    </style>
+                    <!-- Put Boxes in here, and render the panes into those boxes, not Panes directly -->
+                  </object>
+                </child> <!-- panes -->
+
+              </object>
+            </child>
+          </object>
+        </child>
+
+
+        <child type="overlay">
+          <object class="GtkButton" name="toast">
+            <property name="visible">false</property>
+            <style>
+              <class name="error-toast"/>
+            </style>
+
+            <child>
+              <object class="GtkLabel" name="error-message">
+                <property name="wrap">true</property>
+                <property name="wrap-mode">PANGO_WRAP_CHAR</property>
+              </object>
+            </child>
+          </object>
+        </child> <!-- toast overlay -->
+
+      </object>
+    </child>
+  </template>
+</interface>
+

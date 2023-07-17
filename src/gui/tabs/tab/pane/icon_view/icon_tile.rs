@@ -93,11 +93,11 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Box;
 }
 
-impl Default for IconTile {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// impl Default for IconTile {
+//     fn default() -> Self {
+//         Self::new()
+//     }
+// }
 
 impl IconTile {
     pub fn new() -> Self {

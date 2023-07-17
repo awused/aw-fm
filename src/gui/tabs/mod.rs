@@ -10,6 +10,7 @@ use self::tab::Tab;
 use crate::com::{DirSnapshot, DisplayMode, EntryObjectSnapshot, SortSettings, Update};
 
 mod tab;
+mod tab_element;
 
 // Maximum number of panes per window
 const MAX_PANES: usize = 3;
@@ -52,24 +53,10 @@ pub(super) struct TabsList {
     tabs: Vec<Tab>,
     active: usize,
     next_id: NonZeroU64,
+
     tabs_container: gtk::Box,
     pane_container: gtk::Box,
 }
-
-impl Deref for TabsList {
-    type Target = [Tab];
-
-    fn deref(&self) -> &Self::Target {
-        &self.tabs
-    }
-}
-
-impl DerefMut for TabsList {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.tabs
-    }
-}
-
 
 impl TabsList {
     pub(super) fn new_uninit() -> Self {
@@ -98,9 +85,9 @@ impl TabsList {
         self.tabs.push(Tab::new(TabId(0), path, first_tab_element, &[]));
     }
 
-    pub(super) fn layout(&mut self, parent: &gtk::Box) {
-        parent.append(&self.tabs_container);
-        parent.append(&self.pane_container);
+    pub(super) fn layout(&mut self, tabs_container: &gtk::ListView, pane_container: &gtk::Box) {
+        // parent.append(&self.tabs_container);
+        // parent.append(&self.pane_container);
 
         // Open and activate first and only tab
         self.tabs[0].load(&mut [], &mut []);
@@ -140,7 +127,7 @@ impl TabsList {
     }
 
     fn split_around_mut(&mut self, index: usize) -> (&mut [Tab], &mut Tab, &mut [Tab]) {
-        let (left, rest) = self.split_at_mut(index);
+        let (left, rest) = self.tabs.split_at_mut(index);
         let ([center], right) = rest.split_at_mut(1) else {
             unreachable!();
         };
@@ -149,7 +136,7 @@ impl TabsList {
     }
 
     pub(super) fn apply_snapshot(&mut self, snap: DirSnapshot) {
-        let first_match = self.iter().position(|t| t.matches_snapshot(&snap.id));
+        let first_match = self.tabs.iter().position(|t| t.matches_snapshot(&snap.id));
         if let Some(i) = first_match {
             let (_, first_tab, right_tabs) = self.split_around_mut(i);
             first_tab.apply_snapshot(right_tabs, snap);

@@ -1,4 +1,3 @@
-// mod layout;
 mod menu;
 #[cfg(windows)]
 mod windows;
@@ -20,6 +19,7 @@ use gtk::gio::ffi::GListStore;
 use gtk::gio::{Cancellable, FileQueryInfoFlags, FILE_ATTRIBUTE_THUMBNAIL_PATH};
 use gtk::glib::{Object, WeakRef};
 use gtk::prelude::*;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::Orientation::Horizontal;
 use gtk::{
     gdk, gio, glib, Align, EventControllerScroll, EventControllerScrollFlags, GridView,
@@ -29,15 +29,16 @@ use gtk::{
 use path_clean::PathClean;
 use tokio::sync::mpsc::UnboundedSender;
 
+use self::main_window::MainWindow;
 use self::tabs::TabsList;
 use self::thumbnailer::Thumbnailer;
-// use self::layout::{LayoutContents, LayoutManager};
 use super::com::*;
 use crate::config::{CONFIG, OPTIONS};
 use crate::database::DBCon;
 // use crate::state_cache::{save_settings, State, STATE};
 use crate::{closing, config};
 
+mod main_window;
 mod tabs;
 mod thumbnailer;
 
@@ -67,7 +68,7 @@ pub fn low_priority_thumb(weak: WeakRef<EntryObject>) {
 
 #[derive(Debug)]
 struct Gui {
-    window: gtk::ApplicationWindow,
+    window: MainWindow,
     win_state: Cell<WindowState>,
     overlay: gtk::Overlay,
     menu: OnceCell<menu::GuiMenu>,
@@ -98,7 +99,7 @@ struct Gui {
     first_content_paint: OnceCell<()>,
     // open_dialogs: RefCell<input::OpenDialogs>,
     // shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, String>>,
-    manager_sender: Rc<UnboundedSender<MAWithResponse>>,
+    manager_sender: UnboundedSender<MAWithResponse>,
 
     #[cfg(windows)]
     win32: windows::WindowsEx,
@@ -116,7 +117,7 @@ pub fn run(
 
     let application = gtk::Application::new(Some("awused.aw-fm"), flags);
 
-    let gui_to_manager = Rc::from(manager_sender);
+    let gui_to_manager = Cell::from(Some(manager_sender));
     let gui_receiver = Cell::from(Some(gui_receiver));
 
     application.connect_activate(move |a| {
@@ -134,7 +135,7 @@ pub fn run(
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
-        Gui::new(a, gui_to_manager.clone(), &gui_receiver);
+        Gui::new(a, gui_to_manager.take().unwrap(), &gui_receiver);
     });
 
     // This is a stupid hack around glib trying to exert exclusive control over the command line.
@@ -154,10 +155,10 @@ pub fn run(
 impl Gui {
     pub fn new(
         application: &gtk::Application,
-        manager_sender: Rc<UnboundedSender<MAWithResponse>>,
+        manager_sender: UnboundedSender<MAWithResponse>,
         gui_receiver: &Cell<Option<glib::Receiver<GuiAction>>>,
     ) -> Rc<Self> {
-        let window = gtk::ApplicationWindow::new(application);
+        let window = MainWindow::new(application);
 
         let rc = Rc::new(Self {
             window,
@@ -248,7 +249,9 @@ impl Gui {
 
         self.tabs.borrow_mut().initialize(path);
 
-        self.layout();
+        self.window.remove_css_class("background");
+
+        self.tabs.borrow_mut().layout(&self.window.imp().tabs, &self.window.imp().panes);
         // self.setup_interaction();
 
 
@@ -307,82 +310,6 @@ impl Gui {
         s.maximized = maximized;
         s.fullscreen = fullscreen;
         self.win_state.set(s);
-    }
-
-    fn layout(self: &Rc<Self>) {
-        self.window.remove_css_class("background");
-        self.window.set_title(Some("aw-fm"));
-        self.window.set_default_size(800, 600);
-
-
-        // let cancellable = Cancellable::new();
-        // let thumbnailer =
-        // DesktopThumbnailFactory::new(gnome_desktop::DesktopThumbnailSize::Normal);
-
-        // thumbnailer.can_thumbnail(f.uri().as_str(), mime_type, mtime)
-
-
-        //
-        // let scroll_clone = scroller.clone();
-        // let last_frame_counter = RefCell::new(0);
-        // controller.connect_scroll(move |_, _, _| {
-        //     let mut last_frame_counter = last_frame_counter.borrow_mut();
-        //     let new_frame_counter = scroll_clone.frame_clock().unwrap().frame_counter() + 1;
-        //     if *last_frame_counter <= new_frame_counter {
-        //         warn!("inhibit");
-        //         gtk::Inhibit(false) // Inhibit scroll event to work around bug: https://gitlab.gnome.org/GNOME/gtk/-/issues/2971
-        //     } else {
-        //         *last_frame_counter = new_frame_counter;
-        //         gtk::Inhibit(false)
-        //     }
-        // });
-        //
-        // scroller.add_controller(&controller);
-        //
-        //
-        // if let Some(saved) = &*STATE {
-        //     // Don't create very tiny windows.
-        //     if saved.size.w >= 100 && saved.size.h >= 100 {
-        //         self.window.set_default_size(saved.size.w as i32, saved.size.h as i32);
-        //         let mut ws = self.win_state.get();
-        //         ws.memorized_size = saved.size;
-        //         self.win_state.set(ws);
-        //     }
-        //
-        //     if saved.maximized {
-        //         self.window.set_maximized(true);
-        //     }
-        // }
-
-        // TODO -- three separate indicators?
-        self.page_name.set_wrap(true);
-        self.archive_name.set_wrap(true);
-
-        // Left side -- right to left
-        self.bottom_bar.prepend(&self.page_name);
-        self.bottom_bar.prepend(&gtk::Label::new(Some("|")));
-        self.bottom_bar.prepend(&self.archive_name);
-        self.bottom_bar.prepend(&gtk::Label::new(Some("|")));
-        self.bottom_bar.prepend(&self.page_num);
-
-        // TODO -- replace with center controls ?
-        // self.edge_indicator.set_hexpand(true);
-        self.edge_indicator.set_halign(Align::End);
-
-        // Right side - left to right
-        self.bottom_bar.append(&self.edge_indicator);
-        self.bottom_bar.append(&self.zoom_level);
-        self.bottom_bar.append(&gtk::Label::new(Some("|")));
-        self.bottom_bar.append(&self.mode);
-
-        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        // vbox.set_vexpand(true);
-
-        self.tabs.borrow_mut().layout(&vbox);
-
-        // vbox.prepend(&self.overlay);
-
-        self.window.set_child(Some(&vbox));
     }
 
     fn handle_update(self: &Rc<Self>, gu: GuiAction) -> glib::Continue {

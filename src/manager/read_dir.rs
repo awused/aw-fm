@@ -70,6 +70,7 @@ static READ_POOL: Lazy<ThreadPool> = Lazy::new(|| {
 });
 
 enum ReadResult {
+    DirUnreadable(std::io::Error),
     DirError(std::io::Error),
     EntryError(Arc<Path>, gtk::glib::Error),
     Entry(Entry),
@@ -100,7 +101,7 @@ fn read_dir_sync(path: Arc<Path>, sender: UnboundedSender<ReadResult>) -> onesho
             Ok(rdir) => rdir,
             Err(e) => {
                 error!("Unexpected error opening directory {path:?} {e}");
-                drop(sender.send(ReadResult::DirError(e)));
+                drop(sender.send(ReadResult::DirUnreadable(e)));
                 return;
             }
         };
@@ -156,6 +157,9 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
                 match r {
                     ReadResult::Entry(ent) => {
                         entries.push(ent);
+                    }
+                    ReadResult::DirUnreadable(e) => {
+                        todo!()
                     }
                     ReadResult::DirError(e) => {
                         todo!()
@@ -224,6 +228,9 @@ async fn read_slow_dir(
                                 break false;
                             }
                         }
+                        ReadResult::DirUnreadable(e) => {
+                            todo!()
+                        }
                         ReadResult::DirError(e) => {
                             todo!()
                         }
@@ -287,6 +294,9 @@ async fn read_slow_dir(
                         Some(ReadResult::Entry(ent)) => {
                             batch.push(ent);
                             false
+                        }
+                        Some(ReadResult::DirUnreadable(e)) => {
+                            todo!()
                         }
                         Some(ReadResult::DirError(e)) => {
                             todo!()

@@ -249,6 +249,7 @@ impl Manager {
                 self.watch_dir(&path);
                 self.start_read_dir(path);
             }
+            Refresh(path) => self.start_read_dir(path),
             Close(path) => self.unwatch_dir(&path),
         }
         // Execute(s, env) => self.execute(s, env, resp),

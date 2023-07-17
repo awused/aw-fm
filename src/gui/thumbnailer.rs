@@ -32,6 +32,11 @@ use crate::{closing, handle_panic};
 // thumbnails take forever (though burning tons of CPU isn't great either).
 //
 // 0 entirely disables thumbnail loading.
+//
+// Experimentally, 8 is a bit past the limit of what's acceptable, but only in pathologically bad
+// directories where there are many extremely cheap thumbnails to generate. In directories with
+// expensive thumbnails we would want even more (though not more than 16). Something adaptive might
+// be worth exploring later.
 static MAX_CONCURRENT: usize = 8;
 // Low priority runs with this many threads. No effect if higher than MAX_TICKETS.
 //
