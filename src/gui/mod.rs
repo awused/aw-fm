@@ -60,6 +60,10 @@ pub fn high_priority_thumb(weak: WeakRef<EntryObject>) {
     GUI.with(|g| g.get().unwrap().thumbnailer.high_priority(weak));
 }
 
+pub fn low_priority_thumb(weak: WeakRef<EntryObject>) {
+    GUI.with(|g| g.get().unwrap().thumbnailer.low_priority(weak));
+}
+
 
 #[derive(Debug)]
 struct Gui {

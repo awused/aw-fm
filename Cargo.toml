@@ -21,6 +21,7 @@ derive_more = { version = "0.99.17", default-features = false, features = ["dere
 dirs = "5.0.1"
 env_logger = { version = "0.10.0", default-features = false, features = ["auto-color", "color"] }
 futures-util = { version = "0.3.28", default-features = false }
+futures-executor = { version = "0.3.28", default-features = false }
 gtk = { package = "gtk4", features = ["v4_10"], version = "0.6.6" }
 humansize = "2.1.3"
 log = "0.4.19"
@@ -41,10 +42,8 @@ tokio = { version = "1.29.1", features = ["fs", "net", "macros", "process", "rt"
 
 
 # This is auto-generated, but pretty much left unmaintained and abandoned.
-# While it works it's fine, but likely want to just generate it myself.
-gnome-desktop = "0.4.0"
-old-gio = { package = "gio", version = "0.16.7" }
-old-pixbuf = { package = "gdk-pixbuf", version = "0.16.7" }
+# Local patched version to generate what I need and expose the "v42" feature.
+gnome-desktop = { path = "../../third_party/gnome-desktop-rs/gnome-desktop", features = [ "v42" ] }
 
 
 [target.'cfg(unix)'.dependencies]

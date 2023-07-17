@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::fmt::{self, Formatter};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use ahash::AHashMap;
 use gtk::gdk::Texture;
@@ -23,7 +24,7 @@ use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassIsExt};
 use once_cell::sync::Lazy;
 
 use super::{DirSettings, SortDir, SortMode, SortSettings};
-use crate::gui::high_priority_thumb;
+use crate::gui::{high_priority_thumb, low_priority_thumb};
 use crate::natsort::{self, ParsedString};
 
 // In theory could use standard::edit-name and standard::display-name instead of taking
@@ -86,7 +87,7 @@ pub enum EntryKind {
 pub struct Entry {
     pub kind: EntryKind,
     // This is an absolute but NOT canonicalized path.
-    pub abs_path: PathBuf,
+    pub abs_path: Arc<Path>,
     // It's kind of expensive to do this but necessary as an mtime/ctime tiebreaker anyway.
     // TODO -- is this really name, or should it be rel_path for searching
     pub name: ParsedString,
@@ -100,6 +101,7 @@ pub struct Entry {
     // number of wasted tiny allocations.
     // Could do String::into_boxed_str()::leak() to get &'static str
     pub mime: String,
+    pub symlink: bool,
     // pub info: String,
     pub icon: Variant,
 }
@@ -142,7 +144,7 @@ impl Entry {
         }
     }
 
-    pub fn new(abs_path: PathBuf) -> Result<Self, (PathBuf, gtk::glib::Error)> {
+    pub fn new(abs_path: Arc<Path>) -> Result<Self, (Arc<Path>, gtk::glib::Error)> {
         debug_assert!(abs_path.is_absolute());
 
         let name = abs_path.file_name().unwrap_or(abs_path.as_os_str());
@@ -184,6 +186,7 @@ impl Entry {
 
 
         let icon = info.icon().unwrap().serialize().unwrap();
+        let symlink = info.is_symlink();
 
         Ok(Self {
             kind,
@@ -192,6 +195,7 @@ impl Entry {
             mtime,
             // btime,
             mime,
+            symlink,
             icon,
         })
     }
@@ -230,7 +234,7 @@ impl Entry {
 pub enum Thumbnail {
     Nothing,
     LowPriority,
-    HighPriority,
+    HighPriority(u8),
     // Only set by the thumbnailer when it starts to load the thumbnail for a file.
     // This is to avoid race conditions between an update being handled and a second update to the
     // file.
@@ -330,38 +334,64 @@ mod internal {
             Ref::map(b, |o| &o.as_ref().unwrap().thumbnail)
         }
 
-        pub(super) fn mark_thumbnail_loading(&self) -> bool {
+        pub(super) fn mark_thumbnail_loading_high(&self) -> bool {
             let mut b = self.0.borrow_mut();
             let mut thumb = &mut b.as_mut().unwrap().thumbnail;
-            match thumb {
-                Thumbnail::LowPriority | Thumbnail::HighPriority => {
-                    *thumb = Thumbnail::Loading;
+
+            if matches!(thumb, Thumbnail::HighPriority(_)) {
+                *thumb = Thumbnail::Loading;
+                return true;
+            }
+            false
+        }
+
+        pub(super) fn mark_thumbnail_loading_low(&self) -> bool {
+            let mut b = self.0.borrow_mut();
+            let mut thumb = &mut b.as_mut().unwrap().thumbnail;
+
+            if matches!(thumb, Thumbnail::LowPriority) {
+                *thumb = Thumbnail::Loading;
+                return true;
+            }
+            false
+        }
+
+        pub(super) fn deprioritize_thumb(&self) -> bool {
+            let mut b = self.0.borrow_mut();
+            let mut thumb = &mut b.as_mut().unwrap().thumbnail;
+            match &mut thumb {
+                Thumbnail::HighPriority(1) => {
+                    *thumb = Thumbnail::LowPriority;
                     true
+                }
+                Thumbnail::HighPriority(n) => {
+                    *n -= 1;
+                    false
                 }
                 Thumbnail::Nothing
                 | Thumbnail::Loading
                 | Thumbnail::Loaded(_)
-                | Thumbnail::Failed => false,
+                | Thumbnail::Failed
+                | Thumbnail::LowPriority => false,
             }
         }
 
         // There is a minute risk of a race where we're loading a thumbnail for a file twice at
         // once and the first one finishes second. The risk is so low and the outcome so minor it
         // just isn't worth addressing.
-        pub(super) fn update_thumbnail(&self, pixbuf: Pixbuf) {
+        pub(super) fn update_thumbnail(&self, tex: Texture) {
             let mut b = self.0.borrow_mut();
-            let mut thumb = &mut b.as_mut().unwrap().thumbnail;
+            let thumb = &mut b.as_mut().unwrap().thumbnail;
 
             match thumb {
                 Thumbnail::Nothing
                 | Thumbnail::LowPriority
-                | Thumbnail::HighPriority
+                | Thumbnail::HighPriority(_)
                 | Thumbnail::Failed => return,
                 Thumbnail::Loading | Thumbnail::Loaded(_) => {
-                    *thumb = Thumbnail::Loaded(Texture::for_pixbuf(&pixbuf));
+                    *thumb = Thumbnail::Loaded(tex);
                 }
             }
-            println!("Pixbuf refs {}", pixbuf.ref_count());
             drop(b);
             self.obj().emit_by_name::<()>("update", &[]);
         }
@@ -378,14 +408,17 @@ mod internal {
             let thumb = &mut b.as_mut().unwrap().thumbnail;
             match thumb {
                 Thumbnail::LowPriority => {
-                    *thumb = Thumbnail::HighPriority;
+                    *thumb = Thumbnail::HighPriority(1);
                     (true, None)
                 }
+                Thumbnail::HighPriority(n) => {
+                    // This can actually increment it multiple times from update() calls, but
+                    // the worst case there is that we keep it in the high priority queue.
+                    *n += 1;
+                    (false, None)
+                }
                 Thumbnail::Loaded(pb) => (false, Some(pb.clone())),
-                Thumbnail::Nothing
-                | Thumbnail::HighPriority
-                | Thumbnail::Failed
-                | Thumbnail::Loading => (false, None),
+                Thumbnail::Nothing | Thumbnail::Failed | Thumbnail::Loading => (false, None),
             }
         }
     }
@@ -393,7 +426,7 @@ mod internal {
 
 // This does burn a bit of memory, but it avoids any costly linear searches on updates.
 thread_local! {
-    static ALL_ENTRY_OBJECTS: RefCell<AHashMap<PathBuf, WeakRef<EntryObject>>> =
+    static ALL_ENTRY_OBJECTS: RefCell<AHashMap<Arc<Path>, WeakRef<EntryObject>>> =
         AHashMap::new().into();
 }
 
@@ -414,7 +447,7 @@ impl EntryObject {
         });
 
         if obj.imp().should_request_low_priority_thumb() {
-            error!("TODO -- set low priority thumbnail");
+            low_priority_thumb(obj.downgrade())
         }
 
         obj
@@ -441,7 +474,7 @@ impl EntryObject {
         let old = self.imp().update_inner(entry);
 
         if self.imp().should_request_low_priority_thumb() {
-            error!("TODO -- set low priority thumbnail");
+            low_priority_thumb(self.downgrade())
         }
 
         Some(old)
@@ -465,27 +498,41 @@ impl EntryObject {
         tex
     }
 
-    pub fn mark_thumbnail_loading(&self) -> bool {
-        self.imp().mark_thumbnail_loading()
+    pub fn deprioritize_thumb(&self) {
+        let became_low = self.imp().deprioritize_thumb();
+        if became_low {
+            // This is probably unnecessary.
+            low_priority_thumb(self.downgrade());
+        }
     }
 
-    pub fn update_thumbnail(&self, pixbuf: Pixbuf) {
-        self.imp().update_thumbnail(pixbuf)
+    pub fn mark_thumbnail_loading_high(&self) -> bool {
+        self.imp().mark_thumbnail_loading_high()
+    }
+
+    pub fn mark_thumbnail_loading_low(&self) -> bool {
+        self.imp().mark_thumbnail_loading_low()
+    }
+
+    pub fn update_thumbnail(&self, tex: Texture) {
+        self.imp().update_thumbnail(tex)
     }
 
     pub fn icon(&self) -> Icon {
         Icon::deserialize(&self.get().icon).unwrap()
     }
 
-    // Called when this object should be destroyed and we want to be certain.
-    pub fn assert_destroyed(self) {
-        assert_eq!(self.ref_count(), 1);
+    // Called when this object should be destroyed and we want to remove it.
+    // Should only be called once when an item is fully removed from all ListStores.
+    pub fn destroy_weak(self) {
+        // Ref count is no longer definitely 1 since the tiles can have a reference for signals
+        // If it's more than what a single tab could use (currently 4 + 1 for this ref), log a
+        // message.
+        if self.ref_count() > 5 {
+            // This doesn't necessarily represent a leak.
+            info!("Removed an EntryObject but its strong count was {}", self.ref_count())
+        }
         let weak = ALL_ENTRY_OBJECTS.with(|m| m.borrow_mut().remove(&self.get().abs_path).unwrap());
         drop(self);
-
-        debug_assert!(weak.upgrade().is_none());
     }
-
-    // pub fn cleanup_dangling_weak_refs() {
-    // }
 }

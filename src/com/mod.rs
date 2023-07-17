@@ -37,7 +37,7 @@ pub enum Update {
     // Races with reading the initial directory can cause us get a creation event for an entry we
     // already have.
     Entry(Entry),
-    Removed(PathBuf),
+    Removed(Arc<Path>),
 }
 
 impl Update {

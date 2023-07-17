@@ -49,7 +49,7 @@ struct Manager {
 
     // If there are pending mutations, we wait to clear and process them.
     // If the boolean is true, there was a second event we debounced.
-    recent_mutations: AHashMap<PathBuf, PendingUpdate>,
+    recent_mutations: AHashMap<Arc<Path>, PendingUpdate>,
     next_tick: Option<Instant>,
 
     watcher: RecommendedWatcher,

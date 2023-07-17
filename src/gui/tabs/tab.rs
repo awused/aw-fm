@@ -545,9 +545,8 @@ impl Tab {
             t.finish_update(&partial);
         }
 
-        // TODO -- The thumbnailer needs to be careful to only hold onto weak refs.
         if let PartiallyAppliedUpdate::Delete(obj) = partial {
-            obj.assert_destroyed();
+            obj.destroy_weak();
         }
     }
 

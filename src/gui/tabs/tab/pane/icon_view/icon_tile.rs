@@ -5,7 +5,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{AccessibleExt, EventControllerExt, GestureExt, WidgetExt};
 use gtk::{glib, EventController, GestureClick};
 
-use crate::com::EntryObject;
+use crate::com::{Disconnector, EntryObject};
 
 
 thread_local! {
@@ -25,9 +25,9 @@ mod imp {
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
-    use crate::com::{EntryObject, Thumbnail};
+    use crate::com::{Disconnector, EntryObject, Thumbnail};
 
-    #[derive(Debug, Default, CompositeTemplate)]
+    #[derive(Default, CompositeTemplate)]
     #[template(file = "icon_tile.ui")]
     pub struct IconTile {
         #[template_child]
@@ -38,7 +38,7 @@ mod imp {
         #[template_child]
         pub size: TemplateChild<gtk::Inscription>,
 
-        pub update_connection: RefCell<Option<SignalHandlerId>>,
+        pub update_connection: Cell<Option<Disconnector<EntryObject>>>,
     }
 
     #[glib::object_subclass]
@@ -69,8 +69,9 @@ mod imp {
     impl IconTile {
         pub(super) fn update_contents(&self, obj: &EntryObject) {
             let thumb = obj.thumbnail_for_display();
+            // There's basically no mutation that won't cause the thumbnail
+            // to be regenerated, so this is expensive but never wasted.
             if let Some(texture) = thumb {
-                // let texture = Texture::for_pixbuf(&pb);
                 self.image.set_from_paintable(Some(&texture));
             } else {
                 self.image.set_from_gicon(&obj.icon());
@@ -78,14 +79,11 @@ mod imp {
 
             let entry = obj.get();
 
-            let disp_string = entry.name.to_string_lossy();
-            self.name.set_text(Some(&disp_string));
 
-            // Seems to cause it to lock up completely in large directories with sorting?
-            // Absolutely tanks performance either way.
-            // self.name.set_tooltip_text(Some(&disp_string));
-
-            self.size.set_text(Some(&entry.long_size_string()));
+            let size_string = entry.long_size_string();
+            if !matches!(self.size.text(), Some(existing) if existing.as_str() == size_string) {
+                self.size.set_text(Some(&size_string));
+            }
         }
     }
 }
@@ -128,23 +126,36 @@ impl IconTile {
 
     pub fn bind(&self, obj: &EntryObject) {
         let imp = self.imp();
+
+        // Name can never change, only set it once.
+        {
+            let entry = obj.get();
+            let disp_string = entry.name.to_string_lossy();
+            imp.name.set_text(Some(&entry.name.to_string_lossy()));
+
+            // Seems to cause it to lock up completely in large directories with sorting?
+            // Absolutely tanks performance either way.
+            // self.name.set_tooltip_text(Some(&disp_string));
+        }
+
         imp.update_contents(obj);
 
         // Don't need to be weak refs
         let self_ref = self.clone();
-        let x = obj.connect_local("update", false, move |entry| {
+        let id = obj.connect_local("update", false, move |entry| {
             let obj: EntryObject = entry[0].get().unwrap();
             self_ref.imp().update_contents(&obj);
             trace!("Update for visible entry {:?} in icon view", &*obj.get().name);
             None
         });
 
-        assert!(imp.update_connection.replace(Some(x)).is_none())
+        let d = Disconnector::new(obj, id);
+        assert!(imp.update_connection.replace(Some(d)).is_none())
     }
 
     pub fn unbind(&self, obj: &EntryObject) {
-        let signal = self.imp().update_connection.take().unwrap();
-        obj.disconnect(signal);
+        obj.deprioritize_thumb();
+        self.imp().update_connection.take().unwrap();
     }
 
     pub fn assert_disconnected(&self) {

@@ -11,6 +11,7 @@ extern crate log;
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+use std::any::Any;
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
@@ -38,6 +39,10 @@ mod gui;
 mod manager;
 mod natsort;
 
+fn handle_panic(_e: Box<dyn Any + Send>) {
+    error!("Unexpected panic in thread {}", thread::current().name().unwrap_or("unnamed"));
+    closing::close();
+}
 
 fn spawn_thread<F, T>(name: &str, f: F) -> JoinHandle<T>
 where

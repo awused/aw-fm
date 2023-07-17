@@ -52,7 +52,7 @@ impl Manager {
         }
     }
 
-    fn send_update(gui_sender: &Sender<GuiAction>, path: PathBuf) {
+    fn send_update(gui_sender: &Sender<GuiAction>, path: Arc<Path>) {
         match Entry::new(path) {
             Ok(entry) => Self::send_gui(gui_sender, GuiAction::Update(Update::Entry(entry))),
             Err((path, e)) => {
@@ -70,11 +70,11 @@ impl Manager {
             // Other events are probably meaningless
             // For renames we use the single path events
             Access(_) | Other | Modify(ModifyKind::Name(RenameMode::Both)) => return,
-            // Creations jump the queue entirely.
+            // Creations jump the queue and reset it to dedupe mode.
             Create(_) | Modify(ModifyKind::Name(RenameMode::To)) => {
                 trace!("Create {:?}", event.paths);
                 assert_eq!(event.paths.len(), 1);
-                self.recent_mutations.remove(&event.paths[0]);
+                self.recent_mutations.remove(&*event.paths[0]);
             }
             Remove(_) | Modify(ModifyKind::Name(RenameMode::From)) => {
                 trace!("Remove {:?}", event.paths);
@@ -83,8 +83,8 @@ impl Manager {
                 let mut event = event;
                 let path = event.paths.pop().unwrap();
 
-                self.recent_mutations.remove(&path);
-                Self::send_gui(&self.gui_sender, GuiAction::Update(Update::Removed(path)));
+                self.recent_mutations.remove(&*path);
+                Self::send_gui(&self.gui_sender, GuiAction::Update(Update::Removed(path.into())));
                 return;
             }
             // Treat Any as a generic Modify
@@ -104,7 +104,7 @@ impl Manager {
 
         let now = Instant::now();
         let mut event = event;
-        let path = event.paths.pop().unwrap();
+        let path: Arc<Path> = event.paths.pop().unwrap().into();
 
         match self.recent_mutations.entry(path.clone()) {
             hash_map::Entry::Occupied(occupied) => {

@@ -2,9 +2,10 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{glib, CompositeTemplate};
 
-use crate::com::EntryObject;
+use crate::com::{Disconnector, EntryObject};
 
 mod imp {
+    use std::borrow::Cow;
     use std::cell::{Cell, RefCell};
 
     use chrono::{Local, TimeZone};
@@ -14,9 +15,9 @@ mod imp {
     use gtk::{glib, CompositeTemplate};
 
     use super::EntryString;
-    use crate::com::Entry;
+    use crate::com::{Disconnector, Entry, EntryObject};
 
-    #[derive(Debug, Default, CompositeTemplate)]
+    #[derive(Default, CompositeTemplate)]
     #[template(file = "string_cell.ui")]
     pub struct StringCell {
         #[template_child]
@@ -28,7 +29,8 @@ mod imp {
         // #[template_child]
         // pub image2: TemplateChild<gtk::Image>,
         pub(super) kind: Cell<EntryString>,
-        pub update_connection: RefCell<Option<SignalHandlerId>>,
+
+        pub update_connection: Cell<Option<Disconnector<EntryObject>>>,
     }
 
     #[glib::object_subclass]
@@ -57,21 +59,24 @@ mod imp {
     impl WidgetImpl for StringCell {}
 
     impl StringCell {
-        pub(super) fn update_contents(&self, entry: &Entry) {
-            match self.kind.get() {
+        pub(super) fn update_contents(&self, entry: &Entry) -> bool {
+            let new_text = match self.kind.get() {
                 EntryString::Unset => unreachable!(),
-                EntryString::Name => {
-                    self.contents.set_text(Some(&entry.name.to_string_lossy()));
-                }
-                EntryString::Size => {
-                    self.contents.set_text(Some(&entry.short_size_string()));
-                }
+                EntryString::Name => entry.name.to_string_lossy(),
+                EntryString::Size => Cow::Owned(entry.short_size_string()),
                 EntryString::Modified => {
                     // Only use seconds for columns
                     let localtime = Local.timestamp_opt(entry.mtime.sec as i64, 0).unwrap();
                     let text = localtime.format("%Y-%m-%d %H:%M:%S");
-                    self.contents.set_text(Some(&format!("{text}")));
+                    Cow::Owned(format!("{text}"))
                 }
+            };
+
+            if !matches!(self.contents.text(), Some(existing) if existing.as_str() == new_text) {
+                self.contents.set_text(Some(&new_text));
+                true
+            } else {
+                false
             }
         }
     }
@@ -113,20 +118,28 @@ impl StringCell {
         let imp = self.imp();
         imp.update_contents(&obj.get());
 
+        // Can never change.
+        if matches!(imp.kind.get(), EntryString::Name) {
+            debug_assert!(imp.update_connection.take().is_none());
+            return;
+        }
+
         // Don't need to be weak refs
         let self_ref = self.clone();
-        let x = obj.connect_local("update", false, move |entry| {
+        let id = obj.connect_local("update", false, move |entry| {
             let obj: EntryObject = entry[0].get().unwrap();
-            self_ref.imp().update_contents(&obj.get());
-            trace!("Update for visible entry {:?} in column view", &*obj.get().name);
+            if self_ref.imp().update_contents(&obj.get()) {
+                trace!("Update for visible entry {:?} in column view", &*obj.get().name);
+            }
             None
         });
 
-        assert!(imp.update_connection.replace(Some(x)).is_none())
+        let d = Disconnector::new(obj, id);
+
+        assert!(imp.update_connection.replace(Some(d)).is_none())
     }
 
     pub fn unbind(&self, obj: &EntryObject) {
-        let signal = self.imp().update_connection.take().unwrap();
-        obj.disconnect(signal);
+        self.imp().update_connection.take();
     }
 }

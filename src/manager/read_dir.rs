@@ -21,9 +21,9 @@ use tokio::task::spawn_local;
 use tokio::time::{sleep, sleep_until, Instant};
 
 use super::Manager;
-use crate::closing;
 use crate::com::{DirSnapshot, Entry, EntryObject, GuiAction, SnapshotKind};
 use crate::natsort::ParsedString;
+use crate::{closing, handle_panic};
 
 #[cfg(not(feature = "debug-forced-slow"))]
 mod constants {
@@ -48,10 +48,6 @@ mod constants {
     pub static BATCH_TIMEOUT: Duration = Duration::from_millis(1000);
 }
 
-fn handle_panic(_e: Box<dyn Any + Send>) {
-    error!("Unexpected panic in thread {}", thread::current().name().unwrap_or("unnamed"));
-    closing::close();
-}
 
 // Could potentially be a non-rayon threadpool for directory reading and only use rayon for
 // individual entries.
@@ -75,7 +71,7 @@ static READ_POOL: Lazy<ThreadPool> = Lazy::new(|| {
 
 enum ReadResult {
     DirError(std::io::Error),
-    EntryError(PathBuf, gtk::glib::Error),
+    EntryError(Arc<Path>, gtk::glib::Error),
     Entry(Entry),
 }
 
@@ -119,7 +115,7 @@ fn read_dir_sync(path: Arc<Path>, sender: UnboundedSender<ReadResult>) -> onesho
                 }
             };
 
-            let entry = match Entry::new(dirent.path()) {
+            let entry = match Entry::new(dirent.path().into()) {
                 Ok(entry) => entry,
                 Err((path, e)) => {
                     error!("Unexpected error reading file info {path:?} {e}");
