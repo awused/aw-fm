@@ -21,15 +21,22 @@ use rayon::{ThreadBuilder, ThreadPool, ThreadPoolBuilder};
 use self::send::SendFactory;
 use super::GUI;
 use crate::com::EntryObject;
-use crate::handle_panic;
+use crate::{closing, handle_panic};
 
 // How many concurrent thumbnail processes we allow.
 // There are tradeoffs between how fast we want to generate the thumbnails the user is looking at
 // and how much we can accept in terms of choppiness.
-static MAX_TICKETS: usize = 4;
+//
+// The slower the thumbnail process, the less choppy this is even at higher values. Too high and
+// directories with many cheap thumbnails cause the process to slow down. Too low and expensive
+// thumbnails take forever (though burning tons of CPU isn't great either).
+//
+// 0 entirely disables thumbnail loading.
+static MAX_CONCURRENT: usize = 8;
 // Low priority runs with this many threads. No effect if higher than MAX_TICKETS.
+//
 // If 0, no thumbnails will be generated in the background.
-static LOW_PRIORITY: usize = 1;
+static LOW_PRIORITY: usize = 2;
 
 #[derive(Debug, Default)]
 struct PendingThumbs {
@@ -42,73 +49,66 @@ struct PendingThumbs {
     // For low priority, order doesn't matter much, since the objects can be created in any
     // order. More trouble than it's worth to get a useful order out of these.
     low_priority: Vec<WeakRef<EntryObject>>,
+
+    // Never bother cloning these, it's a waste, just pass them around.
+    // It's marginally more efficient (2-3 seconds worth over 100k items) to not clone and drop
+    // these, also avoids doing manual math on the tickets.
+    factories: Vec<SendFactory>,
 }
 
 
 #[derive(Debug)]
 pub struct Thumbnailer {
     pending: RefCell<PendingThumbs>,
-    factory: SendFactory,
     // No real advantage to rayon over other pools here, but we already have it as a dependency.
+    // Did test a fully glib-async version that uses GTasks under the hood, but the performance
+    // wasn't any better and was sometimes much worse.
     pool: ThreadPool,
-    // More so we can drive prioritization.
-    // In theory we could just dump all the tasks directly into rayon with a combination of spawn
-    // and spawn_fifo.
-    tickets: Cell<usize>,
 }
 
 impl Thumbnailer {
-    // Would really prefer to do all this in a rayon threadpool entirely under my control.
     pub fn new() -> Self {
-        println!("{:?}", data_dir());
-        println!("{:?}", data_local_dir());
-        unsafe {
-            println!("{:?}", g_get_user_data_dir());
-        }
+        let mut pending = PendingThumbs {
+            factories: SendFactory::make(MAX_CONCURRENT),
+            ..PendingThumbs::default()
+        };
 
-        let pending = RefCell::default();
-        let factory = SendFactory::new();
         let pool = ThreadPoolBuilder::new()
             .thread_name(|n| format!("thumbnailer-{n}"))
             .panic_handler(handle_panic)
-            .num_threads(MAX_TICKETS)
+            .num_threads(MAX_CONCURRENT)
             .build()
             .unwrap();
 
-        Self {
-            pending,
-            factory,
-            pool,
-            tickets: Cell::new(MAX_TICKETS),
-        }
+        Self { pending: pending.into(), pool }
     }
 
     pub fn low_priority(&self, weak: WeakRef<EntryObject>) {
-        if LOW_PRIORITY > 0 {
+        if LOW_PRIORITY > 0 && MAX_CONCURRENT > 0 {
             self.pending.borrow_mut().low_priority.push(weak);
             self.process();
         }
     }
 
     pub fn high_priority(&self, weak: WeakRef<EntryObject>) {
-        self.pending.borrow_mut().high_priority.push_back(weak);
-        self.process();
+        if MAX_CONCURRENT > 0 {
+            self.pending.borrow_mut().high_priority.push_back(weak);
+            self.process();
+        }
     }
 
-    fn done_with_ticket() {
+    fn done_with_ticket(factory: SendFactory) {
         GUI.with(|g| {
             let t = &g.get().unwrap().thumbnailer;
-            t.tickets.set(t.tickets.get() + 1);
+            t.pending.borrow_mut().factories.push(factory);
             t.process();
         });
     }
 
-    fn finish_thumbnail(factory: SendFactory, pixbuf: Pixbuf, path: Arc<Path>) {
-        let tex = Texture::for_pixbuf(&pixbuf);
+    fn finish_thumbnail(factory: SendFactory, tex: Texture, path: Arc<Path>) {
         gtk::glib::idle_add_once(move || {
-            drop(factory);
             // If this isn't on the main thread, this will crash. No chance of UB.
-            Self::done_with_ticket();
+            Self::done_with_ticket(factory);
 
             let Some(obj) = EntryObject::lookup(&path) else {
                 return;
@@ -120,8 +120,7 @@ impl Thumbnailer {
 
     fn fail_thumbnail(factory: SendFactory, path: Arc<Path>) {
         gtk::glib::idle_add_once(move || {
-            drop(factory);
-            Self::done_with_ticket();
+            Self::done_with_ticket(factory);
 
             let Some(obj) = EntryObject::lookup(&path) else {
                 return;
@@ -129,43 +128,53 @@ impl Thumbnailer {
         });
     }
 
-    fn find_next(&self) -> Option<EntryObject> {
+    fn find_next(&self) -> Option<(EntryObject, SendFactory)> {
         let mut pending = self.pending.borrow_mut();
+
+        if pending.factories.is_empty() {
+            return None;
+        }
 
         while let Some(weak) = pending.high_priority.pop_front() {
             if let Some(strong) = weak.upgrade() {
                 if strong.mark_thumbnail_loading_high() {
-                    return Some(strong);
+                    return Some((strong, pending.factories.pop().unwrap()));
                 }
             }
         }
 
-        if MAX_TICKETS > LOW_PRIORITY && MAX_TICKETS - self.tickets.get() > LOW_PRIORITY {
+        if MAX_CONCURRENT > LOW_PRIORITY && MAX_CONCURRENT - pending.factories.len() > LOW_PRIORITY
+        {
             return None;
         }
 
         while let Some(weak) = pending.low_priority.pop() {
             if let Some(strong) = weak.upgrade() {
                 if strong.mark_thumbnail_loading_low() {
-                    return Some(strong);
+                    return Some((strong, pending.factories.pop().unwrap()));
                 }
             }
         }
 
-        pending.high_priority.shrink_to_fit();
-        pending.low_priority.shrink_to_fit();
+        // Don't spam this if it's only for single updates.
+        if pending.high_priority.capacity() + pending.low_priority.capacity() > 10 {
+            pending.high_priority.shrink_to_fit();
+            pending.low_priority.shrink_to_fit();
+
+            debug!("Finished loading all thumbnails (none pending).");
+        }
 
         None
     }
 
     fn process(&self) {
-        if self.tickets.get() == 0 {
+        if closing::closed() {
             return;
         }
 
-        let Some(obj) = self.find_next() else { return };
-
-        self.tickets.set(self.tickets.get() - 1);
+        let Some((obj, factory)) = self.find_next() else {
+            return;
+        };
 
         // Get what data we need and drop down to a weak ref.
         let entry = obj.get();
@@ -176,16 +185,17 @@ impl Thumbnailer {
         let mime_type = entry.mime.clone();
 
         let start = Instant::now();
-        let factory = self.factory.clone();
+
         self.pool.spawn(move || {
             let existing = factory.lookup(&uri, mtime_sec);
 
             if let Some(existing) = existing {
-                match Pixbuf::from_file(existing) {
-                    Ok(pixbuf) => {
+                let gfile = gtk::gio::File::for_path(existing);
+                match Texture::from_file(&gfile) {
+                    Ok(tex) => {
                         // This is just too spammy outside of debugging
                         // trace!("Loaded existing thumbnail for {uri:?} in {:?}", start.elapsed());
-                        return Self::finish_thumbnail(factory, pixbuf, path);
+                        return Self::finish_thumbnail(factory, tex, path);
                     }
                     Err(e) => {
                         error!("Failed to load existing thumbnail: {e:?}");
@@ -199,14 +209,14 @@ impl Thumbnailer {
             }
 
             if !factory.can_thumbnail(&uri, &mime_type, mtime_sec) {
-                warn!("Marking thumbnail as failed, though it wasn't attempted.");
+                // trace!("Marking thumbnail as failed, though it wasn't attempted.");
                 return Self::fail_thumbnail(factory, path);
             }
 
             match factory.generate_and_save_thumbnail(&uri, &mime_type, mtime_sec) {
-                Some(pixbuf) => {
+                Some(tex) => {
                     trace!("Generated new thumbnail in {:?} for {uri:?}", start.elapsed());
-                    Self::finish_thumbnail(factory, pixbuf, path);
+                    Self::finish_thumbnail(factory, tex, path);
                 }
                 None => Self::fail_thumbnail(factory, path),
             }
@@ -218,11 +228,12 @@ impl Thumbnailer {
 mod send {
     use std::path::PathBuf;
     use std::ptr;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use futures_executor::block_on;
     use gnome_desktop::traits::DesktopThumbnailFactoryExt;
     use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailSize};
+    use gtk::gdk::Texture;
     use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
     use gtk::gio::glib::GString;
     use gtk::gio::{Cancellable, Cancelled};
@@ -240,15 +251,18 @@ mod send {
     // cloned.
     //
     // Since we have to always mark thumbnails as successes or failures, this aborts the process
-    // rather than scheduling a callback to run on the main thread for efficiencyi.
+    // rather than scheduling a separate callback main thread callback of its own for efficiency.
     //
     // An alternate implementation is just coercing a reference up to &'static, and assuming the
     // Gui object never moves, but we need to be a bit more careful in that case. This
     // implementation also prevents sloppy code.
+    //
+    // Alternatively could just make this abort on drop.
     unsafe impl Send for SendFactory {}
 
     impl Drop for SendFactory {
         fn drop(&mut self) {
+            error!("Dropping a thumbnail factory, this shouldn't happen.");
             unsafe {
                 if g_thread_self() != self.1 {
                     error!(
@@ -262,15 +276,18 @@ mod send {
     }
 
     impl SendFactory {
-        pub fn new() -> Self {
-            let current_thread = unsafe { g_thread_self() };
-            Self(DesktopThumbnailFactory::new(DesktopThumbnailSize::Normal), current_thread)
-        }
+        pub fn make(n: usize) -> Vec<Self> {
+            let mut factories = Vec::with_capacity(n);
+            if n > 0 {
+                let current_thread = unsafe { g_thread_self() };
+                let f = DesktopThumbnailFactory::new(DesktopThumbnailSize::Normal);
 
-        pub fn clone(&self) -> Self {
-            let current_thread = unsafe { g_thread_self() };
-            assert_eq!(self.1, current_thread);
-            Self(self.0.clone(), self.1)
+                for _ in 0..n {
+                    factories.push(Self(f.clone(), current_thread));
+                }
+            }
+
+            factories
         }
 
         pub fn lookup(&self, uri: &str, mtime_sec: u64) -> Option<GString> {
@@ -293,15 +310,15 @@ mod send {
             uri: &str,
             mime_type: &str,
             mtime_sec: u64,
-        ) -> Option<Pixbuf> {
+        ) -> Option<Texture> {
             let generated = self.0.generate_thumbnail(uri, mime_type, None::<&Cancellable>);
 
             let pb = match generated {
                 Ok(pb) => pb,
                 Err(e) => {
-                    // if closing::closed() {
-                    //     return None;
-                    // }
+                    if closing::closed() {
+                        return None;
+                    }
 
                     if e.domain() == Quark::from_str("g-exec-error-quark") {
                         // These represent errors with the thumbnail process itself, such as being
@@ -330,7 +347,7 @@ mod send {
                 return None;
             }
 
-            Some(pb)
+            Some(Texture::for_pixbuf(&pb))
         }
     }
 }

@@ -360,9 +360,7 @@ impl Tab {
 
     pub(super) fn apply_snapshot(&mut self, right_tabs: &mut [Self], snap: DirSnapshot) {
         assert!(self.matches_snapshot(&snap.id));
-        let start = Instant::now();
         let snap: EntryObjectSnapshot = snap.into();
-        println!("Mapped in {:?}", start.elapsed());
 
         // The actual tab order doesn't matter here, so long as it's applied to every matching tab.
         // Avoid one clone by doing the other tabs first.
@@ -393,9 +391,6 @@ impl Tab {
             self.matching(right_tabs).for_each(Self::start_apply_view_state);
             // TODO -- stop showing spinners.
             info!("Finished loading {:?}", self.path);
-
-            // self.contents.list.remove_all();
-            // self.pane.take();
         }
     }
 
@@ -497,9 +492,7 @@ impl Tab {
         drop(sb);
 
 
-        let start = Instant::now();
         let existing = EntryObject::lookup(up.path());
-        println!("{:?}", start.elapsed());
 
         let partial = match (up, existing) {
             (Update::Entry(entry), Some(obj)) => {
@@ -509,10 +502,8 @@ impl Tab {
                     return;
                 };
 
-                println!("{:?}", start.elapsed());
                 self.reinsert_updated(&old, &obj);
 
-                println!("{:?}", start.elapsed());
                 trace!("Updated {:?} from event", old.abs_path);
                 PartiallyAppliedUpdate::Mutate(old, obj)
             }

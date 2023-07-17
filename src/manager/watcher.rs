@@ -40,7 +40,8 @@ pub struct PendingUpdate(Instant, State);
 impl Manager {
     pub(super) fn watch_dir(&mut self, path: &Path) {
         if let Err(e) = self.watcher.watch(path, NonRecursive) {
-            // Handle as a directory error
+            // Treat like the directory was removed.
+            // The tab only opened to this directory because it was a directory very recently.
             todo!()
         }
     }
@@ -88,9 +89,7 @@ impl Manager {
                 return;
             }
             // Treat Any as a generic Modify
-            Modify(_) | Any => {
-                trace!("Modify {:?}", event.kind);
-            }
+            Modify(_) | Any => {}
         }
 
         if event.paths.len() != 1 {

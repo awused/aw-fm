@@ -187,6 +187,7 @@ impl Pane {
         let count_label = gtk::Label::new(Some(&format!("{} items", tab.contents.list.n_items())));
         let selection_label = gtk::Label::new(None);
         selection_label.set_visible(false);
+        selection_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
 
         bottom_bar.append(&count_label);
         bottom_bar.append(&selection_label);
