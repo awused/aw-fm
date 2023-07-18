@@ -24,7 +24,7 @@ use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassIsExt};
 use once_cell::sync::Lazy;
 
 use super::{DirSettings, SortDir, SortMode, SortSettings};
-use crate::gui::{high_priority_thumb, low_priority_thumb};
+use crate::gui::{queue_high_priority_thumb, queue_low_priority_thumb};
 use crate::natsort::{self, ParsedString};
 
 // In theory could use standard::edit-name and standard::display-name instead of taking
@@ -447,7 +447,7 @@ impl EntryObject {
         });
 
         if obj.imp().should_request_low_priority_thumb() {
-            low_priority_thumb(obj.downgrade())
+            queue_low_priority_thumb(obj.downgrade())
         }
 
         obj
@@ -474,7 +474,7 @@ impl EntryObject {
         let old = self.imp().update_inner(entry);
 
         if self.imp().should_request_low_priority_thumb() {
-            low_priority_thumb(self.downgrade())
+            queue_low_priority_thumb(self.downgrade())
         }
 
         Some(old)
@@ -493,7 +493,7 @@ impl EntryObject {
     pub fn thumbnail_for_display(&self) -> Option<Texture> {
         let (was_low, tex) = self.imp().high_priority_thumb();
         if was_low {
-            high_priority_thumb(self.downgrade());
+            queue_high_priority_thumb(self.downgrade());
         }
         tex
     }
@@ -502,7 +502,7 @@ impl EntryObject {
         let became_low = self.imp().deprioritize_thumb();
         if became_low {
             // This is probably unnecessary.
-            low_priority_thumb(self.downgrade());
+            queue_low_priority_thumb(self.downgrade());
         }
     }
 

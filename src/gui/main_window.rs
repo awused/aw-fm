@@ -5,6 +5,37 @@ use gtk::{glib, Application};
 
 use crate::com::{Disconnector, EntryObject};
 
+
+glib::wrapper! {
+    pub struct MainWindow(ObjectSubclass<imp::MainWindow>)
+        @extends gtk::Widget, gtk::ApplicationWindow, gtk::Window;
+}
+
+impl MainWindow {
+    pub fn new(app: &Application) -> Self {
+        // Create new window
+        Object::builder().property("application", app).build()
+    }
+
+    // TODO
+    // Do not start drag and drop unless the mouse is actually "on" something, and not just
+    // dead space.
+    //
+    //
+    // let click = GestureClick::new();
+    // click.connect_pressed(|a, b, c, d| {
+    //     let parent = a.widget().downcast::<Self>().unwrap();
+    //     parent.imp().image.bounds()
+    //     println!("Click on {a:?}, {b:?}, {c:?}, {d:?}");
+    //     let ev = a.current_event().unwrap();
+    //
+    //     let up = a.upcast_ref::<EventController>();
+    //     up.current_event();
+    //     a.set_state(gtk::EventSequenceState::Claimed);
+    // });
+    // s.add_controller(click);
+}
+
 mod imp {
     use std::cell::{Cell, RefCell};
 
@@ -59,34 +90,4 @@ mod imp {
     impl WidgetImpl for MainWindow {}
 
     impl MainWindow {}
-}
-
-glib::wrapper! {
-    pub struct MainWindow(ObjectSubclass<imp::MainWindow>)
-        @extends gtk::Widget, gtk::ApplicationWindow, gtk::Window;
-}
-
-impl MainWindow {
-    pub fn new(app: &Application) -> Self {
-        // Create new window
-        Object::builder().property("application", app).build()
-    }
-
-    // TODO
-    // Do not start drag and drop unless the mouse is actually "on" something, and not just
-    // dead space.
-    //
-    //
-    // let click = GestureClick::new();
-    // click.connect_pressed(|a, b, c, d| {
-    //     let parent = a.widget().downcast::<Self>().unwrap();
-    //     parent.imp().image.bounds()
-    //     println!("Click on {a:?}, {b:?}, {c:?}, {d:?}");
-    //     let ev = a.current_event().unwrap();
-    //
-    //     let up = a.upcast_ref::<EventController>();
-    //     up.current_event();
-    //     a.set_state(gtk::EventSequenceState::Claimed);
-    // });
-    // s.add_controller(click);
 }

@@ -16,6 +16,76 @@ thread_local! {
    }
 }
 
+
+glib::wrapper! {
+    pub struct IconTile(ObjectSubclass<imp::IconTile>)
+        @extends gtk::Widget, gtk::Box;
+}
+
+impl IconTile {
+    pub fn new() -> Self {
+        let s: Self = glib::Object::new();
+        PANGO_ATTRIBUTES.with(|pa| s.imp().name.set_attributes(Some(pa)));
+
+        // TODO
+        // Do not start drag and drop unless the mouse is actually "on" something, and not just
+        // dead space.
+        //
+        //
+        // let click = GestureClick::new();
+        // click.connect_pressed(|a, b, c, d| {
+        //     let parent = a.widget().downcast::<Self>().unwrap();
+        //     parent.imp().image.bounds()
+        //     println!("Click on {a:?}, {b:?}, {c:?}, {d:?}");
+        //     let ev = a.current_event().unwrap();
+        //
+        //     let up = a.upcast_ref::<EventController>();
+        //     up.current_event();
+        //     a.set_state(gtk::EventSequenceState::Claimed);
+        // });
+        // s.add_controller(click);
+        s
+    }
+
+    pub fn bind(&self, obj: &EntryObject) {
+        let imp = self.imp();
+
+        // Name can never change, only set it once.
+        {
+            let entry = obj.get();
+            let disp_string = entry.name.to_string_lossy();
+            imp.name.set_text(Some(&entry.name.to_string_lossy()));
+
+            // Seems to cause it to lock up completely in large directories with sorting?
+            // Absolutely tanks performance either way.
+            // self.name.set_tooltip_text(Some(&disp_string));
+        }
+
+        imp.update_contents(obj);
+
+        // Don't need to be weak refs
+        let self_ref = self.clone();
+        let id = obj.connect_local("update", false, move |entry| {
+            let obj: EntryObject = entry[0].get().unwrap();
+            self_ref.imp().update_contents(&obj);
+            trace!("Update for visible entry {:?} in icon view", &*obj.get().name);
+            None
+        });
+
+        let d = Disconnector::new(obj, id);
+        assert!(imp.update_connection.replace(Some(d)).is_none())
+    }
+
+    pub fn unbind(&self, obj: &EntryObject) {
+        obj.deprioritize_thumb();
+        self.imp().update_connection.take().unwrap();
+    }
+
+    pub fn assert_disconnected(&self) {
+        assert!(self.imp().update_connection.take().is_none());
+    }
+}
+
 mod imp {
     use std::cell::{Cell, RefCell};
 
@@ -85,80 +155,5 @@ mod imp {
                 self.size.set_text(Some(&size_string));
             }
         }
-    }
-}
-
-glib::wrapper! {
-    pub struct IconTile(ObjectSubclass<imp::IconTile>)
-        @extends gtk::Widget, gtk::Box;
-}
-
-// impl Default for IconTile {
-//     fn default() -> Self {
-//         Self::new()
-//     }
-// }
-
-impl IconTile {
-    pub fn new() -> Self {
-        let s: Self = glib::Object::new();
-        PANGO_ATTRIBUTES.with(|pa| s.imp().name.set_attributes(Some(pa)));
-
-        // TODO
-        // Do not start drag and drop unless the mouse is actually "on" something, and not just
-        // dead space.
-        //
-        //
-        // let click = GestureClick::new();
-        // click.connect_pressed(|a, b, c, d| {
-        //     let parent = a.widget().downcast::<Self>().unwrap();
-        //     parent.imp().image.bounds()
-        //     println!("Click on {a:?}, {b:?}, {c:?}, {d:?}");
-        //     let ev = a.current_event().unwrap();
-        //
-        //     let up = a.upcast_ref::<EventController>();
-        //     up.current_event();
-        //     a.set_state(gtk::EventSequenceState::Claimed);
-        // });
-        // s.add_controller(click);
-        s
-    }
-
-    pub fn bind(&self, obj: &EntryObject) {
-        let imp = self.imp();
-
-        // Name can never change, only set it once.
-        {
-            let entry = obj.get();
-            let disp_string = entry.name.to_string_lossy();
-            imp.name.set_text(Some(&entry.name.to_string_lossy()));
-
-            // Seems to cause it to lock up completely in large directories with sorting?
-            // Absolutely tanks performance either way.
-            // self.name.set_tooltip_text(Some(&disp_string));
-        }
-
-        imp.update_contents(obj);
-
-        // Don't need to be weak refs
-        let self_ref = self.clone();
-        let id = obj.connect_local("update", false, move |entry| {
-            let obj: EntryObject = entry[0].get().unwrap();
-            self_ref.imp().update_contents(&obj);
-            trace!("Update for visible entry {:?} in icon view", &*obj.get().name);
-            None
-        });
-
-        let d = Disconnector::new(obj, id);
-        assert!(imp.update_connection.replace(Some(d)).is_none())
-    }
-
-    pub fn unbind(&self, obj: &EntryObject) {
-        obj.deprioritize_thumb();
-        self.imp().update_connection.take().unwrap();
-    }
-
-    pub fn assert_disconnected(&self) {
-        assert!(self.imp().update_connection.take().is_none());
     }
 }

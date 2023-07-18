@@ -10,7 +10,7 @@ use self::tab::Tab;
 use crate::com::{DirSnapshot, DisplayMode, EntryObjectSnapshot, SortSettings, Update};
 
 mod tab;
-mod tab_element;
+// mod tab_element;
 
 // Maximum number of panes per window
 const MAX_PANES: usize = 3;

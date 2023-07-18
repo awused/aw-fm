@@ -94,9 +94,9 @@ pub enum GuiAction {
     Update(Update),
     // FullSnapshot(Arc<Path>, Vec<Entry>),
     // PartialSnapshot(Start/Middle/End, Files)
-
-    // DirectoryError()
-    // EntryError(Arc<Path>, )
+    DirectoryOpenError(Arc<Path>, String),
+    DirectoryError(Arc<Path>, String),
+    // EntryError(Arc<Path>, Error)
 
     // SearchSubscription,
     // DirectoryContents

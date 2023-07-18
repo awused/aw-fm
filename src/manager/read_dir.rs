@@ -159,7 +159,13 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
                         entries.push(ent);
                     }
                     ReadResult::DirUnreadable(e) => {
-                        todo!()
+                        if let Err(e) = gui_sender.send(
+                            GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
+                            if !closing::closed() {
+                                error!("{e}");
+                            }
+                        }
+                        return;
                     }
                     ReadResult::DirError(e) => {
                         todo!()
@@ -199,6 +205,15 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
     debug!("Done reading directory {:?} in {:?}", path, start.elapsed());
 }
 
+
+// For slow directories we try to keep the UI responsive (unlike nautilus/caja/etc) by sending
+// reasonably large batches as they become available.
+//
+// For increasing batch sizes we:
+//   - Consume entries until we meet the minimum batch size
+//   - Continue to consume entries until 5ms have passed without a new entry, up to 100ms total
+//   - If more than 100ms have passed, consume only immediately available entrie
+//   - Send the batch
 async fn read_slow_dir(
     path: Arc<Path>,
     mut receiver: UnboundedReceiver<ReadResult>,
@@ -229,7 +244,13 @@ async fn read_slow_dir(
                             }
                         }
                         ReadResult::DirUnreadable(e) => {
-                            todo!()
+                            if let Err(e) = gui_sender.send(
+                                GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
+                                if !closing::closed() {
+                                    error!("{e}");
+                                }
+                            }
+                            break true;
                         }
                         ReadResult::DirError(e) => {
                             todo!()
@@ -296,7 +317,13 @@ async fn read_slow_dir(
                             false
                         }
                         Some(ReadResult::DirUnreadable(e)) => {
-                            todo!()
+                            if let Err(e) = gui_sender.send(
+                                GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
+                                if !closing::closed() {
+                                    error!("{e}");
+                                }
+                            }
+                            true
                         }
                         Some(ReadResult::DirError(e)) => {
                             todo!()

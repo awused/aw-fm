@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- As long as this single file is manageable, there's no reason to split this into multiple templates. --!>
+<!-- As long as this single file is manageable, there's no reason to split this into multiple templates. -->
 <interface>
   <template class="AwFmMainWindow" parent="GtkApplicationWindow">
     <property name="title">aw-fm</property>
@@ -8,6 +8,7 @@
 
     <child>
       <object class="GtkOverlay">
+
         <child>
           <object class="GtkBox">
             <property name="orientation">horizontal</property>
@@ -27,7 +28,7 @@
 
 
                 <child>
-                  <object class="GtkListView" name="tabs">
+                  <object class="GtkListView" id="tabs">
                     <property name="orientation">horizontal</property>
                     <style>
                       <class name="tabs-list"/>
@@ -36,7 +37,7 @@
                 </child>
 
                 <child>
-                  <object class="GtkBox" name="panes">
+                  <object class="GtkBox" id="panes">
                     <property name="orientation">horizontal</property>
                     <property name="hexpand">true</property>
                     <property name="vexpand">true</property>
@@ -45,23 +46,24 @@
                     </style>
                     <!-- Put Boxes in here, and render the panes into those boxes, not Panes directly -->
                   </object>
-                </child> <!-- panes -->
+                </child>
 
               </object>
             </child>
+
           </object>
-        </child>
+        </child> <!-- horizontal box -->
 
 
         <child type="overlay">
-          <object class="GtkButton" name="toast">
+          <object class="GtkButton" id="toast">
             <property name="visible">false</property>
             <style>
               <class name="error-toast"/>
             </style>
 
             <child>
-              <object class="GtkLabel" name="error-message">
+              <object class="GtkLabel" id="error_message">
                 <property name="wrap">true</property>
                 <property name="wrap-mode">PANGO_WRAP_CHAR</property>
               </object>

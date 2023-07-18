@@ -188,7 +188,7 @@ pub(in crate::gui) struct Tab {
     view_state: Option<SavedViewState>,
     history: VecDeque<HistoryEntry>,
     future: Vec<HistoryEntry>,
-    tab_element: (),
+    element: (),
     // Each tab can only be open in one pane at once.
     // In theory we could do many-to-many but it's too niche.
     pane: Option<Pane>,
@@ -235,7 +235,7 @@ impl Tab {
             view_state: None,
             history: VecDeque::new(),
             future: Vec::new(),
-            tab_element: element,
+            element,
             pane: None,
         };
 
@@ -257,7 +257,7 @@ impl Tab {
             view_state,
             history: source.history.clone(),
             future: source.future.clone(),
-            tab_element: element,
+            element,
             pane: None,
         }
     }
@@ -335,12 +335,13 @@ impl Tab {
 
         if self.settings.display_mode == DisplayMode::Icons {
             if let Some(pane) = &self.pane {
-                if pane.scroller.vscrollbar_policy() != gtk::PolicyType::Never {
+                if pane.workaround_scroller().vscrollbar_policy() != gtk::PolicyType::Never {
                     error!("Locking scrolling to work around gtk crash");
-                    pane.scroller.set_vscrollbar_policy(gtk::PolicyType::Never);
+                    pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Never);
                 }
             }
         }
+
         self.contents.list.extend(snap.entries.into_iter());
         let start = Instant::now();
         self.contents.list.sort(self.settings.sort.comparator());
@@ -629,7 +630,7 @@ impl Tab {
             glib::idle_add_local_once(finish);
         } else {
             error!("Unsetting GTK crash workaround");
-            pane.scroller.set_vscrollbar_policy(gtk::PolicyType::Automatic);
+            pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
             glib::timeout_add_local_once(Duration::from_millis(300), finish);
         }
     }
@@ -657,12 +658,12 @@ impl Tab {
     }
 
     pub(super) fn finish_apply_view_state(&mut self) {
-        let Some(pane) = &self.pane else {
+        let Some(pane) = &mut self.pane else {
             warn!("Pane was closed after we asked to apply view state");
             return;
         };
         let view_state = self.view_state.take().unwrap_or_default();
 
-        pane.scroller.vadjustment().set_value(view_state.scroll_pos);
+        pane.apply_view_state(view_state);
     }
 }

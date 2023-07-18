@@ -25,7 +25,6 @@ use gtk::{
     gdk, gio, glib, Align, EventControllerScroll, EventControllerScrollFlags, GridView,
     MultiSelection, ScrolledWindow,
 };
-// use once_cell::unsync::OnceCell;
 use path_clean::PathClean;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -35,7 +34,6 @@ use self::thumbnailer::Thumbnailer;
 use super::com::*;
 use crate::config::{CONFIG, OPTIONS};
 use crate::database::DBCon;
-// use crate::state_cache::{save_settings, State, STATE};
 use crate::{closing, config};
 
 mod main_window;
@@ -57,11 +55,11 @@ struct WindowState {
     memorized_size: crate::com::Res,
 }
 
-pub fn high_priority_thumb(weak: WeakRef<EntryObject>) {
+pub fn queue_high_priority_thumb(weak: WeakRef<EntryObject>) {
     GUI.with(|g| g.get().unwrap().thumbnailer.high_priority(weak));
 }
 
-pub fn low_priority_thumb(weak: WeakRef<EntryObject>) {
+pub fn queue_low_priority_thumb(weak: WeakRef<EntryObject>) {
     GUI.with(|g| g.get().unwrap().thumbnailer.low_priority(weak));
 }
 
@@ -135,7 +133,7 @@ pub fn run(
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
-        Gui::new(a, gui_to_manager.take().unwrap(), &gui_receiver);
+        Gui::new(a, gui_to_manager.take().unwrap(), gui_receiver.take().unwrap());
     });
 
     // This is a stupid hack around glib trying to exert exclusive control over the command line.
@@ -156,7 +154,7 @@ impl Gui {
     pub fn new(
         application: &gtk::Application,
         manager_sender: UnboundedSender<MAWithResponse>,
-        gui_receiver: &Cell<Option<glib::Receiver<GuiAction>>>,
+        gui_receiver: glib::Receiver<GuiAction>,
     ) -> Rc<Self> {
         let window = MainWindow::new(application);
 
@@ -219,10 +217,7 @@ impl Gui {
         // There are also cyclical references that are annoying to clean up so this Gui object will
         // live forever, but that's fine since the application will exit when the Gui exits.
         let g = rc.clone();
-        gui_receiver
-            .take()
-            .expect("Activated application twice. This should never happen.")
-            .attach(None, move |gu| g.handle_update(gu));
+        gui_receiver.attach(None, move |gu| g.handle_update(gu));
 
         rc.setup();
 
@@ -234,6 +229,8 @@ impl Gui {
     }
 
     fn setup(self: &Rc<Self>) {
+        self.window.remove_css_class("background");
+
         let mut path = OPTIONS
             .file_name
             .clone()
@@ -248,9 +245,6 @@ impl Gui {
         }
 
         self.tabs.borrow_mut().initialize(path);
-
-        self.window.remove_css_class("background");
-
         self.tabs.borrow_mut().layout(&self.window.imp().tabs, &self.window.imp().panes);
         // self.setup_interaction();
 
@@ -315,12 +309,7 @@ impl Gui {
     fn handle_update(self: &Rc<Self>, gu: GuiAction) -> glib::Continue {
         use crate::com::GuiAction::*;
 
-        // println!("{gu:?}");
-
         match gu {
-            // Action(a, fin) => {
-            //     // self.run_command(&a, Some(fin));
-            // }
             Snapshot(snap) => {
                 let g = self.clone();
                 g.tabs.borrow_mut().apply_snapshot(snap);
@@ -333,7 +322,16 @@ impl Gui {
             Update(update) => {
                 self.tabs.borrow_mut().handle_update(update);
             }
-            // IdleUnload => {}
+            DirectoryOpenError(path, error) => {
+                // This is a special case where we failed to open a directory or read it at all.
+                // Treat it as if it were closed.
+                self.convey_error(error);
+                error!("Treating {path:?} as closed");
+            }
+            DirectoryError(path, error) => {
+                // Some other error that isn't as fatal.
+                todo!()
+            }
             Quit => {
                 self.window.close();
                 closing::close();
