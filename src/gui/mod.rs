@@ -36,6 +36,7 @@ use crate::config::{CONFIG, OPTIONS};
 use crate::database::DBCon;
 use crate::{closing, config};
 
+mod input;
 mod main_window;
 mod tabs;
 mod thumbnailer;
@@ -234,7 +235,7 @@ impl Gui {
 
     fn setup(self: &Rc<Self>) {
         self.tabs.borrow_mut().setup();
-        // self.setup_interaction();
+        self.setup_interaction();
 
 
         // let g = self.clone();
@@ -308,17 +309,21 @@ impl Gui {
                 // // g.tabs.borrow_mut().apply_snapshot(snap);
             }
             Update(update) => {
-                self.tabs.borrow_mut().handle_update(update);
+                self.tabs.borrow_mut().update(update);
             }
             DirectoryOpenError(path, error) => {
                 // This is a special case where we failed to open a directory or read it at all.
                 // Treat it as if it were closed.
                 self.convey_error(error);
                 error!("Treating {path:?} as closed");
+                self.tabs.borrow_mut().directory_failure(path);
             }
             DirectoryError(path, error) => {
                 // Some other error that isn't as fatal.
                 todo!()
+            }
+            ConveyError(error) => {
+                self.convey_error(error);
             }
             Quit => {
                 self.window.close();
@@ -341,6 +346,7 @@ impl Gui {
     }
 
     fn convey_error(&self, msg: String) {
-        error!("Unimplemented convey_error");
+        self.window.imp().toast.set_text(&msg);
+        self.window.imp().toast.set_visible(true);
     }
 }

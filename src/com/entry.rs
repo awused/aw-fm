@@ -69,15 +69,10 @@ impl fmt::Debug for FileTime {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
-    File {
-        size: u64,
-    },
-    Directory {
-        contents: u64,
-    },
-    #[default]
+    File { size: u64 },
+    Directory { contents: u64 },
     Uninitialized, // Broken {}
 }
 
@@ -264,13 +259,12 @@ mod internal {
     use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassExt};
     use once_cell::sync::Lazy;
 
-    use super::Thumbnail;
+    use super::{Thumbnail, ALL_ENTRY_OBJECTS};
     use crate::com::EntryKind;
 
     #[derive(Debug)]
     struct Entry {
         entry: super::Entry,
-        // icon: Icon,
         thumbnail: Thumbnail,
     }
 
@@ -291,8 +285,19 @@ mod internal {
                 Lazy::new(|| vec![Signal::builder("update").build()]);
             SIGNALS.as_ref()
         }
+
+        fn dispose(&self) {
+            // Too spammy
+            // trace!("EntryObject disposed");
+            let path = &self.get().abs_path;
+            // Could check the load factor and shrink the map.
+            // dispose can, technically, be called multiple times, so unsafe to assert here.
+            ALL_ENTRY_OBJECTS.with(|m| m.borrow_mut().remove(path));
+        }
     }
 
+    // Might be worth redoing this and moving more logic down into EntryObject.
+    // These should not be Entry methods since they don't make sense for a bare Entry.
     impl EntryWrapper {
         pub(super) fn init(&self, entry: super::Entry) {
             let thumbnail = match entry.kind {
@@ -520,19 +525,5 @@ impl EntryObject {
 
     pub fn icon(&self) -> Icon {
         Icon::deserialize(&self.get().icon).unwrap()
-    }
-
-    // Called when this object should be destroyed and we want to remove it.
-    // Should only be called once when an item is fully removed from all ListStores.
-    pub fn destroy_weak(self) {
-        // Ref count is no longer definitely 1 since the tiles can have a reference for signals
-        // If it's more than what a single tab could use (currently 4 + 1 for this ref), log a
-        // message.
-        if self.ref_count() > 5 {
-            // This doesn't necessarily represent a leak.
-            info!("Removed an EntryObject but its strong count was {}", self.ref_count())
-        }
-        let weak = ALL_ENTRY_OBJECTS.with(|m| m.borrow_mut().remove(&self.get().abs_path).unwrap());
-        drop(self);
     }
 }

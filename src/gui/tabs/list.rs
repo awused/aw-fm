@@ -1,7 +1,8 @@
 use std::env::current_dir;
 use std::num::NonZeroU64;
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use gtk::gdk::RGBA;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -13,6 +14,7 @@ use super::{Tab, TabId};
 use crate::com::{DirSnapshot, DisplayMode, EntryObjectSnapshot, SortSettings, Update};
 use crate::config::OPTIONS;
 use crate::gui::main_window::MainWindow;
+use crate::gui::tabs::id::next_id;
 
 // mod tab_element;
 
@@ -28,8 +30,6 @@ const PANE_COLOURS: [RGBA; MAX_PANES] = [RGBA::BLUE, RGBA::GREEN, RGBA::RED];
 #[derive(Debug)]
 pub struct TabsList {
     tabs: Vec<Tab>,
-    // active: usize,
-    next_id: NonZeroU64,
 
     //tabs_store: gio::ListStore,
     tabs_container: gtk::ListView,
@@ -40,7 +40,7 @@ impl TabsList {
     pub fn new(window: &MainWindow) -> Self {
         Self {
             tabs: Vec::new(),
-            next_id: NonZeroU64::new(1).unwrap(),
+
             tabs_container: window.imp().tabs.clone(),
             pane_container: window.imp().panes.clone(),
         }
@@ -48,7 +48,6 @@ impl TabsList {
 
     pub fn setup(&mut self) {
         assert!(self.tabs.is_empty());
-        assert_eq!(self.next_id.get(), 1);
 
         let mut path = OPTIONS
             .file_name
@@ -65,7 +64,7 @@ impl TabsList {
 
         let first_tab_element = ();
 
-        self.tabs.push(Tab::new(TabId(0), path, first_tab_element, &[]));
+        self.tabs.push(Tab::new(next_id(), path, first_tab_element, &[]));
         self.tabs[0].load(&mut [], &mut []);
         self.tabs[0].display(&self.pane_container);
     }
@@ -107,18 +106,17 @@ impl TabsList {
         }
     }
 
-    pub fn handle_update(&mut self, update: Update) {
+    pub fn update(&mut self, update: Update) {
         // Handle the case where a tab's directory is deleted out from underneath it.
         // This is handled immediately, even if the directory is still being loaded.
         if let Update::Removed(path) = &update {
-            let last_index = None;
-
-            #[allow(clippy::never_loop)]
-            // Technically could do better, but unlikely to ever matter.
-            while let Some(index) = self.tabs.iter().position(|t| t.check_directory_deleted(path)) {
-                assert_ne!(Some(index), last_index); // Should never happen
-                error!("TODO -- handle directory deletion");
-                break;
+            let mut i = 0;
+            while let Some(j) =
+                self.tabs.iter().skip(i).position(|t| t.check_directory_deleted(path))
+            {
+                i += j;
+                let (left, tab, right) = self.split_around_mut(i);
+                tab.handle_directory_deleted(left, right);
             }
         }
 
@@ -130,6 +128,16 @@ impl TabsList {
         tab.apply_update(right_tabs, update);
     }
 
+    // Unlike with update() above, we know this is going to be the same Arc<>
+    pub fn directory_failure(&mut self, path: Arc<Path>) {
+        let mut i = 0;
+        while let Some(j) = self.tabs.iter().skip(i).position(|t| t.matches_arc(&path)) {
+            i += j;
+            let (left, tab, right) = self.split_around_mut(i);
+            tab.handle_directory_deleted(left, right);
+        }
+    }
+
     fn navigate(&mut self, id: TabId) {
         let index = self.position(id).unwrap();
         let (left, tab, right) = self.split_around_mut(index);
@@ -137,18 +145,14 @@ impl TabsList {
     }
 
     fn clone_tab(&mut self, index: usize) {
-        let id = TabId(self.next_id.get());
-        self.next_id = self.next_id.checked_add(1).unwrap();
-        let mut new_tab = Tab::cloned(id, &self.tabs[index], ());
+        let mut new_tab = Tab::cloned(next_id(), &self.tabs[index], ());
 
         self.tabs.insert(index + 1, new_tab);
     }
 
     // For now, tabs always open right of the active tab
     fn open_tab(&mut self, path: PathBuf, active_tab: TabId) {
-        let id = TabId(self.next_id.get());
-        self.next_id = self.next_id.checked_add(1).unwrap();
-        let mut new_tab = Tab::new(id, path, (), &self.tabs);
+        let mut new_tab = Tab::new(next_id(), path, (), &self.tabs);
 
         self.tabs.insert(self.position(active_tab).unwrap() + 1, new_tab);
     }

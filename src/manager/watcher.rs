@@ -38,18 +38,21 @@ enum State {
 pub struct PendingUpdate(Instant, State);
 
 impl Manager {
-    pub(super) fn watch_dir(&mut self, path: &Path) {
+    pub(super) fn watch_dir(&mut self, path: &Arc<Path>) -> bool {
         if let Err(e) = self.watcher.watch(path, NonRecursive) {
             // Treat like the directory was removed.
             // The tab only opened to this directory because it was a directory very recently.
-            todo!()
+            error!("Failed to open directory {path:?}: {e}");
+            self.gui_sender.send(GuiAction::DirectoryOpenError(path.clone(), e.to_string()));
+            false
+        } else {
+            true
         }
     }
 
     pub(super) fn unwatch_dir(&mut self, path: &Path) {
         if let Err(e) = self.watcher.unwatch(path) {
-            // ?????
-            todo!()
+            warn!("Failed to unwatch {path:?}, removed or never started");
         }
     }
 
@@ -57,14 +60,23 @@ impl Manager {
         match Entry::new(path) {
             Ok(entry) => Self::send_gui(gui_sender, GuiAction::Update(Update::Entry(entry))),
             Err((path, e)) => {
-                error!("Error handling file update {path:?}: {e:?}");
-                // todo!();
+                error!("Error handling file update {path:?}, assuming it was removed: {e:?}");
+                // For now, don't convey this error.
             }
         }
     }
 
-    pub(super) fn handle_event(&mut self, event: Event) {
+    pub(super) fn handle_event(&mut self, event: notify::Result<Event>) {
         use notify::EventKind::*;
+
+        let event = match event {
+            Ok(ev) => ev,
+            Err(e) => {
+                let e = format!("Error in notify watcher {e}");
+                error!("{e}");
+                return Self::send_gui(&self.gui_sender, GuiAction::ConveyError(e));
+            }
+        };
 
         match event.kind {
             // Access events are worthless

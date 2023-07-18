@@ -30,34 +30,8 @@ use crate::natsort::ParsedString;
 mod list;
 mod pane;
 
+use id::TabId;
 pub(super) use list::TabsList;
-
-// A unique identifier for tabs.
-// Options considered:
-//   Incrementing u64:
-//      + Easy implementation
-//      + Fast, no allocations
-//      - Can theoretically overflow
-//      - Uniqueness isn't statically guaranteed
-//      - Linear searching for tabs
-//   Rc<()>:
-//      + Easy implementation
-//      + Rc::ptr_eq is as fast as comparing u64
-//      + Tabs can create their own
-//      + Uniqueness is guaranteed provided tabs always construct their own
-//      - Wasted heap allocations
-//      - Linear searching for tabs
-//  Rc<Cell<index>>:
-//      + No need for linear searching to find tabs
-//      + Rc::ptr_eq is as fast as comparing u64
-//      + Uniqueness is guaranteed
-//      - Most complicated implementation. Must be manually kept up-to-date.
-//      - If the index is ever wrong, weird bugs can happen
-//      - Heap allocation
-//  UUIDs:
-//      - Not really better than a bare u64
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub struct TabId(u64);
 
 
 /* This efficiently supports multiple tabs being open to the same directory with different
@@ -169,16 +143,11 @@ impl Default for Contents {
     }
 }
 
-impl Clone for Contents {
-    fn clone(&self) -> Self {
-        let list = ListStore::new(EntryObject::static_type());
-        let selection = MultiSelection::new(Some(list.clone()));
+impl Contents {
+    fn clone_from(&mut self, source: &Self) {
+        self.list.remove_all();
 
-        for item in &self.list {
-            list.append(&item.unwrap());
-        }
-
-        Self { list, selection }
+        self.list.extend(source.list.iter::<EntryObject>().flatten())
     }
 }
 
@@ -194,6 +163,8 @@ struct SavedViewState {
 // Current limitations:
 // - Tabs cannot be unloaded, refreshed, or reopened while they're opening
 //   - Tabs can be closed while opening
+//   - Dropping this requirement isn't super hard but leaves room for bugs.
+//   - Likely to be too niche to really matter.
 // - All tabs open to the same directory are in the same TabState
 //   - Slightly increases memory usage over the absolute bare minimum.
 //
@@ -229,12 +200,16 @@ impl Tab {
         self.id
     }
 
-    fn matches(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.path, &other.path)
+    fn matches_arc(&self, other: &Arc<Path>) -> bool {
+        Arc::ptr_eq(&self.path, &other)
     }
 
-    fn matching<'a>(&'a self, other: &'a mut [Self]) -> impl Iterator<Item = &mut Self> {
-        other.iter_mut().filter(|t| self.matches(t))
+    fn matching_mut<'a>(&'a self, other: &'a mut [Self]) -> impl Iterator<Item = &mut Self> {
+        other.iter_mut().filter(|t| self.matches_arc(&t.path))
+    }
+
+    fn matching<'a>(&'a self, other: &'a [Self]) -> impl Iterator<Item = &Self> {
+        other.iter().filter(|t| self.matches_arc(&t.path))
     }
 
     pub(super) fn new(id: TabId, path: PathBuf, element: (), existing_tabs: &[Self]) -> Self {
@@ -277,13 +252,15 @@ impl Tab {
     pub(super) fn cloned(id: TabId, source: &Self, element: ()) -> Self {
         // Assumes inactive tabs cannot be cloned.
         let view_state = source.take_view_snapshot();
+        let mut contents = Contents::default();
+        contents.clone_from(&source.contents);
 
         Self {
             id,
             path: source.path.clone(),
             settings: source.settings,
             dir_state: source.dir_state.clone(),
-            contents: source.contents.clone(),
+            contents,
             view_state,
             history: source.history.clone(),
             future: source.future.clone(),
@@ -292,22 +269,24 @@ impl Tab {
         }
     }
 
-    fn copy_from_donor(&mut self, left_tabs: &[Self], right_tabs: &[Self]) {
+    fn copy_from_donor(&mut self, left_tabs: &[Self], right_tabs: &[Self]) -> bool {
         for t in left_tabs.iter().chain(right_tabs) {
             // Check for value equality, not reference equality
             if *self.path == *t.path {
                 self.path = t.path.clone();
                 self.dir_state = t.dir_state.clone();
-                self.contents = t.contents.clone();
+                self.contents.clone_from(&t.contents);
 
                 let comparator = self.settings.sort.comparator();
                 self.contents.list.sort(comparator);
-                return;
+                return true;
             }
         }
+        false
     }
 
-    fn load(&mut self, left_tabs: &mut [Self], right_tabs: &mut [Self]) {
+    // Only make this take &mut [Self] if truly necessary
+    fn load(&mut self, left_tabs: &[Self], right_tabs: &[Self]) {
         let mut sb = self.dir_state.borrow_mut();
         let dstate = &mut *sb;
         match dstate {
@@ -339,11 +318,12 @@ impl Tab {
 
         match (&snap.kind, &*sb) {
             (_, DirState::Unloaded) => {
-                // TODO -- find some decent way of preventing two identical tabs from opening to
-                // the same directory at once.
+                // This should never happen. Maybe unloading needs to forcibly change the Arc out
+                // for a new one.
                 unreachable!("Received {:?} snapshot for an unloaded tab", snap.kind);
             }
             (_, DirState::Loaded(_)) => {
+                // This should never happen while loading/reloading.
                 unreachable!("Received {:?} snapshot for loaded tab.", snap.kind);
             }
             (Complete | Start | Middle | End, DirState::Loading { .. }) => true,
@@ -394,34 +374,37 @@ impl Tab {
 
         // The actual tab order doesn't matter here, so long as it's applied to every matching tab.
         // Avoid one clone by doing the other tabs first.
-        self.matching(right_tabs).for_each(|t| t.apply_obj_snapshot(snap.clone()));
+        self.matching_mut(right_tabs).for_each(|t| t.apply_obj_snapshot(snap.clone()));
 
         let snap_kind = snap.id.kind;
 
         self.apply_obj_snapshot(snap);
 
         // If we're finished, update all tabs to reflect this.
-        if snap_kind.finished() {
-            let mut sb = self.dir_state.borrow_mut();
-            let updates = match std::mem::take(&mut *sb) {
-                DirState::Unloaded | DirState::Loaded(_) => unreachable!(),
-                DirState::Loading { watch, pending_updates } => {
-                    *sb = DirState::Loaded(watch);
-                    pending_updates
-                }
-            };
-
-            drop(sb);
-
-            for u in updates {
-                self.apply_update(right_tabs, u);
-            }
-
-            self.start_apply_view_state();
-            self.matching(right_tabs).for_each(Self::start_apply_view_state);
-            // TODO -- stop showing spinners.
-            info!("Finished loading {:?}", self.path);
+        if !snap_kind.finished() {
+            // Not completed, no changes to dir loading state.
+            return;
         }
+
+        let mut sb = self.dir_state.borrow_mut();
+        let updates = match std::mem::take(&mut *sb) {
+            DirState::Unloaded | DirState::Loaded(_) => unreachable!(),
+            DirState::Loading { watch, pending_updates } => {
+                *sb = DirState::Loaded(watch);
+                pending_updates
+            }
+        };
+
+        drop(sb);
+
+        for u in updates {
+            self.apply_update(right_tabs, u);
+        }
+
+        self.start_apply_view_state();
+        self.matching_mut(right_tabs).for_each(Self::start_apply_view_state);
+        // TODO -- stop showing spinners.
+        info!("Finished loading {:?}", self.path);
     }
 
     fn matches_update(&self, ev: &Update) -> bool {
@@ -562,46 +545,64 @@ impl Tab {
         };
 
 
-        for t in self.matching(right_tabs) {
+        for t in self.matching_mut(right_tabs) {
             t.finish_update(&partial);
         }
+    }
 
-        if let PartiallyAppliedUpdate::Delete(obj) = partial {
-            obj.destroy_weak();
-        }
+    fn check_directory_deleted(&self, removed: &Path) -> bool {
+        removed == &*self.path
     }
 
     // Need to handle this to avoid the case where a directory is "Loaded" but no watcher is
     // listening for events.
     // Even if the directory is recreated, the watcher won't work.
-    fn check_directory_deleted(&self, removed: &Path) -> bool {
-        removed == &*self.path
-    }
-
     fn handle_directory_deleted(&mut self, left_tabs: &[Self], right_tabs: &[Self]) {
         let cur_path = self.path.clone();
         let mut path = &*cur_path;
         while !path.exists() || !path.is_dir() {
             path = path.parent().unwrap()
         }
-        self.navigate(left_tabs, right_tabs, path);
+
+        self.change_location(left_tabs, right_tabs, path);
     }
 
     fn update_sort(&mut self, sort: SortSettings) {
         self.settings.sort = sort;
         self.contents.list.sort(self.settings.sort.comparator());
-        self.pane.as_mut().unwrap().update_sort(sort);
-        // TODO -- update database
+        self.pane.as_mut().unwrap().update_settings(self.settings);
+        self.save_settings();
     }
 
     fn update_display_mode(&mut self, mode: DisplayMode) {
         self.settings.display_mode = mode;
-        self.pane.as_mut().unwrap().update_mode(self.settings);
-        // TODO -- update database
+        self.pane.as_mut().unwrap().update_settings(self.settings);
+        self.save_settings();
+    }
+
+    fn change_location(&mut self, left_tabs: &[Self], right_tabs: &[Self], target: &Path) {
+        self.view_state = None;
+
+        self.path = target.into();
+
+        if !self.copy_from_donor(left_tabs, right_tabs) {
+            // We couldn't find any state to steal, so we know we're the only matching tab.
+
+            self.dir_state.replace(DirState::Unloaded);
+            self.settings = GUI.with(|g| g.get().unwrap().database.get(&self.path));
+            self.contents.list.remove_all();
+        }
+
+        if let Some(pane) = &mut self.pane {
+            pane.update_location(&self.path, self.settings);
+            self.load(left_tabs, right_tabs);
+        }
     }
 
     fn navigate(&mut self, left_tabs: &[Self], right_tabs: &[Self], target: &Path) {
         info!("Navigating from {:?} to {:?}", self.path, target);
+
+        // self.take_view_snapshot()
         // Look for another matching tab and steal its state.
         // Only if that fails do we open a new watcher.
         // todo!()
@@ -695,5 +696,55 @@ impl Tab {
         let view_state = self.view_state.take().unwrap_or_default();
 
         pane.apply_view_state(view_state);
+    }
+
+    fn save_settings(&self) {
+        GUI.with(|g| {
+            g.get().unwrap().database.store(&self.path, self.settings);
+        });
+    }
+}
+
+
+mod id {
+    use std::cell::Cell;
+
+    thread_local! {
+        static NEXT_ID: Cell<u64> = Cell::new(0);
+    }
+
+    // A unique identifier for tabs.
+    // Options considered:
+    //   Incrementing u64:
+    //      + Easy implementation
+    //      + Fast, no allocations
+    //      - Can theoretically overflow
+    //      - Uniqueness isn't statically guaranteed
+    //      - Linear searching for tabs
+    //   Rc<()>:
+    //      + Easy implementation
+    //      + Rc::ptr_eq is as fast as comparing u64
+    //      + Tabs can create their own
+    //      + Uniqueness is guaranteed provided tabs always construct their own
+    //      - Wasted heap allocations
+    //      - Linear searching for tabs
+    //  Rc<Cell<index>>:
+    //      + No need for linear searching to find tabs
+    //      + Rc::ptr_eq is as fast as comparing u64
+    //      + Uniqueness is guaranteed
+    //      - Most complicated implementation. Must be manually kept up-to-date.
+    //      - If the index is ever wrong, weird bugs can happen
+    //      - Heap allocation
+    //  UUIDs:
+    //      - Not really better than a bare u64
+    #[derive(Debug, Eq, PartialEq, Clone, Copy)]
+    pub struct TabId(u64);
+
+    pub fn next_id() -> TabId {
+        TabId(NEXT_ID.with(|n| {
+            let o = n.get();
+            n.set(o + 1);
+            o
+        }))
     }
 }

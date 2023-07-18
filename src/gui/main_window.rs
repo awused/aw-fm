@@ -57,10 +57,9 @@ mod imp {
         pub panes: TemplateChild<gtk::Box>,
 
         #[template_child]
-        pub toast: TemplateChild<gtk::Button>,
-
-        #[template_child]
-        pub error_message: TemplateChild<gtk::Label>,
+        pub toast: TemplateChild<gtk::Label>,
+        // #[template_child]
+        // pub error_message: TemplateChild<gtk::Label>,
     }
 
     #[glib::object_subclass]

@@ -1,11 +1,12 @@
 use std::fmt::Write;
+use std::path::Path;
 use std::time::Instant;
 
 use gtk::gio::ListStore;
 use gtk::glib::SignalHandlerId;
 use gtk::prelude::{Cast, ListModelExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{AdjustmentExt, BoxExt, SelectionModelExt, WidgetExt};
+use gtk::traits::{AdjustmentExt, BoxExt, EditableExt, SelectionModelExt, WidgetExt};
 use gtk::{
     Bitset, ColumnView, GridView, ListView, MultiSelection, Orientation, ScrolledWindow, Widget,
 };
@@ -23,14 +24,30 @@ mod icon_view;
 #[derive(Debug)]
 enum Contents {
     Icons(IconView),
-    // Icons(ListView),
     Details(DetailsView),
+}
+
+impl Contents {
+    fn matches(&self, mode: DisplayMode) -> bool {
+        match (self, mode) {
+            (Contents::Icons(_), DisplayMode::Icons)
+            | (Contents::Details(_), DisplayMode::List) => true,
+            (Contents::Icons(_), DisplayMode::List)
+            | (Contents::Details(_), DisplayMode::Icons) => false,
+        }
+    }
+
+    fn update_settings(&self, settings: DirSettings) {
+        match self {
+            Contents::Icons(_) => (),
+            Contents::Details(details) => details.update_sort(settings.sort),
+        }
+    }
 }
 
 
 #[derive(Debug)]
 pub(super) struct Pane {
-    // TODO -- change to "GOTO" when edited, hit escape -> reset
     contents: Contents,
 
     element: PaneElement,
@@ -53,8 +70,6 @@ impl Drop for Pane {
 impl Pane {
     pub(super) fn new(tab: &Tab) -> Self {
         debug!("Creating {:?} pane for {:?}: {:?}", tab.settings.display_mode, tab.id, tab.path);
-        let scroller = ScrolledWindow::new();
-
 
         let (element, signals) = PaneElement::new(tab);
 
@@ -93,14 +108,12 @@ impl Pane {
         }
     }
 
-    pub(super) fn update_sort(&self, sort: SortSettings) {
-        match &self.contents {
-            Contents::Icons(_) => {}
-            Contents::Details(details) => details.update_sort(sort),
+    pub(super) fn update_settings(&mut self, settings: DirSettings) {
+        if self.contents.matches(settings.display_mode) {
+            self.contents.update_settings(settings);
+            return;
         }
-    }
 
-    pub(super) fn update_mode(&mut self, settings: DirSettings) {
         self.contents = match settings.display_mode {
             DisplayMode::Icons => Contents::Icons(IconView::new(
                 &self.element.imp().scroller,
@@ -123,5 +136,10 @@ impl Pane {
     // Most view state code should be moved here.
     pub(super) fn workaround_scroller(&self) -> &ScrolledWindow {
         &self.element.imp().scroller
+    }
+
+    pub(super) fn update_location(&mut self, path: &Path, settings: DirSettings) {
+        self.update_settings(settings);
+        self.element.imp().location.set_text(&path.to_string_lossy());
     }
 }

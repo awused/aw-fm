@@ -49,11 +49,13 @@ struct Manager {
 
     // If there are pending mutations, we wait to clear and process them.
     // If the boolean is true, there was a second event we debounced.
+    //
+    // TODO -- a vector of tuples is likely faster here unless N gets unreasonably huge.
     recent_mutations: AHashMap<Arc<Path>, PendingUpdate>,
     next_tick: Option<Instant>,
 
     watcher: RecommendedWatcher,
-    notify_receiver: UnboundedReceiver<Event>,
+    notify_receiver: UnboundedReceiver<notify::Result<Event>>,
 }
 
 pub fn run(
@@ -99,12 +101,14 @@ impl Manager {
         let (sender, notify_receiver) = tokio::sync::mpsc::unbounded_channel();
 
         let watcher = notify::recommended_watcher(move |res| {
-            let event = match res {
-                Ok(event) => event,
-                Err(e) => todo!(),
-            };
+            // let event = match res {
+            //     Ok(event) => event,
+            //     Err(e) => {
+            //         error!("Error in file system watcher: {e}");
+            //     }
+            // };
 
-            if let Err(e) = sender.send(event) {
+            if let Err(e) = sender.send(res) {
                 if !closing::closed() {
                     error!("Error sending from notify watcher: {e}");
                 }
@@ -177,61 +181,61 @@ impl Manager {
             //     || scan_work
             //     || delay_downscale);
 
-            let mut idle = false;
+            // let mut idle = false;
 
-            'idle: loop {
-                select! {
-                    biased;
-                    _ = closing::closed_fut() => break 'main,
-                    mtg = receiver.recv() => {
-                        let Some((mtg, context, r)) = mtg else {
-                            error!("Received nothing from gui thread. This should never happen");
-                            closing::close();
-                            break 'main;
-                        };
-                        self.action_context = context;
-                        self.handle_action(mtg, r);
-                    }
-                    ev = self.notify_receiver.recv() => {
-                        let Some(ev) = ev else {
-                            error!("Received nothing from notify watcher. This should never happen");
-                            closing::close();
-                            break 'main;
-                        };
-                        self.handle_event(ev);
-                    }
-                    _ = async { sleep_until(self.next_tick.unwrap()).await },
-                            if self.next_tick.is_some() => {
-                        self.handle_pending_updates();
-                    }
-                    // _ = self.do_work(Current, true), if current_work => {},
-                    // comp = self.do_work(Finalize, current_work), if final_work =>
-                    //     self.handle_completion(comp, self.finalize.clone().unwrap()),
-                    // comp = self.do_work(Downscale, current_work), if downscale_work =>
-                    //     self.handle_completion(comp, self.downscale.clone().unwrap()),
-                    // comp = self.do_work(Load, current_work), if load_work =>
-                    //     self.handle_completion(comp, self.load.clone().unwrap()),
-                    // comp = self.do_work(Upscale, current_work), if upscale_work =>
-                    //     self.handle_completion(comp, self.upscale.clone().unwrap()),
-                    // _ = self.do_work(Scan, current_work), if scan_work => {},
-                    // _ = self.downscale_delay.wait_delay(), if delay_downscale => {
-                    //     self.downscale_delay.clear();
-                    // },
-                    // TODO -- move this to the GUI thread and have it drive unloading stuff
-                    _ = idle_sleep(), if no_work && !idle && CONFIG.idle_timeout.is_some() => {
-                        idle = true;
-                        debug!("Entering idle mode.");
-                        self.idle_unload();
-                        continue 'idle;
-                    }
-                };
-
-                if idle {
-                    error!("todo -- idle end")
+            // 'idle: loop {
+            select! {
+                biased;
+                _ = closing::closed_fut() => break 'main,
+                mtg = receiver.recv() => {
+                    let Some((mtg, context, r)) = mtg else {
+                        error!("Received nothing from gui thread. This should never happen");
+                        closing::close();
+                        break 'main;
+                    };
+                    self.action_context = context;
+                    self.handle_action(mtg, r);
                 }
+                ev = self.notify_receiver.recv() => {
+                    let Some(ev) = ev else {
+                        error!("Received nothing from notify watcher. This should never happen");
+                        closing::close();
+                        break 'main;
+                    };
+                    self.handle_event(ev);
+                }
+                _ = async { sleep_until(self.next_tick.unwrap()).await },
+                        if self.next_tick.is_some() => {
+                    self.handle_pending_updates();
+                }
+                // _ = self.do_work(Current, true), if current_work => {},
+                // comp = self.do_work(Finalize, current_work), if final_work =>
+                //     self.handle_completion(comp, self.finalize.clone().unwrap()),
+                // comp = self.do_work(Downscale, current_work), if downscale_work =>
+                //     self.handle_completion(comp, self.downscale.clone().unwrap()),
+                // comp = self.do_work(Load, current_work), if load_work =>
+                //     self.handle_completion(comp, self.load.clone().unwrap()),
+                // comp = self.do_work(Upscale, current_work), if upscale_work =>
+                //     self.handle_completion(comp, self.upscale.clone().unwrap()),
+                // _ = self.do_work(Scan, current_work), if scan_work => {},
+                // _ = self.downscale_delay.wait_delay(), if delay_downscale => {
+                //     self.downscale_delay.clear();
+                // },
+                // TODO -- move this to the GUI thread and have it drive unloading stuff
+                // _ = idle_sleep(), if no_work && !idle && CONFIG.idle_timeout.is_some() => {
+                //     idle = true;
+                //     debug!("Entering idle mode.");
+                //     self.idle_unload();
+                //     continue 'idle;
+                // }
+            };
 
-                break 'idle;
-            }
+            // if idle {
+            //     error!("todo -- idle end")
+            // }
+            //
+            // break 'idle;
+            // }
         }
 
         closing::close();
@@ -246,8 +250,9 @@ impl Manager {
 
         match ma {
             Open(path) => {
-                self.watch_dir(&path);
-                self.start_read_dir(path);
+                if self.watch_dir(&path) {
+                    self.start_read_dir(path);
+                }
             }
             Refresh(path) => self.start_read_dir(path),
             Close(path) => self.unwatch_dir(&path),

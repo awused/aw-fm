@@ -76,6 +76,13 @@ enum ReadResult {
     Entry(Entry),
 }
 
+enum AsyncResult {
+    Done,
+    Failed,
+    Incomplete,
+}
+
+
 pub const fn full_snap(path: Arc<Path>, entries: Vec<Entry>) -> GuiAction {
     GuiAction::Snapshot(DirSnapshot::new(SnapshotKind::Complete, path, entries))
 }
@@ -152,7 +159,7 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
     select! {
         biased;
         _ = closing::closed_fut() => drop(receiver),
-        _ = async {
+        success = async {
             while let Some(r) = receiver.recv().await {
                 match r {
                     ReadResult::Entry(ent) => {
@@ -165,7 +172,7 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
                                 error!("{e}");
                             }
                         }
-                        return;
+                        return false;
                     }
                     ReadResult::DirError(e) => {
                         todo!()
@@ -175,7 +182,12 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
                     }
                 }
             }
+            true
         } => {
+            if !success {
+                return;
+            }
+
             trace!("Fast directory completed in {:?} with {} entries", start.elapsed(), entries.len());
             // Send off a full snapshot
             if let Err(e) = gui_sender.send(full_snap(path.clone(), entries)) {
@@ -200,9 +212,15 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
         }
     };
 
-    // Technically this blocks, but it's more a formality by this point
-    h.await.unwrap();
-    debug!("Done reading directory {:?} in {:?}", path, start.elapsed());
+    // Technically this blocks, but it's more a formality by this point. Still want to wait so we
+    // can be sure it has been cleaned up.
+    let finished = h.await.is_ok();
+    debug!(
+        "Done reading directory {:?} in {:?}. finished: {}",
+        path,
+        start.elapsed(),
+        finished
+    );
 }
 
 
@@ -219,6 +237,14 @@ async fn read_slow_dir(
     mut receiver: UnboundedReceiver<ReadResult>,
     gui_sender: glib::Sender<GuiAction>,
 ) {
+    #[derive(Eq, PartialEq)]
+    enum SlowBatch {
+        Completed,
+        Failed,
+        Incomplete,
+    }
+    use SlowBatch::*;
+
     let start = Instant::now();
     let mut batch_size = INITIAL_BATCH;
     let mut next_size = INITIAL_BATCH;
@@ -230,17 +256,17 @@ async fn read_slow_dir(
 
         select! {
             _ = closing::closed_fut() => return drop(receiver),
-            done = async {
+            status = async {
                 loop {
                     let Some(r) = receiver.recv().await else {
-                        break true;
+                        break Completed;
                     };
 
                     match r {
                         ReadResult::Entry(ent) => {
                             batch.push(ent);
                             if batch.len() >= batch_size {
-                                break false;
+                                break Incomplete;
                             }
                         }
                         ReadResult::DirUnreadable(e) => {
@@ -250,7 +276,7 @@ async fn read_slow_dir(
                                     error!("{e}");
                                 }
                             }
-                            break true;
+                            break Failed;
                         }
                         ReadResult::DirError(e) => {
                             todo!()
@@ -261,7 +287,7 @@ async fn read_slow_dir(
                     }
                 }
             } => {
-                if done {
+                if status == Completed {
                     #[cfg(feature = "debug-forced-slow")]
                     {
                         sleep_until(Instant::now() + BATCH_TIMEOUT).await;
@@ -280,6 +306,8 @@ async fn read_slow_dir(
                         }
                     }
 
+                    return
+                } else if status == Failed {
                     return
                 }
             }
@@ -317,12 +345,11 @@ async fn read_slow_dir(
                             false
                         }
                         Some(ReadResult::DirUnreadable(e)) => {
-                            if let Err(e) = gui_sender.send(
-                                GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
-                                if !closing::closed() {
-                                    error!("{e}");
-                                }
-                            }
+                            // By now, this case is unreachable.
+                            // It only triggers if the dir is completely unreadable.
+                            // Since we've loaded at least one item, that can no longer be the
+                            // case.
+                            error!("DirUnreadable despite reading it. {e}");
                             true
                         }
                         Some(ReadResult::DirError(e)) => {

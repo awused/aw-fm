@@ -12,10 +12,13 @@
         <child>
           <object class="GtkBox">
             <property name="orientation">horizontal</property>
+              <property name="spacing">0</property>
 
             <child>
               <object class="GtkBox">
                 <property name="orientation">vertical</property>
+                <property name="spacing">0</property>
+
                 <style>
                   <class name="left-bar"/>
                 </style>
@@ -25,6 +28,7 @@
             <child>
               <object class="GtkBox">
                 <property name="orientation">vertical</property>
+                <property name="spacing">0</property>
 
 
                 <child>
@@ -40,6 +44,7 @@
                 <child>
                   <object class="GtkBox" id="panes">
                     <property name="orientation">horizontal</property>
+                    <property name="spacing">0</property>
                     <property name="hexpand">true</property>
                     <property name="vexpand">true</property>
                     <style>
@@ -56,21 +61,37 @@
         </child> <!-- horizontal box -->
 
 
-        <child type="overlay">
-          <object class="GtkButton" id="toast">
-            <property name="visible">false</property>
-            <style>
-              <class name="error-toast"/>
-            </style>
+        <!-- hit a crash with a misaligned button, I don't trust it with huge text -->
+        <!-- <child type="overlay"> -->
+        <!--   <object class="GtkButton" id="toast"> -->
+        <!--     <property name="visible">false</property> -->
+        <!--     <property name="halign">start</property> -->
+        <!--     <property name="halign">end</property> -->
+        <!--  -->
+        <!--  -->
+        <!--     <child> -->
+        <!--       <object class="GtkLabel" id="error_message"> -->
+        <!--         <property name="wrap">true</property> -->
+        <!--         <property name="wrap-mode">PANGO_WRAP_CHAR</property> -->
+        <!--       </object> -->
+        <!--     </child> -->
+        <!--   </object> -->
+        <!-- </child> &#60;&#33;&#45;&#45; toast overlay &#45;&#45;&#62; -->
+        <!--  -->
 
-            <child>
-              <object class="GtkLabel" id="error_message">
-                <property name="wrap">true</property>
-                <property name="wrap-mode">PANGO_WRAP_CHAR</property>
-              </object>
-            </child>
+        <child type="overlay">
+          <object class="GtkLabel" id="toast">
+            <property name="visible">false</property>
+            <property name="halign">start</property>
+            <property name="valign">end</property>
+            <property name="wrap">true</property>
+            <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
+
+            <style>
+              <class name="toast"/>
+            </style>
           </object>
-        </child> <!-- toast overlay -->
+        </child>
 
       </object>
     </child>

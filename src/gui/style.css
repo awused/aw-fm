@@ -1,6 +1,5 @@
 .bottom-bar {
-  padding: 0px 40px;
-  min-height: 44px;
+  padding: 0px 8px;
 }
 
 /* This is an unfortunate hack due to https://gitlab.gnome.org/GNOME/gtk/-/issues/4184 */
@@ -8,6 +7,11 @@
   opacity: 0;
 }
 
+.toast {
+  color: white;
+  background: black;
+  padding: 16px 24px;
+}
 
 header>button {
   background: none;

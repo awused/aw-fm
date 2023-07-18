@@ -16,6 +16,173 @@ use crate::config::CONFIG;
 #[derive(Debug)]
 pub struct DBCon(RefCell<Option<Connection>>);
 
+impl DBCon {
+    // If we fail to connect, just panic and die.
+    // Some operations later might be allowed to fail (DB deleted underneath us?) but not
+    // creation/connection.
+    pub fn connect() -> Self {
+        let start = Instant::now();
+        let path = CONFIG
+            .database
+            .clone()
+            .unwrap_or_else(|| data_dir().unwrap().join("aw-fm").join("settings.db"));
+
+        // For testing, destroy DB each time
+        if path.is_file() {
+            error!("Removing existing DB for testing purposes");
+            std::fs::remove_file(&path).unwrap();
+        }
+
+        info!("Attempting to open database in {path:?}");
+        if !path.exists() {
+            info!("Directory {path:?} does not exist, attempting to create it.");
+            let dir = path.parent().unwrap();
+            assert!(!dir.exists() || dir.is_dir(), "{dir:?} exists and is not a directory");
+
+            std::fs::create_dir_all(dir).unwrap_or_else(|e| {
+                &format!("Failed to create parent directory {dir:?} for database: {e}");
+            });
+        } else if !path.is_file() {
+            panic!("Database {path:?} exists but is not a file.");
+        }
+
+        let mut con = Connection::open(path).unwrap();
+
+        con.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        update_to_current(&mut con);
+
+        trace!("Opened database in {:?}", start.elapsed());
+
+        Self(Some(con).into())
+    }
+
+    pub fn destroy(&self) {
+        debug!("Tearing down database connection");
+        self.0.borrow_mut().take().unwrap().close().unwrap();
+    }
+
+    pub fn get(&self, path: &Path) -> DirSettings {
+        let start = Instant::now();
+
+        let b = self.0.borrow();
+        let con = b.as_ref().unwrap();
+
+        let settings = con
+            .query_row(
+                "SELECT display_mode, sort_mode, sort_direction FROM dir_settings WHERE PATH = ?",
+                [path.as_os_str().as_bytes()],
+                |row| {
+                    Ok(DirSettings {
+                        display_mode: row.get(0)?,
+                        sort: SortSettings {
+                            mode: row.get(1)?,
+                            direction: row.get(2)?,
+                        },
+                    })
+                },
+            )
+            .unwrap_or_else(|e| {
+                if e == rusqlite::Error::QueryReturnedNoRows {
+                    trace!("No saved settings for {path:?}");
+                } else {
+                    error!("Error reading saved settings for {path:?}: {e}");
+                }
+                DirSettings::default()
+            });
+
+        trace!("Fetched settings for {path:?} in {:?}", start.elapsed());
+        settings
+    }
+
+    pub fn store(&self, path: &Path, settings: DirSettings) {
+        let start = Instant::now();
+
+        let b = self.0.borrow();
+        let con = b.as_ref().unwrap();
+
+        if settings == DirSettings::default() {
+            con.execute("DELETE FROM dir_settings WHERE path = ?;", [path.as_os_str().as_bytes()])
+                .unwrap_or_else(|e| {
+                    error!("Error clearing directory settings for {path:?} to DB: {e}");
+                    0
+                });
+            trace!("Reset settings for path {path:?} in {:?}", start.elapsed());
+            return;
+        }
+
+        con.execute(
+            r#"
+INSERT OR REPLACE INTO
+    dir_settings(path, display_mode, sort_mode, sort_direction)
+VALUES
+    (?, ?, ?, ?);"#,
+            params![
+                path.as_os_str().as_bytes(),
+                settings.display_mode,
+                settings.sort.mode,
+                settings.sort.direction,
+            ],
+        )
+        .unwrap_or_else(|e| {
+            error!("Error writing directory settings for {path:?} to DB: {e}");
+            0
+        });
+        trace!("Saved settings for path {path:?} in {:?}", start.elapsed());
+    }
+}
+
+
+// If this is needed for a lot more types, this can be done with a macro.
+impl ToSql for DisplayMode {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_ref().into())
+    }
+}
+
+impl FromSql for DisplayMode {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
+    }
+}
+
+impl ToSql for SortMode {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_ref().into())
+    }
+}
+
+impl FromSql for SortMode {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
+    }
+}
+
+impl ToSql for SortDir {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_ref().into())
+    }
+}
+
+impl FromSql for SortDir {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
+    }
+}
+
+impl ToSql for DisplayHidden {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_ref().into())
+    }
+}
+
+impl FromSql for DisplayHidden {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
+    }
+}
+
+
 fn get_version(con: &Connection) -> u32 {
     let r = con.query_row(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'metadata';",
@@ -79,164 +246,4 @@ CREATE TABLE dir_settings(
     PRIMARY KEY(path)
 );"#,
     );
-}
-
-impl DBCon {
-    // If we fail to connect, just panic and die.
-    // Some operations later might be allowed to fail (DB deleted underneath us?) but not
-    // creation/connection.
-    pub fn connect() -> Self {
-        let start = Instant::now();
-        let path = CONFIG
-            .database
-            .clone()
-            .unwrap_or_else(|| data_dir().unwrap().join("aw-fm").join("settings.db"));
-
-        // For testing, destroy DB each time
-        if path.is_file() {
-            error!("Removing existing DB for testing purposes");
-            std::fs::remove_file(&path).unwrap();
-        }
-
-        info!("Attempting to open database in {path:?}");
-        if !path.exists() {
-            info!("Directory {path:?} does not exist, attempting to create it.");
-            let dir = path.parent().unwrap();
-            assert!(!dir.exists() || dir.is_dir(), "{dir:?} exists and is not a directory");
-
-            std::fs::create_dir_all(dir).unwrap_or_else(|e| {
-                &format!("Failed to create parent directory {dir:?} for database: {e}");
-            });
-        } else if !path.is_file() {
-            panic!("Database {path:?} exists but is not a file.");
-        }
-
-        let mut con = Connection::open(path).unwrap();
-
-        con.pragma_update(None, "foreign_keys", "ON").unwrap();
-
-        update_to_current(&mut con);
-
-        trace!("Opened database in {:?}", start.elapsed());
-
-        Self(Some(con).into())
-    }
-
-    pub fn destroy(&self) {
-        debug!("Tearing down database connection");
-        self.0.borrow_mut().take().unwrap().close().unwrap();
-    }
-
-    pub fn get(&self, path: &Path) -> DirSettings {
-        trace!("Fetching settings for {path:?}");
-
-        let b = self.0.borrow();
-        let con = b.as_ref().unwrap();
-
-        con.query_row(
-            "SELECT display_mode, sort_mode, sort_direction FROM dir_settings WHERE PATH = ?",
-            [path.as_os_str().as_bytes()],
-            |row| {
-                Ok(DirSettings {
-                    display_mode: row.get(0)?,
-                    sort: SortSettings {
-                        mode: row.get(1)?,
-                        direction: row.get(2)?,
-                    },
-                })
-            },
-        )
-        .unwrap_or_else(|e| {
-            if e == rusqlite::Error::QueryReturnedNoRows {
-                trace!("No saved settings for {path:?}");
-            } else {
-                error!("Error reading saved settings for {path:?}: {e}");
-            }
-            DirSettings::default()
-        })
-    }
-
-    pub fn store(&self, path: &Path, settings: DirSettings) {
-        trace!("Storing settings for {path:?}");
-
-        let b = self.0.borrow();
-        let con = b.as_ref().unwrap();
-
-        if settings == DirSettings::default() {
-            con.execute("DELETE FROM dir_settings WHERE path = ?;", [path.as_os_str().as_bytes()])
-                .unwrap_or_else(|e| {
-                    error!("Error clearing directory settings for {path:?} to DB: {e}");
-                    0
-                });
-            return;
-        }
-
-        con.execute(
-            r#"
-INSERT OR REPLACE INTO
-    dir_settings(path, display_mode, sort_mode, sort_direction)
-VALUES
-    (?, ?, ?, ?);"#,
-            params![
-                path.as_os_str().as_bytes(),
-                settings.display_mode,
-                settings.sort.mode,
-                settings.sort.direction,
-            ],
-        )
-        .unwrap_or_else(|e| {
-            error!("Error writing directory settings for {path:?} to DB: {e}");
-            0
-        });
-    }
-}
-
-
-// If this is needed for a lot more types, this can be done with a macro.
-impl ToSql for DisplayMode {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(self.as_ref().into())
-    }
-}
-
-impl FromSql for DisplayMode {
-    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
-    }
-}
-
-impl ToSql for SortMode {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(self.as_ref().into())
-    }
-}
-
-impl FromSql for SortMode {
-    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
-    }
-}
-
-impl ToSql for SortDir {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(self.as_ref().into())
-    }
-}
-
-impl FromSql for SortDir {
-    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
-    }
-}
-
-impl ToSql for DisplayHidden {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(self.as_ref().into())
-    }
-}
-
-impl FromSql for DisplayHidden {
-    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
-    }
 }

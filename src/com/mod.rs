@@ -96,6 +96,8 @@ pub enum GuiAction {
     // PartialSnapshot(Start/Middle/End, Files)
     DirectoryOpenError(Arc<Path>, String),
     DirectoryError(Arc<Path>, String),
+    // Any generic error we want to convey to the user.
+    ConveyError(String),
     // EntryError(Arc<Path>, Error)
 
     // SearchSubscription,
