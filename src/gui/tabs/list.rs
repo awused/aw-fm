@@ -101,8 +101,8 @@ impl TabsList {
     pub fn apply_snapshot(&mut self, snap: DirSnapshot) {
         let first_match = self.tabs.iter().position(|t| t.matches_snapshot(&snap.id));
         if let Some(i) = first_match {
-            let (_, first_tab, right_tabs) = self.split_around_mut(i);
-            first_tab.apply_snapshot(right_tabs, snap);
+            let (left_tabs, first_tab, right_tabs) = self.split_around_mut(i);
+            first_tab.apply_snapshot(left_tabs, right_tabs, snap);
         }
     }
 
@@ -120,13 +120,32 @@ impl TabsList {
             }
         }
 
-        let Some(index) = self.tabs.iter().position(|t| t.matches_update(&update)) else {
-            return;
-        };
+        if let Some(index) = self.tabs.iter().position(|t| t.matches_update(&update)) {
+            let (left_tabs, tab, right_tabs) = self.split_around_mut(index);
+            tab.apply_update(left_tabs, right_tabs, update);
+        } else {
+            // TODO [search] handle search updates, which will be expensive but rare,
+            // and cheap when there is no search.
 
-        let (_, tab, right_tabs) = self.split_around_mut(index);
-        tab.apply_update(right_tabs, update);
+            for t in self.tabs.iter_mut() {
+                // No need to be super efficient, searching is rare
+                // t.apply_search_update(&update);
+            }
+            // let Some(index) = self.tabs.iter().position(|t| t.matches_search_update(&update))
+            // else {
+            //     return;
+            // };
+            // let (_, tab, right_tabs) = self.split_around_mut(index);
+            // tab.apply_search_update([], right_tabs, update);
+        };
     }
+
+    // Applies a search snapshot to its matching tab.
+    //
+    // This cannot cause updates to other tabs, but it can fail to update some EntryObjects with
+    // the newest versions if this snapshot has newer versions. To prevent races, flat tab
+    // snapshots always take priority.
+    // pub fn apply_search_snapshot(&mut self, snap: SearchSnapshot) {}
 
     // Unlike with update() above, we know this is going to be the same Arc<>
     pub fn directory_failure(&mut self, path: Arc<Path>) {

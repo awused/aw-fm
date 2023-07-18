@@ -59,6 +59,8 @@ struct PendingThumbs {
     // It's marginally more efficient (2-3 seconds worth over 100k items) to not clone and drop
     // these, also avoids doing manual math on the tickets.
     factories: Vec<SendFactory>,
+    // TODO -- Save a map lookup?
+    // ongoing: Vec<(Arc<Path>, WeakRef<EntryObject>)>,
 }
 
 
@@ -112,7 +114,6 @@ impl Thumbnailer {
 
     fn finish_thumbnail(factory: SendFactory, tex: Texture, path: Arc<Path>) {
         gtk::glib::idle_add_once(move || {
-            // If this isn't on the main thread, this will crash. No chance of UB.
             Self::done_with_ticket(factory);
 
             let Some(obj) = EntryObject::lookup(&path) else {

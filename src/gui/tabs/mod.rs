@@ -30,7 +30,7 @@ use crate::natsort::ParsedString;
 mod list;
 mod pane;
 
-use id::TabId;
+use id::{TabId, TabUid};
 pub(super) use list::TabsList;
 
 
@@ -159,6 +159,8 @@ struct SavedViewState {
     // Selected items?
 }
 
+#[derive(Debug)]
+struct Search();
 
 // Current limitations:
 // - Tabs cannot be unloaded, refreshed, or reopened while they're opening
@@ -178,7 +180,7 @@ struct SavedViewState {
 #[derive(Debug)]
 struct Tab {
     // displayed_path: PathBuf,
-    id: TabId,
+    id: TabUid,
     path: Arc<Path>,
     // visible: bool, -- whether the tab contents are currently visible -- only needed to support
     // paned views.
@@ -190,18 +192,23 @@ struct Tab {
     history: VecDeque<HistoryEntry>,
     future: Vec<HistoryEntry>,
     element: (),
+
     // Each tab can only be open in one pane at once.
     // In theory we could do many-to-many but it's too niche.
     pane: Option<Pane>,
+    // Searches do not share state with other searches and aren't copied.
+    // Each Search gets its own dedicated recursive notify watcher, if we care to listen for search
+    // updates.
+    search: Option<Search>,
 }
 
 impl Tab {
     const fn id(&self) -> TabId {
-        self.id
+        self.id.copy()
     }
 
     fn matches_arc(&self, other: &Arc<Path>) -> bool {
-        Arc::ptr_eq(&self.path, &other)
+        Arc::ptr_eq(&self.path, other)
     }
 
     fn matching_mut<'a>(&'a self, other: &'a mut [Self]) -> impl Iterator<Item = &mut Self> {
@@ -212,7 +219,7 @@ impl Tab {
         other.iter().filter(|t| self.matches_arc(&t.path))
     }
 
-    pub(super) fn new(id: TabId, path: PathBuf, element: (), existing_tabs: &[Self]) -> Self {
+    pub(super) fn new(id: TabUid, path: PathBuf, element: (), existing_tabs: &[Self]) -> Self {
         // Clean the path without resolving symlinks.
         let mut path = path.clean();
         if path.is_relative() {
@@ -242,6 +249,7 @@ impl Tab {
             future: Vec::new(),
             element,
             pane: None,
+            search: None,
         };
 
         t.copy_from_donor(existing_tabs, &[]);
@@ -249,7 +257,7 @@ impl Tab {
         t
     }
 
-    pub(super) fn cloned(id: TabId, source: &Self, element: ()) -> Self {
+    pub(super) fn cloned(id: TabUid, source: &Self, element: ()) -> Self {
         // Assumes inactive tabs cannot be cloned.
         let view_state = source.take_view_snapshot();
         let mut contents = Contents::default();
@@ -266,6 +274,7 @@ impl Tab {
             future: source.future.clone(),
             element,
             pane: None,
+            search: None,
         }
     }
 
@@ -355,6 +364,7 @@ impl Tab {
         self.contents.list.extend(snap.entries.into_iter());
         let start = Instant::now();
         self.contents.list.sort(self.settings.sort.comparator());
+        self.search_extend();
         println!("sort time {:?}", start.elapsed());
 
         // let a = self.contents.list.item(0).unwrap();
@@ -368,9 +378,17 @@ impl Tab {
         // });
     }
 
-    fn apply_snapshot(&mut self, right_tabs: &mut [Self], snap: DirSnapshot) {
+    // Returns true if we had any search updates. Expected to be rare, so that path isn't
+    // terribly efficient.
+    fn apply_snapshot(
+        &mut self,
+        left_tabs: &mut [Self],
+        right_tabs: &mut [Self],
+        snap: DirSnapshot,
+    ) {
         assert!(self.matches_snapshot(&snap.id));
         let snap: EntryObjectSnapshot = snap.into();
+        let force_search_sort = snap.had_search_updates;
 
         // The actual tab order doesn't matter here, so long as it's applied to every matching tab.
         // Avoid one clone by doing the other tabs first.
@@ -379,6 +397,15 @@ impl Tab {
         let snap_kind = snap.id.kind;
 
         self.apply_obj_snapshot(snap);
+
+        if force_search_sort {
+            // We just sorted this tab, and we sorted all matching tabs to the right.
+            left_tabs.iter_mut().for_each(Self::search_sort);
+            right_tabs
+                .iter_mut()
+                .filter(|t| !t.matches_arc(&self.path))
+                .for_each(Self::search_sort);
+        }
 
         // If we're finished, update all tabs to reflect this.
         if !snap_kind.finished() {
@@ -398,7 +425,7 @@ impl Tab {
         drop(sb);
 
         for u in updates {
-            self.apply_update(right_tabs, u);
+            self.apply_update(left_tabs, right_tabs, u);
         }
 
         self.start_apply_view_state();
@@ -489,7 +516,7 @@ impl Tab {
         }
     }
 
-    fn apply_update(&mut self, right_tabs: &mut [Self], up: Update) {
+    fn apply_update(&mut self, left_tabs: &mut [Self], right_tabs: &mut [Self], up: Update) {
         assert!(self.matches_update(&up));
 
         let mut sb = self.dir_state.borrow_mut();
@@ -507,6 +534,8 @@ impl Tab {
 
         let existing = EntryObject::lookup(up.path());
 
+        let mut search_mutate = None;
+
         let partial = match (up, existing) {
             (Update::Entry(entry), Some(obj)) => {
                 let Some(old) = obj.update(entry) else {
@@ -521,7 +550,10 @@ impl Tab {
                 PartiallyAppliedUpdate::Mutate(old, obj)
             }
             (Update::Entry(entry), None) => {
-                let new = EntryObject::new(entry);
+                let (new, old) = EntryObject::create_or_update(entry);
+                // This existing means the element existing in a search tab, somewhere, and we've
+                // updated it.
+                search_mutate = old.map(|old| PartiallyAppliedUpdate::Mutate(old, new.clone()));
 
                 let comp = self.settings.sort.comparator();
                 self.contents.list.insert_sorted(&new, comp);
@@ -540,6 +572,8 @@ impl Tab {
                 // Unusual case, probably shouldn't happen.
                 // Maybe if something is removed while loading the directory.
                 warn!("Got removal for {path:?} which wasn't present");
+                // It's possible this entry is living in a yet-to-be applies search snapshot, but
+                // that's not important right now.
                 return;
             }
         };
@@ -548,6 +582,37 @@ impl Tab {
         for t in self.matching_mut(right_tabs) {
             t.finish_update(&partial);
         }
+
+        let search_update = search_mutate.unwrap_or(partial);
+
+        // Apply to any matching search tabs, even to the left.
+        self.finish_search_update(&search_update);
+        for t in left_tabs.iter_mut().chain(right_tabs.iter_mut()) {
+            t.finish_search_update(&search_update)
+        }
+    }
+
+    fn search_sort(&mut self) {
+        let Some(search) = &self.search else {
+            return;
+        };
+        // if !searching return
+        // TODO [search]
+    }
+
+    fn search_extend(&mut self) {
+        let Some(search) = &self.search else {
+            return;
+        };
+        // TODO [search]
+    }
+
+    fn finish_search_update(&mut self, update: &PartiallyAppliedUpdate) {
+        let Some(search) = &self.search else {
+            return;
+        };
+        // if !searching return
+        error!("TODO -- finish_search_update")
     }
 
     fn check_directory_deleted(&self, removed: &Path) -> bool {
@@ -582,6 +647,7 @@ impl Tab {
 
     fn change_location(&mut self, left_tabs: &[Self], right_tabs: &[Self], target: &Path) {
         self.view_state = None;
+        self.search = None;
 
         self.path = target.into();
 
@@ -602,6 +668,8 @@ impl Tab {
     fn navigate(&mut self, left_tabs: &[Self], right_tabs: &[Self], target: &Path) {
         info!("Navigating from {:?} to {:?}", self.path, target);
 
+        // TODO -- is an active search part of a history entry?
+        //
         // self.take_view_snapshot()
         // Look for another matching tab and steal its state.
         // Only if that fails do we open a new watcher.
@@ -652,7 +720,7 @@ impl Tab {
             return;
         };
 
-        let id = self.id;
+        let id = self.id.copy();
         let finish =
             move || GUI.with(|g| g.get().unwrap().tabs.borrow_mut().finish_apply_view_state(id));
 
@@ -719,7 +787,7 @@ mod id {
     //      + Easy implementation
     //      + Fast, no allocations
     //      - Can theoretically overflow
-    //      - Uniqueness isn't statically guaranteed
+    //      - Uniqueness isn't trivially statically guaranteed
     //      - Linear searching for tabs
     //   Rc<()>:
     //      + Easy implementation
@@ -737,14 +805,23 @@ mod id {
     //      - Heap allocation
     //  UUIDs:
     //      - Not really better than a bare u64
+    #[derive(Debug, Eq, PartialEq)]
+    pub struct TabUid(u64);
+
     #[derive(Debug, Eq, PartialEq, Clone, Copy)]
     pub struct TabId(u64);
 
-    pub fn next_id() -> TabId {
-        TabId(NEXT_ID.with(|n| {
+    pub fn next_id() -> TabUid {
+        TabUid(NEXT_ID.with(|n| {
             let o = n.get();
             n.set(o + 1);
             o
         }))
+    }
+
+    impl TabUid {
+        pub const fn copy(&self) -> TabId {
+            TabId(self.0)
+        }
     }
 }

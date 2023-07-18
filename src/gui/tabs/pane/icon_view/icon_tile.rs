@@ -22,31 +22,15 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Box;
 }
 
-impl IconTile {
-    pub fn new() -> Self {
+impl Default for IconTile {
+    fn default() -> Self {
         let s: Self = glib::Object::new();
         PANGO_ATTRIBUTES.with(|pa| s.imp().name.set_attributes(Some(pa)));
-
-        // TODO
-        // Do not start drag and drop unless the mouse is actually "on" something, and not just
-        // dead space.
-        //
-        //
-        // let click = GestureClick::new();
-        // click.connect_pressed(|a, b, c, d| {
-        //     let parent = a.widget().downcast::<Self>().unwrap();
-        //     parent.imp().image.bounds()
-        //     println!("Click on {a:?}, {b:?}, {c:?}, {d:?}");
-        //     let ev = a.current_event().unwrap();
-        //
-        //     let up = a.upcast_ref::<EventController>();
-        //     up.current_event();
-        //     a.set_state(gtk::EventSequenceState::Claimed);
-        // });
-        // s.add_controller(click);
         s
     }
+}
 
+impl IconTile {
     pub fn bind(&self, obj: &EntryObject) {
         let imp = self.imp();
 

@@ -28,19 +28,17 @@ enum Contents {
 }
 
 impl Contents {
-    fn matches(&self, mode: DisplayMode) -> bool {
+    const fn matches(&self, mode: DisplayMode) -> bool {
         match (self, mode) {
-            (Contents::Icons(_), DisplayMode::Icons)
-            | (Contents::Details(_), DisplayMode::List) => true,
-            (Contents::Icons(_), DisplayMode::List)
-            | (Contents::Details(_), DisplayMode::Icons) => false,
+            (Self::Icons(_), DisplayMode::Icons) | (Self::Details(_), DisplayMode::List) => true,
+            (Self::Icons(_), DisplayMode::List) | (Self::Details(_), DisplayMode::Icons) => false,
         }
     }
 
     fn update_settings(&self, settings: DirSettings) {
         match self {
-            Contents::Icons(_) => (),
-            Contents::Details(details) => details.update_sort(settings.sort),
+            Self::Icons(_) => (),
+            Self::Details(details) => details.update_sort(settings.sort),
         }
     }
 }
@@ -76,12 +74,12 @@ impl Pane {
         let contents = match tab.settings.display_mode {
             DisplayMode::Icons => Contents::Icons(IconView::new(
                 &element.imp().scroller,
-                tab.id,
+                tab.id.copy(),
                 &tab.contents.selection,
             )),
             DisplayMode::List => Contents::Details(DetailsView::new(
                 &element.imp().scroller,
-                tab.id,
+                tab.id.copy(),
                 tab.settings,
                 &tab.contents.selection,
             )),
@@ -94,7 +92,7 @@ impl Pane {
             element,
             signals,
 
-            tab: tab.id,
+            tab: tab.id.copy(),
             selection: tab.contents.selection.clone(),
         }
     }

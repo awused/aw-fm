@@ -1,6 +1,7 @@
 use std::borrow::BorrowMut;
 use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
+use std::collections::hash_map;
 use std::fmt::{self, Formatter};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -312,7 +313,7 @@ mod internal {
             assert!(self.0.replace(Some(wrapped)).is_none());
         }
 
-        pub(super) fn update_inner(&self, entry: super::Entry) -> super::Entry {
+        pub(super) fn update_inner(&self, mut entry: super::Entry) -> super::Entry {
             // TODO -- this is where we'd be able to use "Outdated"
             // Every time there is an update, we have an opportunity to try the thumbnail again if
             // it failed.
@@ -322,6 +323,14 @@ mod internal {
                 EntryKind::Directory { .. } => Thumbnail::Nothing,
                 EntryKind::Uninitialized => unreachable!(),
             };
+
+            // Since this is used as the key in the hash map, if we use the new Arc<Path> we'll
+            // double memory usage for no reason.
+            {
+                let old = self.0.borrow();
+                let old_arc = old.as_ref().unwrap().entry.abs_path.clone();
+                entry.abs_path = old_arc;
+            }
 
             let wrapped = Entry { entry, thumbnail };
             let old = self.0.replace(Some(wrapped)).unwrap();
@@ -429,7 +438,7 @@ mod internal {
     }
 }
 
-// This does burn a bit of memory, but it avoids any costly linear searches on updates.
+// This does burn a bit of memory, but it avoids any costly searches on updates and insertions.
 thread_local! {
     static ALL_ENTRY_OBJECTS: RefCell<AHashMap<Arc<Path>, WeakRef<EntryObject>>> =
         AHashMap::new().into();
@@ -440,16 +449,9 @@ glib::wrapper! {
 }
 
 impl EntryObject {
-    pub fn new(entry: Entry) -> Self {
+    fn new(entry: Entry) -> Self {
         let obj: Self = Object::new();
         obj.imp().init(entry);
-
-        ALL_ENTRY_OBJECTS.with(|m| {
-            let old = m.borrow_mut().insert(obj.get().abs_path.clone(), obj.downgrade());
-
-            // If an old matching EntryObject existed, it must be gone by now.
-            debug_assert!(old.as_ref().and_then(WeakRef::upgrade).is_none())
-        });
 
         if obj.imp().should_request_low_priority_thumb() {
             queue_low_priority_thumb(obj.downgrade())
@@ -457,6 +459,42 @@ impl EntryObject {
 
         obj
     }
+
+    // If the old entry is present, we have existing search tabs we'll need to update.
+    //
+    // This cannot cause updates to existing non-search lists.
+    pub fn create_or_update(entry: Entry) -> (Self, Option<Entry>) {
+        ALL_ENTRY_OBJECTS.with(|m| {
+            let mut map = m.borrow_mut();
+
+            match map.entry(entry.abs_path.clone()) {
+                // We update it here if it's different to avoid the case where this is a stale
+                // entry from a search tab keeping a stale reference up to date, or a user is
+                // refreshing a remote directory with a search open.
+                hash_map::Entry::Occupied(o) => {
+                    let value = o.into_mut();
+                    match value.upgrade() {
+                        Some(existing) => return (existing.clone(), existing.update(entry)),
+                        None => {
+                            warn!("Got dangling WeakRef in EntryObject::create_or_update");
+                            let new = Self::new(entry);
+                            *value = new.downgrade();
+                            (new, None)
+                        }
+                    }
+                }
+                hash_map::Entry::Vacant(v) => {
+                    let new = Self::new(entry);
+                    v.insert(new.downgrade());
+                    (new, None)
+                }
+            }
+        })
+    }
+
+    // Use the existing entry if present but do not update it.
+    // Any updates will have to come from the regular notifier or
+    // pub fn create_for_search()
 
     pub fn lookup(path: &Path) -> Option<Self> {
         ALL_ENTRY_OBJECTS.with(|m| m.borrow().get(path).and_then(WeakRef::upgrade))

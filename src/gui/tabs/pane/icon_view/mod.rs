@@ -26,7 +26,7 @@ impl IconView {
 
         factory.connect_setup(move |_factory, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let row = IconTile::new();
+            let row = IconTile::default();
             item.set_child(Some(&row));
         });
 

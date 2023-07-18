@@ -52,13 +52,27 @@ impl DirSnapshot {
 pub struct EntryObjectSnapshot {
     pub id: SnapshotId,
     pub entries: Vec<EntryObject>,
+    // Rare case, handle by just forcing a sort of all search tabs.
+    pub had_search_updates: bool,
 }
 
 impl From<DirSnapshot> for EntryObjectSnapshot {
     fn from(value: DirSnapshot) -> Self {
+        let mut had_search_updates = false;
+        let entries = value
+            .entries
+            .into_iter()
+            .map(|entry| {
+                let (eo, updated) = EntryObject::create_or_update(entry);
+                had_search_updates = had_search_updates || updated.is_some();
+                eo
+            })
+            .collect();
+
         Self {
             id: value.id,
-            entries: value.entries.into_iter().map(EntryObject::new).collect(),
+            entries,
+            had_search_updates,
         }
     }
 }
