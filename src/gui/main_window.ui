@@ -30,6 +30,7 @@
                 <child>
                   <object class="GtkListView" id="tabs">
                     <property name="orientation">horizontal</property>
+                    <property name="hexpand">true</property>
                     <style>
                       <class name="tabs-list"/>
                     </style>

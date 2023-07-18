@@ -157,6 +157,10 @@ impl Gui {
         gui_receiver: glib::Receiver<GuiAction>,
     ) -> Rc<Self> {
         let window = MainWindow::new(application);
+        window.remove_css_class("background");
+
+
+        let tabs = TabsList::new(&window);
 
         let rc = Rc::new(Self {
             window,
@@ -164,7 +168,7 @@ impl Gui {
             overlay: gtk::Overlay::new(),
             menu: OnceCell::default(),
 
-            tabs: RefCell::new(TabsList::new_uninit()),
+            tabs: tabs.into(),
 
             database: DBCon::connect(),
             thumbnailer: Thumbnailer::new(),
@@ -229,23 +233,7 @@ impl Gui {
     }
 
     fn setup(self: &Rc<Self>) {
-        self.window.remove_css_class("background");
-
-        let mut path = OPTIONS
-            .file_name
-            .clone()
-            .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()))
-            .clean();
-
-        if path.is_relative() {
-            // prepending "/" is likely to be wrong, but eh.
-            let mut abs = current_dir().unwrap_or_else(|_| "/".into());
-            abs.push(path);
-            path = abs.clean();
-        }
-
-        self.tabs.borrow_mut().initialize(path);
-        self.tabs.borrow_mut().layout(&self.window.imp().tabs, &self.window.imp().panes);
+        self.tabs.borrow_mut().setup();
         // self.setup_interaction();
 
 

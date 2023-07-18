@@ -1,13 +1,18 @@
+use std::env::current_dir;
 use std::num::NonZeroU64;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
 use gtk::gdk::RGBA;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{BoxExt, WidgetExt};
 use gtk::Orientation;
+use path_clean::PathClean;
 
 use super::{Tab, TabId};
 use crate::com::{DirSnapshot, DisplayMode, EntryObjectSnapshot, SortSettings, Update};
+use crate::config::OPTIONS;
+use crate::gui::main_window::MainWindow;
 
 // mod tab_element;
 
@@ -23,59 +28,46 @@ const PANE_COLOURS: [RGBA; MAX_PANES] = [RGBA::BLUE, RGBA::GREEN, RGBA::RED];
 #[derive(Debug)]
 pub struct TabsList {
     tabs: Vec<Tab>,
-    active: usize,
+    // active: usize,
     next_id: NonZeroU64,
 
-    tabs_container: gtk::Box,
+    //tabs_store: gio::ListStore,
+    tabs_container: gtk::ListView,
     pane_container: gtk::Box,
 }
 
 impl TabsList {
-    pub fn new_uninit() -> Self {
-        let tabs_container = gtk::Box::new(Orientation::Horizontal, 0);
-        tabs_container.set_hexpand(true);
-
-
-        let pane_container = gtk::Box::new(Orientation::Horizontal, 0);
-        pane_container.set_hexpand(true);
-        pane_container.set_vexpand(true);
-
+    pub fn new(window: &MainWindow) -> Self {
         Self {
             tabs: Vec::new(),
-            active: 0, // Temporary for handling a single active tab
             next_id: NonZeroU64::new(1).unwrap(),
-            tabs_container,
-            pane_container,
+            tabs_container: window.imp().tabs.clone(),
+            pane_container: window.imp().panes.clone(),
         }
     }
 
-    pub fn initialize(&mut self, path: PathBuf) {
+    pub fn setup(&mut self) {
         assert!(self.tabs.is_empty());
+        assert_eq!(self.next_id.get(), 1);
+
+        let mut path = OPTIONS
+            .file_name
+            .clone()
+            .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()))
+            .clean();
+
+        if path.is_relative() {
+            // prepending "/" is likely to be wrong, but eh.
+            let mut abs = current_dir().unwrap_or_else(|_| "/".into());
+            abs.push(path);
+            path = abs.clean();
+        }
 
         let first_tab_element = ();
 
         self.tabs.push(Tab::new(TabId(0), path, first_tab_element, &[]));
-    }
-
-    pub fn layout(&mut self, tabs_container: &gtk::ListView, pane_container: &gtk::Box) {
-        // parent.append(&self.tabs_container);
-        // parent.append(&self.pane_container);
-
-        // Open and activate first and only tab
         self.tabs[0].load(&mut [], &mut []);
         self.tabs[0].display(&self.pane_container);
-
-        // self.clone_tab(0);
-        // glib::timeout_add_local_once(Duration::from_secs(5), || {
-        //     GUI.with(|g| {
-        //         let tabs = g.get().unwrap().tabs.borrow_mut();
-        //         let it = tabs.tabs[1].contents.list.item(0).unwrap();
-        //         let it = it.downcast::<EntryObject>().unwrap();
-        //         let mut e = it.get().clone();
-        //         e.name = ParsedString::from(OsString::from("faq"));
-        //         it.update(e, SortSettings::default());
-        // })
-        // });
     }
 
     pub fn update_sort(&mut self, id: TabId, settings: SortSettings) {
@@ -150,11 +142,6 @@ impl TabsList {
         let mut new_tab = Tab::cloned(id, &self.tabs[index], ());
 
         self.tabs.insert(index + 1, new_tab);
-
-        if index < self.active {
-            error!("Cloning inactive tab, this shouldn't happen (yet)");
-            self.active += 1
-        }
     }
 
     // For now, tabs always open right of the active tab
@@ -176,15 +163,16 @@ impl TabsList {
         let tab = &self.tabs[index];
         let pane_index = Some(0); // ???
 
+        // let active = self.tabs[index].is_active()
         self.tabs.remove(index);
 
-        if let Some(pane_index) = pane_index {
-            // TODO -- handle case where multiple tabs are active in panes
-            // Should grab the next
-            let (left, new_active, right) = self.split_around_mut(self.active);
-            new_active.load(left, right);
-            self.tabs[self.active].display(&self.pane_container);
-        }
+        // if let Some(pane_index) = pane_index {
+        //     // TODO -- handle case where multiple tabs are active in panes
+        //     // Should grab the next
+        //     let (left, new_active, right) = self.split_around_mut(self.active);
+        //     new_active.load(left, right);
+        //     self.tabs[self.active].display(&self.pane_container);
+        // }
     }
 
     // This is necessary to attempt to avoid a gtk crash
