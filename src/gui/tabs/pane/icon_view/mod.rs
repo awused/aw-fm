@@ -8,8 +8,7 @@ use gtk::{gio, glib, GridView, ListView, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
 use crate::com::{DisplayMode, EntryObject};
-use crate::gui::tabs::tab::Tab;
-use crate::gui::tabs::TabId;
+use crate::gui::tabs::{Tab, TabId};
 use crate::gui::GUI;
 
 #[derive(Debug)]

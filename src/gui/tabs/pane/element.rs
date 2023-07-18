@@ -7,7 +7,7 @@ use gtk::traits::{SelectionModelExt, WidgetExt};
 use gtk::{glib, Bitset, MultiSelection};
 
 use crate::com::{Disconnector, EntryObject};
-use crate::gui::tabs::tab::Tab;
+use crate::gui::tabs::Tab;
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)

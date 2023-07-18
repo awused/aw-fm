@@ -18,8 +18,7 @@ use self::string_cell::{EntryString, StringCell};
 use crate::com::{
     DirSettings, DisplayMode, Entry, EntryKind, EntryObject, SortDir, SortMode, SortSettings,
 };
-use crate::gui::tabs::tab::Tab;
-use crate::gui::tabs::TabId;
+use crate::gui::tabs::{Tab, TabId};
 use crate::gui::GUI;
 
 const NAME: &str = "Name";
