@@ -14,11 +14,12 @@ use std::time::{Duration, Instant};
 use gtk::gio::ListStore;
 use gtk::glib::Object;
 use gtk::prelude::{Cast, ListModelExt, ListModelExtManual, StaticType};
-use gtk::subclass::prelude::ObjectSubclassExt;
+use gtk::subclass::prelude::{ObjectSubclassExt, ObjectSubclassIsExt};
 use gtk::traits::{AdjustmentExt, BoxExt, SelectionModelExt, WidgetExt};
 use gtk::{glib, Box, MultiSelection, Orientation, ScrolledWindow};
 use path_clean::PathClean;
 
+use self::contents::Contents;
 use self::pane::Pane;
 use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, Entry, EntryObject, EntryObjectSnapshot, FileTime,
@@ -27,6 +28,7 @@ use crate::com::{
 use crate::gui::{Update, GUI};
 use crate::natsort::ParsedString;
 
+mod contents;
 mod list;
 mod pane;
 
@@ -85,6 +87,22 @@ enum PartiallyAppliedUpdate {
     Delete(EntryObject),
 }
 
+impl PartiallyAppliedUpdate {
+    fn is_in_subdir(&self, ancestor: &Path) -> bool {
+        let entry = match self {
+            PartiallyAppliedUpdate::Mutate(_, eo)
+            | PartiallyAppliedUpdate::Insert(eo)
+            | PartiallyAppliedUpdate::Delete(eo) => eo.get(),
+        };
+
+        if Some(ancestor) == entry.abs_path.parent() {
+            return false;
+        }
+
+        entry.abs_path.starts_with(ancestor)
+    }
+}
+
 
 #[derive(Debug, Default)]
 enum DirState {
@@ -123,34 +141,6 @@ struct HistoryEntry {
     location: Rc<Path>,
     scroll_pos: f64, // View snapshot?
 }
-
-struct Contents {
-    list: ListStore,
-    selection: MultiSelection,
-}
-
-impl fmt::Debug for Contents {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Contents size: {}", self.list.n_items())
-    }
-}
-
-impl Default for Contents {
-    fn default() -> Self {
-        let list = ListStore::new(EntryObject::static_type());
-        let selection = MultiSelection::new(Some(list.clone()));
-        Self { list, selection }
-    }
-}
-
-impl Contents {
-    fn clone_from(&mut self, source: &Self) {
-        self.list.remove_all();
-
-        self.list.extend(source.list.iter::<EntryObject>().flatten())
-    }
-}
-
 
 // Not kept up to date, maybe an enum?
 #[derive(Debug, Clone, Default)]
@@ -236,7 +226,7 @@ impl Tab {
 
         let dir_state = Rc::new(RefCell::new(DirState::Unloaded));
 
-        let contents = Contents::default();
+        let contents = Contents::new(settings.sort);
 
         let mut t = Self {
             id,
@@ -260,8 +250,8 @@ impl Tab {
     pub(super) fn cloned(id: TabUid, source: &Self, element: ()) -> Self {
         // Assumes inactive tabs cannot be cloned.
         let view_state = source.take_view_snapshot();
-        let mut contents = Contents::default();
-        contents.clone_from(&source.contents);
+        let mut contents = Contents::new(source.settings.sort);
+        contents.clone_from(&source.contents, source.settings.sort);
 
         Self {
             id,
@@ -284,10 +274,8 @@ impl Tab {
             if *self.path == *t.path {
                 self.path = t.path.clone();
                 self.dir_state = t.dir_state.clone();
-                self.contents.clone_from(&t.contents);
+                self.contents.clone_from(&t.contents, self.settings.sort);
 
-                let comparator = self.settings.sort.comparator();
-                self.contents.list.sort(comparator);
                 return true;
             }
         }
@@ -339,19 +327,7 @@ impl Tab {
         }
     }
 
-    fn apply_obj_snapshot(&mut self, snap: EntryObjectSnapshot) {
-        assert!(self.matches_snapshot(&snap.id));
-        debug!(
-            "Applying {:?} snapshot for {:?} with {} items",
-            snap.id.kind,
-            self.path,
-            snap.entries.len()
-        );
-
-        if snap.id.kind.initial() {
-            assert!(self.contents.list.n_items() == 0);
-        }
-
+    fn apply_snapshot_inner(&mut self, snap: EntryObjectSnapshot) {
         if self.settings.display_mode == DisplayMode::Icons {
             if let Some(pane) = &self.pane {
                 if pane.workaround_scroller().vscrollbar_policy() != gtk::PolicyType::Never {
@@ -361,21 +337,8 @@ impl Tab {
             }
         }
 
-        self.contents.list.extend(snap.entries.into_iter());
-        let start = Instant::now();
-        self.contents.list.sort(self.settings.sort.comparator());
+        self.contents.apply_snapshot(snap);
         self.search_extend();
-        println!("sort time {:?}", start.elapsed());
-
-        // let a = self.contents.list.item(0).unwrap();
-        // let settings = self.settings;
-        // glib::timeout_add_local_once(Duration::from_secs(5), move || {
-        //     let b = a.downcast::<EntryObject>().unwrap();
-        //     let mut c = b.get().clone();
-        //     c.name = ParsedString::from(OsString::from("asdf"));
-        //     error!("Updating file for no reason");
-        //     b.update(c, settings.sort);
-        // });
     }
 
     // Returns true if we had any search updates. Expected to be rare, so that path isn't
@@ -388,31 +351,39 @@ impl Tab {
     ) {
         assert!(self.matches_snapshot(&snap.id));
         let snap: EntryObjectSnapshot = snap.into();
+
+        debug!(
+            "Applying {:?} snapshot for {:?} with {} items",
+            snap.id.kind,
+            self.path,
+            snap.entries.len()
+        );
+
         let force_search_sort = snap.had_search_updates;
 
         // The actual tab order doesn't matter here, so long as it's applied to every matching tab.
         // Avoid one clone by doing the other tabs first.
-        self.matching_mut(right_tabs).for_each(|t| t.apply_obj_snapshot(snap.clone()));
+        self.matching_mut(right_tabs).for_each(|t| t.apply_snapshot_inner(snap.clone()));
 
         let snap_kind = snap.id.kind;
 
-        self.apply_obj_snapshot(snap);
+        self.apply_snapshot_inner(snap);
 
         if force_search_sort {
-            // We just sorted this tab, and we sorted all matching tabs to the right.
-            left_tabs.iter_mut().for_each(Self::search_sort);
+            // We just sorted this tab and all matching tabs to the right.
+            left_tabs.iter_mut().for_each(Self::search_sort_after_snapshot);
             right_tabs
                 .iter_mut()
                 .filter(|t| !t.matches_arc(&self.path))
-                .for_each(Self::search_sort);
+                .for_each(Self::search_sort_after_snapshot);
         }
 
-        // If we're finished, update all tabs to reflect this.
         if !snap_kind.finished() {
             // Not completed, no changes to dir loading state.
             return;
         }
 
+        // If we're finished, update all tabs to reflect this.
         let mut sb = self.dir_state.borrow_mut();
         let updates = match std::mem::take(&mut *sb) {
             DirState::Unloaded | DirState::Loaded(_) => unreachable!(),
@@ -425,7 +396,7 @@ impl Tab {
         drop(sb);
 
         for u in updates {
-            self.apply_update(left_tabs, right_tabs, u);
+            self.matched_update(left_tabs, right_tabs, u);
         }
 
         self.start_apply_view_state();
@@ -443,80 +414,7 @@ impl Tab {
         Some(&*self.path) == ev.path().parent()
     }
 
-    // Look for the location in the list.
-    // The list may no longer be sorted because of an update, but except for the single update to
-    // "entry's corresponding EntryObject" the list will be sorted.
-    // So using the old version of the entry we can search for the old location.
-    fn position_by_sorted_entry(&self, entry: &Entry) -> u32 {
-        let mut start = 0;
-        let mut end = self.contents.list.n_items();
-        assert_ne!(end, 0);
-
-        let comp = self.settings.sort.comparator();
-
-        while start < end {
-            let mid = start + (end - start) / 2;
-
-            let obj = self.contents.list.item(mid).unwrap().downcast::<EntryObject>().unwrap();
-
-            let inner = obj.get();
-            if inner.abs_path == entry.abs_path {
-                // The equality check below may fail even with abs_path being equal due to updates.
-                return mid;
-            }
-
-            match entry.cmp(&inner, self.settings.sort) {
-                Ordering::Equal => unreachable!(),
-                Ordering::Less => end = mid,
-                Ordering::Greater => start = mid + 1,
-            }
-        }
-
-        // The old object MUST exist in all relevant liststores, so this should not fail.
-        unreachable!()
-    }
-
-    fn reinsert_updated(&mut self, sorted: &Entry, new: &EntryObject) {
-        let i = self.position_by_sorted_entry(sorted);
-
-        let comp = self.settings.sort.comparator();
-        if (i == 0
-            || comp(&self.contents.list.item(i - 1).unwrap(), new.upcast_ref::<Object>()).is_lt())
-            && (i == self.contents.list.n_items() - 1
-                || comp(&self.contents.list.item(i + 1).unwrap(), new.upcast_ref::<Object>())
-                    .is_gt())
-        {
-            debug!("Did not reinsert item as it was already in the correct position");
-            return;
-        }
-
-        let was_selected = self.contents.selection.is_selected(i);
-
-        // After removing the lone updated item, the list is guaranteed to be sorted.
-        // So we can reinsert it much more cheaply than sorting the entire list again.
-        self.contents.list.remove(i);
-        let new_idx = self.contents.list.insert_sorted(new, comp);
-
-        if was_selected {
-            self.contents.selection.select_item(new_idx, false);
-        }
-    }
-
-    fn finish_update(&mut self, update: &PartiallyAppliedUpdate) {
-        match update {
-            PartiallyAppliedUpdate::Mutate(old, new) => self.reinsert_updated(old, new),
-            PartiallyAppliedUpdate::Insert(new) => {
-                let comp = self.settings.sort.comparator();
-                self.contents.list.insert_sorted(new, comp);
-            }
-            PartiallyAppliedUpdate::Delete(old) => {
-                let i = self.position_by_sorted_entry(&old.get());
-                self.contents.list.remove(i);
-            }
-        }
-    }
-
-    fn apply_update(&mut self, left_tabs: &mut [Self], right_tabs: &mut [Self], up: Update) {
+    fn matched_update(&mut self, left_tabs: &mut [Self], right_tabs: &mut [Self], up: Update) {
         assert!(self.matches_update(&up));
 
         let mut sb = self.dir_state.borrow_mut();
@@ -532,67 +430,99 @@ impl Tab {
         drop(sb);
 
 
-        let existing = EntryObject::lookup(up.path());
+        // If it exists in any tab (search or flat)
+        let existing_global = EntryObject::lookup(up.path());
+        // If it exists in flat tabs (which all share the same state).
+        let local_position = existing_global
+            .clone()
+            .and_then(|eg| self.contents.position_by_sorted_entry(&eg.get()));
 
+
+        // If something exists globally but not locally, it might need special handling.
         let mut search_mutate = None;
 
-        let partial = match (up, existing) {
-            (Update::Entry(entry), Some(obj)) => {
+        let partial = match (up, local_position, existing_global) {
+            // It simply can't exist globally but not locally
+            (_, Some(_), None) => unreachable!(),
+            (Update::Entry(entry), Some(pos), Some(obj)) => {
                 let Some(old) = obj.update(entry) else {
                     // An unimportant update.
                     // No need to check other tabs.
                     return;
                 };
 
-                self.reinsert_updated(&old, &obj);
+                self.contents.reinsert_updated(pos, &obj);
 
                 trace!("Updated {:?} from event", old.abs_path);
                 PartiallyAppliedUpdate::Mutate(old, obj)
             }
-            (Update::Entry(entry), None) => {
-                let (new, old) = EntryObject::create_or_update(entry);
-                // This existing means the element existing in a search tab, somewhere, and we've
-                // updated it.
-                search_mutate = old.map(|old| PartiallyAppliedUpdate::Mutate(old, new.clone()));
+            (Update::Entry(entry), None, Some(obj)) => {
+                // This means the element already existed in a search tab, somewhere else, and
+                // we're updating it.
+                //
+                // It does not exist within this search tab.
+                if let Some(old) = obj.update(entry) {
+                    // It's an update for (some) search tabs, but an insertion for flat tabs.
+                    //
+                    // This means that a different search tab happened to read a newly created file
+                    // before it was inserted into this tab.
+                    warn!(
+                        "Search tab read item {:?} before it was inserted into a flat tab.",
+                        old.abs_path
+                    );
+                    search_mutate = Some(PartiallyAppliedUpdate::Mutate(old, obj.clone()));
+                }
 
-                let comp = self.settings.sort.comparator();
-                self.contents.list.insert_sorted(&new, comp);
 
-                trace!("Inserted {:?} from event", new.get().abs_path);
+                self.contents.insert(&obj, self.settings.sort);
+                trace!("Inserted existing {:?} from event", obj.get().abs_path);
+                PartiallyAppliedUpdate::Insert(obj)
+            }
+            (Update::Entry(entry), None, None) => {
+                let new = EntryObject::new(entry);
+
+                self.contents.insert(&new, self.settings.sort);
+                trace!("Inserted existing {:?} from event", new.get().abs_path);
                 PartiallyAppliedUpdate::Insert(new)
             }
-            (Update::Removed(path), Some(obj)) => {
-                let i = self.position_by_sorted_entry(&obj.get());
-                self.contents.list.remove(i);
-
+            (Update::Removed(path), Some(i), Some(obj)) => {
+                self.contents.remove(i);
                 trace!("Removed {:?} from event", path);
                 PartiallyAppliedUpdate::Delete(obj)
             }
-            (Update::Removed(path), None) => {
-                // Unusual case, probably shouldn't happen.
-                // Maybe if something is removed while loading the directory.
+            (Update::Removed(path), None, Some(obj)) => {
+                trace!("Removed {:?} from event", path);
+                PartiallyAppliedUpdate::Delete(obj)
+            }
+            (Update::Removed(path), None, None) => {
+                // Unusual case, probably shouldn't happen often.
+                // Maybe if something is removed while loading the directory before we read it.
                 warn!("Got removal for {path:?} which wasn't present");
-                // It's possible this entry is living in a yet-to-be applies search snapshot, but
-                // that's not important right now.
+                // It's possible this entry is living in a yet-to-be applied search snapshot, but
+                // that's not important since it will be skipped over by apply_search_snapshot.
                 return;
             }
         };
 
 
         for t in self.matching_mut(right_tabs) {
-            t.finish_update(&partial);
+            t.contents.finish_update(&partial);
         }
 
-        let search_update = search_mutate.unwrap_or(partial);
+
+        // We know that an insert in this tab is also an insert in this sort.
+        // Very often this will be the only sort, and this is marginally more efficient.
+        self.finish_search_update(&partial);
+
 
         // Apply to any matching search tabs, even to the left.
-        self.finish_search_update(&search_update);
+        let other_tab_search_update = search_mutate.unwrap_or(partial);
         for t in left_tabs.iter_mut().chain(right_tabs.iter_mut()) {
-            t.finish_search_update(&search_update)
+            t.finish_search_update(&other_tab_search_update)
         }
     }
 
-    fn search_sort(&mut self) {
+    fn search_sort_after_snapshot(&mut self) {
         let Some(search) = &self.search else {
             return;
         };
@@ -607,10 +537,39 @@ impl Tab {
         // TODO [search]
     }
 
+    // It hasn't matched any tabs, but it might match some searches.
+    //
+    // Generally, updates will match at least one tab, so we will rarely hit this without a search
+    // actually existing.
+    fn handle_unmatched_update(tabs: &mut [Tab], update: Update) {
+        let existing = EntryObject::lookup(update.path());
+        let partial = match (update, existing) {
+            (Update::Entry(entry), None) => PartiallyAppliedUpdate::Insert(EntryObject::new(entry)),
+            (Update::Entry(entry), Some(obj)) => {
+                let Some(old) = obj.update(entry) else {
+                    return;
+                };
+                PartiallyAppliedUpdate::Mutate(old, obj)
+            }
+            (Update::Removed(_), None) => {
+                return;
+            }
+            (Update::Removed(_), Some(existing)) => PartiallyAppliedUpdate::Delete(existing),
+        };
+
+        for t in tabs {
+            t.finish_search_update(&partial);
+        }
+    }
+
     fn finish_search_update(&mut self, update: &PartiallyAppliedUpdate) {
         let Some(search) = &self.search else {
             return;
         };
+
+        // TODO [search] it's possible for a Mutate to need to be treated as an insert for other
+        // tabs. We promote insertions into mutates into insertions if they match a tab, but not
+        // all searches may be up-to-date with those.
         // if !searching return
         error!("TODO -- finish_search_update")
     }
@@ -634,7 +593,7 @@ impl Tab {
 
     fn update_sort(&mut self, sort: SortSettings) {
         self.settings.sort = sort;
-        self.contents.list.sort(self.settings.sort.comparator());
+        self.contents.sort(sort);
         self.pane.as_mut().unwrap().update_settings(self.settings);
         self.save_settings();
     }
@@ -656,7 +615,7 @@ impl Tab {
 
             self.dir_state.replace(DirState::Unloaded);
             self.settings = GUI.with(|g| g.get().unwrap().database.get(&self.path));
-            self.contents.list.remove_all();
+            self.contents.clear(self.settings.sort);
         }
 
         if let Some(pane) = &mut self.pane {

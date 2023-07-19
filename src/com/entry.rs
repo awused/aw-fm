@@ -449,13 +449,24 @@ glib::wrapper! {
 }
 
 impl EntryObject {
-    fn new(entry: Entry) -> Self {
+    fn create(entry: Entry) -> Self {
         let obj: Self = Object::new();
         obj.imp().init(entry);
 
         if obj.imp().should_request_low_priority_thumb() {
             queue_low_priority_thumb(obj.downgrade())
         }
+
+        obj
+    }
+
+    pub fn new(entry: Entry) -> Self {
+        let obj = Self::create(entry);
+
+        ALL_ENTRY_OBJECTS.with(|m| {
+            let old = m.borrow_mut().insert(obj.get().abs_path.clone(), obj.downgrade());
+            assert!(old.is_none());
+        });
 
         obj
     }
@@ -473,28 +484,23 @@ impl EntryObject {
                 // refreshing a remote directory with a search open.
                 hash_map::Entry::Occupied(o) => {
                     let value = o.into_mut();
-                    match value.upgrade() {
-                        Some(existing) => return (existing.clone(), existing.update(entry)),
-                        None => {
-                            warn!("Got dangling WeakRef in EntryObject::create_or_update");
-                            let new = Self::new(entry);
-                            *value = new.downgrade();
-                            (new, None)
-                        }
+                    if let Some(existing) = value.upgrade() {
+                        return (existing.clone(), existing.update(entry));
                     }
+
+                    warn!("Got dangling WeakRef in EntryObject::create_or_update");
+                    let new = Self::create(entry);
+                    *value = new.downgrade();
+                    (new, None)
                 }
                 hash_map::Entry::Vacant(v) => {
-                    let new = Self::new(entry);
+                    let new = Self::create(entry);
                     v.insert(new.downgrade());
                     (new, None)
                 }
             }
         })
     }
-
-    // Use the existing entry if present but do not update it.
-    // Any updates will have to come from the regular notifier or
-    // pub fn create_for_search()
 
     pub fn lookup(path: &Path) -> Option<Self> {
         ALL_ENTRY_OBJECTS.with(|m| m.borrow().get(path).and_then(WeakRef::upgrade))

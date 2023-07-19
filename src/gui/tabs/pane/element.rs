@@ -15,7 +15,7 @@ glib::wrapper! {
 }
 
 #[derive(Debug)]
-pub(super) struct PaneSignals(Disconnector<ListStore>, Disconnector<MultiSelection>);
+pub(super) struct PaneSignals(Disconnector<MultiSelection>, Disconnector<MultiSelection>);
 
 impl PaneElement {
     pub(super) fn new(tab: &Tab) -> (Self, PaneSignals) {
@@ -30,10 +30,10 @@ impl PaneElement {
         let selection_label = &*self.imp().selection;
 
         let count = count_label.clone();
-        let count_signal = tab.contents.list.connect_items_changed(move |list, _p, _a, _r| {
+        let count_signal = tab.contents.selection.connect_items_changed(move |list, _p, _a, _r| {
             count.set_text(&format!("{} items", list.n_items()));
         });
-        let count_signal = Disconnector::new(&tab.contents.list, count_signal);
+        let count_signal = Disconnector::new(&tab.contents.selection, count_signal);
 
         let count = count_label.clone();
         let selected = selection_label.clone();

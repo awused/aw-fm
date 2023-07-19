@@ -122,21 +122,11 @@ impl TabsList {
 
         if let Some(index) = self.tabs.iter().position(|t| t.matches_update(&update)) {
             let (left_tabs, tab, right_tabs) = self.split_around_mut(index);
-            tab.apply_update(left_tabs, right_tabs, update);
+            tab.matched_update(left_tabs, right_tabs, update);
         } else {
             // TODO [search] handle search updates, which will be expensive but rare,
             // and cheap when there is no search.
-
-            for t in self.tabs.iter_mut() {
-                // No need to be super efficient, searching is rare
-                // t.apply_search_update(&update);
-            }
-            // let Some(index) = self.tabs.iter().position(|t| t.matches_search_update(&update))
-            // else {
-            //     return;
-            // };
-            // let (_, tab, right_tabs) = self.split_around_mut(index);
-            // tab.apply_search_update([], right_tabs, update);
+            Tab::handle_unmatched_update(&mut self.tabs, update);
         };
     }
 
