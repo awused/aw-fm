@@ -62,11 +62,12 @@ impl IconTile {
 
     pub fn unbind(&self, obj: &EntryObject) {
         obj.deprioritize_thumb();
+        self.imp().bound_object.take().unwrap();
         self.imp().update_connection.take().unwrap();
     }
 
-    pub fn assert_disconnected(&self) {
-        assert!(self.imp().update_connection.take().is_none());
+    pub fn bound_object(&self) -> Option<EntryObject> {
+        self.imp().bound_object.borrow().clone()
     }
 }
 
@@ -92,6 +93,7 @@ mod imp {
         #[template_child]
         pub size: TemplateChild<gtk::Inscription>,
 
+        pub bound_object: RefCell<Option<EntryObject>>,
         pub update_connection: Cell<Option<Disconnector<EntryObject>>>,
     }
 
@@ -130,6 +132,8 @@ mod imp {
             } else {
                 self.image.set_from_gicon(&obj.icon());
             }
+
+            self.bound_object.replace(Some(obj.clone()));
 
             let entry = obj.get();
 

@@ -1,6 +1,6 @@
 use std::fmt::Write;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gtk::gio::ListStore;
 use gtk::glib::SignalHandlerId;
@@ -16,6 +16,7 @@ use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
 use super::{SavedViewState, Tab};
 use crate::com::{DirSettings, Disconnector, DisplayMode, EntryObject, SortSettings};
+use crate::gui::tabs_run;
 
 mod details;
 mod element;
@@ -43,6 +44,19 @@ impl Contents {
     }
 }
 
+
+fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
+    let mut child = parent.first_child()?;
+    loop {
+        let allocation = child.allocation();
+        // Assume we're dealing with a vertical list.
+        if allocation.y() + allocation.height() > 0 {
+            break Some(child);
+        }
+
+        child = child.next_sibling()?;
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct Pane {
@@ -127,17 +141,33 @@ impl Pane {
         };
     }
 
+    pub(super) fn update_location(&mut self, path: &Path, settings: DirSettings) {
+        self.update_settings(settings);
+        self.element.imp().location.set_text(&path.to_string_lossy());
+    }
+
     pub(super) fn apply_view_state(&mut self, state: SavedViewState) {
-        self.element.imp().scroller.vadjustment().set_value(state.scroll_pos);
+        match &self.contents {
+            Contents::Icons(icons) => icons.scroll_to(state.scroll_pos),
+            Contents::Details(details) => details.scroll_to(state.scroll_pos),
+        }
+    }
+
+    pub(super) fn get_view_state(&self, list: &super::Contents) -> SavedViewState {
+        let eo = match &self.contents {
+            Contents::Icons(ic) => ic.get_first_visible(),
+            Contents::Details(_) => todo!(),
+        };
+
+        let scroll_pos =
+            eo.and_then(|obj| list.position_by_sorted_entry(&obj.get())).unwrap_or_default();
+
+
+        SavedViewState { scroll_pos }
     }
 
     // Most view state code should be moved here.
     pub(super) fn workaround_scroller(&self) -> &ScrolledWindow {
         &self.element.imp().scroller
-    }
-
-    pub(super) fn update_location(&mut self, path: &Path, settings: DirSettings) {
-        self.update_settings(settings);
-        self.element.imp().location.set_text(&path.to_string_lossy());
     }
 }

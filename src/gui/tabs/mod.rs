@@ -25,7 +25,7 @@ use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, Entry, EntryObject, EntryObjectSnapshot, FileTime,
     GuiAction, GuiActionContext, ManagerAction, SnapshotId, SnapshotKind, SortMode, SortSettings,
 };
-use crate::gui::{Update, GUI};
+use crate::gui::Update;
 use crate::natsort::ParsedString;
 
 mod contents;
@@ -34,6 +34,8 @@ mod pane;
 
 use id::{TabId, TabUid};
 pub(super) use list::TabsList;
+
+use super::{gui_run, tabs_run};
 
 
 /* This efficiently supports multiple tabs being open to the same directory with different
@@ -51,8 +53,7 @@ struct WatchedDir {
 
 impl Drop for WatchedDir {
     fn drop(&mut self) {
-        GUI.with(|g| {
-            let g = g.get().unwrap();
+        gui_run(|g| {
             g.send_manager((
                 ManagerAction::Close(self.path.clone()),
                 GuiActionContext::default(),
@@ -68,8 +69,7 @@ impl Drop for WatchedDir {
 
 impl WatchedDir {
     fn start(path: Arc<Path>) -> Self {
-        GUI.with(|g| {
-            let g = g.get().unwrap();
+        gui_run(|g| {
             g.send_manager((ManagerAction::Open(path.clone()), GuiActionContext::default(), None));
         });
 
@@ -145,7 +145,9 @@ struct HistoryEntry {
 // Not kept up to date, maybe an enum?
 #[derive(Debug, Clone, Default)]
 struct SavedViewState {
-    pub scroll_pos: f64,
+    // First visible element.
+    // If the directory has updated we just don't care, it'll be wrong.
+    pub scroll_pos: u32,
     // Selected items?
 }
 
@@ -222,7 +224,7 @@ impl Tab {
         let path: Arc<Path> = path.into();
 
         // fetch metatada synchronously, even with a donor
-        let settings = GUI.with(|g| g.get().unwrap().database.get(&path));
+        let settings = gui_run(|g| g.database.get(&path));
 
         let dir_state = Rc::new(RefCell::new(DirState::Unloaded));
 
@@ -349,15 +351,10 @@ impl Tab {
         right_tabs: &mut [Self],
         snap: DirSnapshot,
     ) {
+        let start = Instant::now();
         assert!(self.matches_snapshot(&snap.id));
         let snap: EntryObjectSnapshot = snap.into();
 
-        debug!(
-            "Applying {:?} snapshot for {:?} with {} items",
-            snap.id.kind,
-            self.path,
-            snap.entries.len()
-        );
 
         let force_search_sort = snap.had_search_updates;
 
@@ -365,7 +362,8 @@ impl Tab {
         // Avoid one clone by doing the other tabs first.
         self.matching_mut(right_tabs).for_each(|t| t.apply_snapshot_inner(snap.clone()));
 
-        let snap_kind = snap.id.kind;
+        let kind = snap.id.kind;
+        let len = snap.entries.len();
 
         self.apply_snapshot_inner(snap);
 
@@ -378,10 +376,21 @@ impl Tab {
                 .for_each(Self::search_sort_after_snapshot);
         }
 
-        if !snap_kind.finished() {
+        debug!(
+            "Applied {kind:?} snapshot for {:?} with {len} items in {:?}",
+            self.path,
+            start.elapsed()
+        );
+
+        if !kind.finished() {
             // Not completed, no changes to dir loading state.
             return;
         }
+
+        println!(
+            "Test get_view_state {:?}",
+            self.pane.as_ref().unwrap().get_view_state(&self.contents)
+        );
 
         // If we're finished, update all tabs to reflect this.
         let mut sb = self.dir_state.borrow_mut();
@@ -541,7 +550,7 @@ impl Tab {
     //
     // Generally, updates will match at least one tab, so we will rarely hit this without a search
     // actually existing.
-    fn handle_unmatched_update(tabs: &mut [Tab], update: Update) {
+    fn handle_unmatched_update(tabs: &mut [Self], update: Update) {
         let existing = EntryObject::lookup(update.path());
         let partial = match (update, existing) {
             (Update::Entry(entry), None) => PartiallyAppliedUpdate::Insert(EntryObject::new(entry)),
@@ -594,13 +603,19 @@ impl Tab {
     fn update_sort(&mut self, sort: SortSettings) {
         self.settings.sort = sort;
         self.contents.sort(sort);
-        self.pane.as_mut().unwrap().update_settings(self.settings);
+        // TODO [search]
+        if let Some(p) = self.pane.as_mut() {
+            p.update_settings(self.settings)
+        }
         self.save_settings();
     }
 
     fn update_display_mode(&mut self, mode: DisplayMode) {
         self.settings.display_mode = mode;
-        self.pane.as_mut().unwrap().update_settings(self.settings);
+        // TODO [search]
+        if let Some(p) = self.pane.as_mut() {
+            p.update_settings(self.settings)
+        }
         self.save_settings();
     }
 
@@ -614,7 +629,7 @@ impl Tab {
             // We couldn't find any state to steal, so we know we're the only matching tab.
 
             self.dir_state.replace(DirState::Unloaded);
-            self.settings = GUI.with(|g| g.get().unwrap().database.get(&self.path));
+            self.settings = gui_run(|g| g.database.get(&self.path));
             self.contents.clear(self.settings.sort);
         }
 
@@ -661,11 +676,8 @@ impl Tab {
 
     #[must_use]
     fn take_view_snapshot(&self) -> Option<SavedViewState> {
-        GUI.with(|g| {
-            // Only called on active tab
-            error!("TODO -- take_view_snapshot");
-        });
-
+        // Only called on active tab
+        error!("TODO -- take_view_snapshot");
         None
     }
 
@@ -680,17 +692,16 @@ impl Tab {
         };
 
         let id = self.id.copy();
-        let finish =
-            move || GUI.with(|g| g.get().unwrap().tabs.borrow_mut().finish_apply_view_state(id));
+        let finish = move || tabs_run(|t| t.finish_apply_view_state(id));
 
         if self.settings.display_mode != DisplayMode::Icons {
-            // Doing this immediately can cause it to be skipped
-            glib::idle_add_local_once(finish);
         } else {
             error!("Unsetting GTK crash workaround");
             pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
-            glib::timeout_add_local_once(Duration::from_millis(300), finish);
+            // glib::timeout_add_local_once(Duration::from_millis(300), finish);
         }
+        // Doing this immediately can cause it to be skipped
+        glib::idle_add_local_once(finish);
     }
 
     // TODO -- include index or have the TabsList allocate boxes and pass those down.
@@ -726,8 +737,8 @@ impl Tab {
     }
 
     fn save_settings(&self) {
-        GUI.with(|g| {
-            g.get().unwrap().database.store(&self.path, self.settings);
+        gui_run(|g| {
+            g.database.store(&self.path, self.settings);
         });
     }
 }

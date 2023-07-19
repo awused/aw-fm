@@ -47,7 +47,7 @@ impl Contents {
         self.list.extend(snap.entries.into_iter());
         let start = Instant::now();
         self.list.sort(self.sort.comparator());
-        println!("sort time {:?}", start.elapsed());
+        trace!("Sorted {:?} items in {:?}", self.list.n_items(), start.elapsed());
 
         // let a = self.contents.list.item(0).unwrap();
         // let settings = self.settings;
@@ -145,7 +145,9 @@ impl Contents {
 
     pub fn sort(&mut self, sort: SortSettings) {
         self.sort = sort;
+        let start = Instant::now();
         self.list.sort(sort.comparator());
+        trace!("Sorted {:?} items in {:?}", self.list.n_items(), start.elapsed());
     }
 
     pub fn clear(&mut self, sort: SortSettings) {

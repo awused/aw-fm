@@ -48,6 +48,17 @@ pub static WINDOW_ID: OnceLock<String> = OnceLock::new();
 // Rc<RefCell<Option<Gui>>> might work better in some cases.
 thread_local!(static GUI: OnceCell<Rc<Gui>> = OnceCell::default());
 
+fn gui_run<R, F: FnOnce(&Rc<Gui>) -> R>(f: F) -> R {
+    GUI.with(|g| f(g.get().unwrap()))
+}
+
+fn tabs_run<R, F: FnOnce(&mut TabsList) -> R>(f: F) -> R {
+    gui_run(|g| {
+        let mut tabs = g.tabs.borrow_mut();
+        f(&mut tabs)
+    })
+}
+
 #[derive(Debug, Copy, Clone, Default)]
 struct WindowState {
     maximized: bool,
@@ -57,11 +68,11 @@ struct WindowState {
 }
 
 pub fn queue_high_priority_thumb(weak: WeakRef<EntryObject>) {
-    GUI.with(|g| g.get().unwrap().thumbnailer.high_priority(weak));
+    gui_run(|g| g.thumbnailer.high_priority(weak));
 }
 
 pub fn queue_low_priority_thumb(weak: WeakRef<EntryObject>) {
-    GUI.with(|g| g.get().unwrap().thumbnailer.low_priority(weak));
+    gui_run(|g| g.thumbnailer.low_priority(weak));
 }
 
 

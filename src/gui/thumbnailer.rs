@@ -19,7 +19,7 @@ use gtk::prelude::{FileExt, IconExt, ObjectExt};
 use rayon::{ThreadBuilder, ThreadPool, ThreadPoolBuilder};
 
 use self::send::SendFactory;
-use super::GUI;
+use super::gui_run;
 use crate::com::EntryObject;
 use crate::{closing, handle_panic};
 
@@ -105,8 +105,8 @@ impl Thumbnailer {
     }
 
     fn done_with_ticket(factory: SendFactory) {
-        GUI.with(|g| {
-            let t = &g.get().unwrap().thumbnailer;
+        gui_run(|g| {
+            let t = &g.thumbnailer;
             t.pending.borrow_mut().factories.push(factory);
             t.process();
         });

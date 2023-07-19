@@ -7,6 +7,7 @@ use gtk::subclass::prelude::*;
 use gtk::{gio, glib, GridView, ListView, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
+use super::get_first_visible_child;
 use crate::com::{DisplayMode, EntryObject};
 use crate::gui::tabs::{Tab, TabId};
 use crate::gui::GUI;
@@ -57,6 +58,30 @@ impl IconView {
         grid.connect_destroy(|_| error!("TODO -- remove me: grid confirmed destroyed"));
         scroller.set_child(Some(&grid));
 
+
+        grid.connect_activate(move |g, a| {
+            let model = g.model().unwrap();
+
+            let selection = model.selection();
+            println!("activate {g:?}, {tab_id:?}: {} {:?}", selection.size(), selection);
+        });
+
         Self { grid }
+    }
+
+    pub(super) fn scroll_to(&self, pos: u32) {
+        self.grid.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
+    }
+
+    pub(super) fn get_first_visible(&self) -> Option<EntryObject> {
+        let model = self.grid.model().unwrap();
+        if model.n_items() == 0 {
+            return None;
+        }
+
+        get_first_visible_child(self.grid.upcast_ref::<gtk::Widget>())
+            .and_then(|w| w.first_child())
+            .and_downcast::<IconTile>()
+            .and_then(|it: IconTile| it.bound_object())
     }
 }

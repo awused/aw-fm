@@ -19,7 +19,7 @@ use crate::com::{
     DirSettings, DisplayMode, Entry, EntryKind, EntryObject, SortDir, SortMode, SortSettings,
 };
 use crate::gui::tabs::{Tab, TabId};
-use crate::gui::GUI;
+use crate::gui::{tabs_run, GUI};
 
 const NAME: &str = "Name";
 const SIZE: &str = "Size";
@@ -155,7 +155,6 @@ impl DetailsView {
         let cur_sort = current_sort.clone();
         sorter.connect_changed(move |sorter, b| {
             let (col, direction) = sorter.nth_sort_column(0);
-            println!("{col:?} {direction:?}");
             let Some(col) = col else {
                 return;
             };
@@ -174,12 +173,21 @@ impl DetailsView {
             if cur_sort.get() != new_sort {
                 cur_sort.set(new_sort);
                 trace!("Sorter changed: {col:?} {direction:?}");
-                GUI.with(|g| g.get().unwrap().tabs.borrow_mut().update_sort(tab_id, new_sort))
+                tabs_run(|t| t.update_sort(tab_id, new_sort))
             }
         });
 
         column_view.connect_destroy(|_| error!("TODO -- remove me: details confirmed destroyed"));
 
+        column_view.connect_activate(|c, a| {
+            let model = c.model().unwrap();
+
+            let selection = model.selection();
+            for i in 0..selection.size() {
+                println!("{}", selection.nth(i as u32));
+            }
+            println!("activate {c:?}, {a:?}: {} {:?}", selection.size(), selection);
+        });
 
         scroller.set_child(Some(&column_view));
 
@@ -195,4 +203,6 @@ impl DetailsView {
 
         set_sort(&self.column_view, sort);
     }
+
+    pub(super) fn scroll_to(&self, pos: u32) {}
 }

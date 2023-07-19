@@ -16,7 +16,6 @@ use crate::config::OPTIONS;
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 
-// mod tab_element;
 
 // Maximum number of panes per window
 const MAX_PANES: usize = 3;
