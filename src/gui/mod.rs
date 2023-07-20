@@ -36,6 +36,7 @@ use crate::config::{CONFIG, OPTIONS};
 use crate::database::DBCon;
 use crate::{closing, config};
 
+mod applications;
 mod input;
 mod main_window;
 mod tabs;
@@ -83,7 +84,6 @@ struct Gui {
     overlay: gtk::Overlay,
     menu: OnceCell<menu::GuiMenu>,
 
-    // RefCell<Vec<Tab>>>
     // Tabs can recursively look for each other.
     tabs: RefCell<TabsList>,
 
@@ -107,18 +107,25 @@ struct Gui {
 
     last_action: Cell<Option<Instant>>,
     first_content_paint: OnceCell<()>,
-    // open_dialogs: RefCell<input::OpenDialogs>,
-    // shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, String>>,
-    manager_sender: UnboundedSender<MAWithResponse>,
+    open_dialogs: RefCell<input::OpenDialogs>,
+    shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, String>>,
+
+    manager_sender: UnboundedSender<ManagerAction>,
 
     #[cfg(windows)]
     win32: windows::WindowsEx,
 }
 
 pub fn run(
-    manager_sender: UnboundedSender<MAWithResponse>,
+    manager_sender: UnboundedSender<ManagerAction>,
     gui_receiver: glib::Receiver<GuiAction>,
 ) {
+    let start = Instant::now();
+    println!("{:?}", gio::AppInfo::default_for_type("video/mp4", false).unwrap().name());
+    println!("Listed applications in {:?}", start.elapsed());
+    println!("{:?}", gio::AppInfo::default_for_type("video/mp4", false).unwrap().name());
+    println!("Listed applications in {:?}", start.elapsed());
+
     let flags = if CONFIG.unique {
         gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::SEND_ENVIRONMENT
     } else {
@@ -150,11 +157,10 @@ pub fn run(
 
     // This is a stupid hack around glib trying to exert exclusive control over the command line.
     application.connect_command_line(|a, _| {
-        if GUI.with(|g| g.get().is_none()) {
-            a.activate();
-        } else {
-            println!("Handling command line from another process")
-        }
+        GUI.with(|g| match g.get() {
+            None => a.activate(),
+            Some(g) => println!("Handling command line from another process"),
+        });
         0
     });
 
@@ -165,7 +171,7 @@ pub fn run(
 impl Gui {
     pub fn new(
         application: &gtk::Application,
-        manager_sender: UnboundedSender<MAWithResponse>,
+        manager_sender: UnboundedSender<ManagerAction>,
         gui_receiver: glib::Receiver<GuiAction>,
     ) -> Rc<Self> {
         let window = MainWindow::new(application);
@@ -194,17 +200,15 @@ impl Gui {
             bottom_bar: gtk::Box::new(Horizontal, 15),
             label_updates: RefCell::default(),
 
-            // bg: Cell::new(config::CONFIG.background_colour.unwrap_or(gdk::RGBA::BLACK)),
-
-            // layout_manager: RefCell::new(LayoutManager::new(weak.clone())),
             pad_scrolling: Cell::default(),
             drop_next_scroll: Cell::default(),
             animation_playing: Cell::new(true),
 
             last_action: Cell::default(),
             first_content_paint: OnceCell::default(),
-            // open_dialogs: RefCell::default(),
-            // shortcuts: Self::parse_shortcuts(),
+            open_dialogs: RefCell::default(),
+            shortcuts: Self::parse_shortcuts(),
+
             manager_sender,
 
             #[cfg(windows)]
@@ -247,7 +251,6 @@ impl Gui {
     fn setup(self: &Rc<Self>) {
         self.tabs.borrow_mut().setup();
         self.setup_interaction();
-
 
         // let g = self.clone();
         // TODO -- handle resizing
@@ -325,17 +328,14 @@ impl Gui {
             DirectoryOpenError(path, error) => {
                 // This is a special case where we failed to open a directory or read it at all.
                 // Treat it as if it were closed.
-                self.convey_error(error);
+                self.convey_error(&error);
                 error!("Treating {path:?} as closed");
                 self.tabs.borrow_mut().directory_failure(path);
             }
-            DirectoryError(path, error) => {
-                // Some other error that isn't as fatal.
-                todo!()
+            DirectoryError(_, error) | EntryReadError(_, _, error) | ConveyError(error) => {
+                self.convey_error(&error);
             }
-            ConveyError(error) => {
-                self.convey_error(error);
-            }
+            Action(action) => self.run_command(&action),
             Quit => {
                 self.window.close();
                 closing::close();
@@ -345,7 +345,7 @@ impl Gui {
         glib::Continue(true)
     }
 
-    fn send_manager(&self, val: MAWithResponse) {
+    fn send_manager(&self, val: ManagerAction) {
         if let Err(e) = self.manager_sender.send(val) {
             if !closing::closed() {
                 // This should never happen
@@ -356,7 +356,7 @@ impl Gui {
         }
     }
 
-    fn convey_error(&self, msg: String) {
+    fn convey_error(&self, msg: &str) {
         self.window.imp().toast.set_text(&msg);
         self.window.imp().toast.set_visible(true);
     }

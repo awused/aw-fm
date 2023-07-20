@@ -39,9 +39,6 @@ On fedora all required dependencies can be installed with `dnf install gtk4-deve
 
 # Shortcuts
 
-Default Shortcut | Action
------------------|-----------
-
 ## Customization
 
 Keyboard shortcuts and context menu entries can be customized in [aw-man.toml](aw-man.toml.sample). See the comments in the config file for how to specify them.
@@ -50,61 +47,68 @@ Recognized internal commands:
 
 * Help
   * List current keybinds.
-* NextPage/PreviousPage/FirstPage/LastPage
-  * Optionally takes an argument of `start`, `end`, or `current` to determine what portion of the page will be visible.
-* ScrollDown/ScrollUp
-  * These may switch to the next or previous page outside of strip mode.
-  * Optionally takes a scroll amount as a positive integer `ScrollDown 500`
-* ScrollRight/ScrollLeft
-  * Optionally takes a scroll amount as a positive integer `ScrollRight 500`
-* SnapTop/SnapBottom/SnapLeft/SnapRight
-  * Snaps the screen so that the edges of the current page are visible.
-* FitToContainer/FitToWidth/FitToHeight/FullSize
-* SinglePage/VerticalStrip/HorizontalStrip/DualPage/DualPageReversed
-  * Change how pages are displayed.
-* NextArchive/PreviousArchive
 * Quit
-* SetBackground
-  * Spawns a dialog allowing the user to select a new background colour.
-  * Optionally takes a string recognized by GDK as a colour.
-  * Examples: `SetBackground #aaaaaa55` `SetBackground magenta`
-* Fullscreen/MangaMode/Upscaling/Playing/UI
-  * Toggle the status of various modes.
-    * Fullscreen - If the application is full screen.
-    * MangaMode - If scrolling down from the last image in an archive will automaticlly load the next archive.
-    * Upscaling - Whether or not external upscalers are in use.
-    * Playing - Set whether animations and videos are playing.
-    * UI - Hide or show the visible portions of the UI.
-  * These optionally take an argument of `toggle`, `on` or `off`
-  * Examples: `Fullscreen` (equivalent to `Fullscreen toggle`), `MangaMode on`, or `Playing off`
-  * ToggleFullscreen/ToggleMangaMode/ToggleUpscaling/TogglePlaying/ToggleUI are older, deprecated versions that do not take arguments.
-* Jump
-  * Spawns a dialog allowing the user to enter the number of the page they want to display, or the number of pages to shift.
-  * Optionally takes an integer argument as either an absolute jump within the same chapter or a relative jump, which can span multiple chapters in Manga mode.
-  * Optionally takes a second argument of `start`, `end`, or `current` to determine what portion of the page will be visible.
-  * Absolute jumps are one-indexed.
-  * Examples: `Jump 25`, `Jump +10`, `Jump -5`, `Jump -4 start`, `Jump +1 current`
+* Activate
+  * Activates the current selection.
+  * The same as if the user hits "Enter" with the pane focused.
+* Cut/Copy
+  * Cuts or copies the current selection.
+  * Clears the clipboard if nothing is selected.
+* Paste
+  * Pastes into the current tab.
+  * Calling this from scripts would be strange.
+* JumpToFile
+  * 
+  * Examples: `JumpToFile /home/me/some_important_file.png`
+* OpenToFile
+  * Like JumpToFile but always opens a new tab.
+  * Examples: `OpenToFile /home/me/some_important_file.png`
+* Navigate
+  * Navigates the current tab to a directory.
+  * If no tab is open, one will be opened.
+  * Examples: `Navigate /path/to/directory`
 * Execute
   * Requires a single string argument which will be run as an executable.
   * Example: `Execute /path/to/save-page.sh`
 * Script
   * Like Execute but reads stdout from the executable as a series of commands to run, one per line.
-  * Waits for the script to finish. Use `Execute` and the unix socket for more interactive scripting.
   * Example: `Script /path/to/sample-script.sh`
-* Open/OpenFolder
-  * Spawns a dialog allowing the user to open new files or a new folder.
-  * Open can take a series of unescaped but quoted paths.
+* Open
   * Example `Open /first/path/file.jpg /second/path/file2.jpg "/path/with spaces/file3.jpg"`
 
 # Custom Actions
 
-Custom actions are enabled by scripts in the scripts directory, default `$HOME/.config/aw-fm/scripts/`. 
+Custom actions are enabled by scripts in the custom-actions directory, default `$HOME/.config/aw-fm/custom-actions/`. Depending on how they are configured they do not always appear in the context menu.
 
 They must be executable text files and options are read from within the file. See the [example script](examples/sample.sh) for an explanation of all the options and environment variables.
 
+## External Executable Environment
+
+The executables from `Execute`, `Script`, and custom actions will be called with no arguments and several environment variables set. [rofi-jump-home.sh](examples/rofi-jump-home.sh) is an example that opens rofi to navigate to a directory inside the user's home directory.
+
+Environment Variable | Explanation
+-------------------- | ----------
+AWFM_CURRENT_DIR | The directory of the current selected tab. May be empty.
+AWFM_SELECTION | A newline-separated set of selected files.
+AWMAN_ARCHIVE | The path to the current archive or directory that is open.
+AWMAN_ARCHIVE_TYPE | The type of the archive, one of `archive`, `directory`, `fileset`, or `unknown`.
+AWMAN_BACKGROUND | The current background colour in `rgb(int, int, int)` or `rgba(int, int, int, float)` form.
+AWMAN_CURRENT_FILE | The path to the extracted file or, in the case of directories, the original file. It should not be modified or deleted.
+AWMAN_DISPLAY_MODE | The current display mode, either `single` or `verticalstrip`.
+AWMAN_FIT_MODE | The current fit mode, one of `container`, `height`, `width`, or `verticalstrip`.
+AWMAN_FULLSCREEN | Wether or not the window is currently fullscreen.
+AWMAN_MANGA_MODE | Whether manga mode is enabled or not.
+AWMAN_PAGE_NUMBER | The page number of the currently open file.
+AWMAN_PID | The PID of the aw-man process.
+AWMAN_RELATIVE_FILE_PATH | The path of the current file relative to the root of the archive or directory.
+AWMAN_SOCKET | The socket used for IPC, if enabled.
+AWMAN_UI_VISIBLE | Whether the UI (bottom bar) is currently visible.
+AWMAN_UPSCALING_ENABLED | Whether upscaling is enabled or not.
+AWMAN_WINDOW | The window ID for the primary window. Currently only on X11.
+
 # Building on Windows
 
-Not planned.
+Not planned, good luck.
 
 # Development
 

@@ -16,12 +16,11 @@ use tokio::task::LocalSet;
 use tokio::time::{sleep_until, timeout, Instant};
 
 use self::watcher::PendingUpdate;
-use crate::com::{CommandResponder, GuiAction, GuiActionContext, MAWithResponse, ManagerAction};
+use crate::com::{GuiAction, ManagerAction};
 use crate::config::{CONFIG, OPTIONS};
 use crate::{closing, spawn_thread};
 
 mod actions;
-mod monitor;
 mod read_dir;
 mod watcher;
 
@@ -42,10 +41,8 @@ enum ManagerWork {
 // to the gui without blocking it.
 #[derive(Debug)]
 struct Manager {
-    temp_dir: TempDir,
+    // temp_dir: TempDir,
     gui_sender: glib::Sender<GuiAction>,
-
-    action_context: GuiActionContext,
 
     // If there are pending mutations, we wait to clear and process them.
     // If the boolean is true, there was a second event we debounced.
@@ -59,7 +56,7 @@ struct Manager {
 }
 
 pub fn run(
-    manager_receiver: UnboundedReceiver<MAWithResponse>,
+    manager_receiver: UnboundedReceiver<ManagerAction>,
     gui_sender: glib::Sender<GuiAction>,
 ) -> JoinHandle<()> {
     let mut builder = tempfile::Builder::new();
@@ -79,7 +76,8 @@ pub fn run(
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn run_local(f: impl Future<Output = TempDir>) {
+//async fn run_local(f: impl Future<Output = TempDir>) {
+async fn run_local(f: impl Future<Output = ()>) {
     // Set up a LocalSet so that spawn_local can be used for cleanup tasks.
     let local = LocalSet::new();
     let tdir = local.run_until(f).await;
@@ -92,8 +90,8 @@ async fn run_local(f: impl Future<Output = TempDir>) {
     }
 
     // By now, all archive joins, even those spawned in separate tasks, are done.
-    tdir.close()
-        .unwrap_or_else(|e| error!("Error dropping manager temp dir: {:?}", e));
+    // tdir.close()
+    // .unwrap_or_else(|e| error!("Error dropping manager temp dir: {:?}", e));
 }
 
 impl Manager {
@@ -118,10 +116,8 @@ impl Manager {
         .unwrap();
 
         Self {
-            temp_dir,
+            // temp_dir,
             gui_sender,
-
-            action_context: GuiActionContext::default(),
 
             recent_mutations: AHashMap::new(),
             next_tick: None,
@@ -131,7 +127,8 @@ impl Manager {
         }
     }
 
-    async fn run(mut self, mut receiver: UnboundedReceiver<MAWithResponse>) -> TempDir {
+    // async fn run(mut self, mut receiver: UnboundedReceiver<ManagerAction>) -> TempDir {
+    async fn run(mut self, mut receiver: UnboundedReceiver<ManagerAction>) {
         // let path: PathBuf = "/storage/usr/desuwa/Hentai/Images".into();
         // let path: PathBuf = "/storage/cache/fm-test".into();
         // self.start_read_dir(Arc::from(path));
@@ -188,13 +185,12 @@ impl Manager {
                 biased;
                 _ = closing::closed_fut() => break 'main,
                 mtg = receiver.recv() => {
-                    let Some((mtg, context, r)) = mtg else {
+                    let Some(ma) = mtg else {
                         error!("Received nothing from gui thread. This should never happen");
                         closing::close();
                         break 'main;
                     };
-                    self.action_context = context;
-                    self.handle_action(mtg, r);
+                    self.handle_action(ma);
                 }
                 ev = self.notify_receiver.recv() => {
                     let Some(ev) = ev else {
@@ -242,10 +238,10 @@ impl Manager {
         if let Err(e) = timeout(Duration::from_secs(600), self.join()).await {
             error!("Failed to exit cleanly in {e}, something is probably stuck.");
         }
-        self.temp_dir
+        // self.temp_dir
     }
 
-    fn handle_action(&mut self, ma: ManagerAction, resp: Option<CommandResponder>) {
+    fn handle_action(&mut self, ma: ManagerAction) {
         use ManagerAction::*;
 
         match ma {
@@ -255,9 +251,11 @@ impl Manager {
                 }
             }
             Refresh(path) => self.start_read_dir(path),
-            Close(path) => self.unwatch_dir(&path),
+            Unwatch(path) => self.unwatch_dir(&path),
+
+            Execute(s, env) => self.execute(s, env),
+            Script(s, env) => self.script(s, env),
         }
-        // Execute(s, env) => self.execute(s, env, resp),
     }
 
     fn send_gui(gui_sender: &glib::Sender<GuiAction>, action: GuiAction) {

@@ -173,6 +173,7 @@ dependencies = [
  "tempfile",
  "tikv-jemallocator",
  "tokio",
+ "toml 0.7.6",
 ]
 
 [[package]]

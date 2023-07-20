@@ -17,12 +17,12 @@ header>button {
   background: none;
 }
 
-scrolledwindow,
-listview,
-gridview,
-columnview,
-entry,
-scrollbar {
+.main scrolledwindow,
+.main listview,
+.main gridview,
+.main columnview,
+.main entry,
+.main scrollbar {
   background: none;
 }
 

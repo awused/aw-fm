@@ -21,6 +21,7 @@ use crate::gui::tabs::id::next_id;
 const MAX_PANES: usize = 3;
 
 // Unique highlights for each selected tab per pane.
+// TODO -- this or just brighter/darker?
 const PANE_COLOURS: [RGBA; MAX_PANES] = [RGBA::BLUE, RGBA::GREEN, RGBA::RED];
 
 
@@ -29,6 +30,10 @@ const PANE_COLOURS: [RGBA; MAX_PANES] = [RGBA::BLUE, RGBA::GREEN, RGBA::RED];
 #[derive(Debug)]
 pub struct TabsList {
     tabs: Vec<Tab>,
+
+    // There is always one active tab or no open tabs.
+    // This may be a dangling ID.
+    active: Option<TabId>,
 
     //tabs_store: gio::ListStore,
     tabs_container: gtk::ListView,
@@ -39,6 +44,7 @@ impl TabsList {
     pub fn new(window: &MainWindow) -> Self {
         Self {
             tabs: Vec::new(),
+            active: None,
 
             tabs_container: window.imp().tabs.clone(),
             pane_container: window.imp().panes.clone(),
@@ -146,10 +152,11 @@ impl TabsList {
         }
     }
 
-    fn navigate(&mut self, id: TabId) {
+    pub fn navigate(&mut self, id: TabId, target: &Path) {
         let index = self.position(id).unwrap();
         let (left, tab, right) = self.split_around_mut(index);
-        todo!()
+
+        tab.navigate(left, right, target)
     }
 
     fn clone_tab(&mut self, index: usize) {

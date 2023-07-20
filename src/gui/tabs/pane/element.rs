@@ -20,6 +20,7 @@ pub(super) struct PaneSignals(Disconnector<MultiSelection>, Disconnector<MultiSe
 impl PaneElement {
     pub(super) fn new(tab: &Tab) -> (Self, PaneSignals) {
         let s: Self = glib::Object::new();
+        s.imp().tab_id.set(tab.id()).unwrap();
         let signals = s.setup_signals(tab);
 
         (s, signals)
@@ -84,8 +85,10 @@ mod imp {
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
+    use once_cell::unsync::OnceCell;
 
     use crate::com::{Disconnector, EntryObject, Thumbnail};
+    use crate::gui::tabs::TabId;
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "element.ui")]
@@ -101,6 +104,8 @@ mod imp {
 
         #[template_child]
         pub selection: TemplateChild<gtk::Label>,
+
+        pub tab_id: OnceCell<TabId>,
     }
 
     #[glib::object_subclass]

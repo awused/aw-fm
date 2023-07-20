@@ -51,6 +51,7 @@ impl Manager {
     }
 
     pub(super) fn unwatch_dir(&mut self, path: &Path) {
+        trace!("Unwatching {path:?}");
         if let Err(e) = self.watcher.unwatch(path) {
             warn!("Failed to unwatch {path:?}, removed or never started");
         }

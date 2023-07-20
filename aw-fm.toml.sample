@@ -1,9 +1,5 @@
 # You can use the --awconf flag to override the config being loaded.
-# This config file is optional.
-
-# Directory to store temporary files in, including extracting archives.
-# Leave blank for the system default temp directory.
-# temp_directory = ''
+# This config file is optional, the options specified here are the defaults.
 
 # The location of the database to use for persistent data storage.
 # Currently only per-directory sort and display settings.
@@ -14,10 +10,6 @@
 # This is any string understood by GDK, such as "black", "magenta", or "#55667788"
 # Transparency is allowed but depends on the display server for support.
 background_colour = '#000000be'
-
-# The amount by which scrolling happens for discrete events.
-# This applies to most mouse wheels and for "Scroll" actions.
-scroll_amount = 300
 
 # The timeout, in seconds, for detecting idleness.
 # When the application is idle for a long period of time then most preloaded images can be unloaded
@@ -32,63 +24,31 @@ idle_timeout = 600
 # See the readme or the example scripts for details on the commands and environment variables.
 # Valid modifiers are Control, Shift, Alt, Super, and Command.
 # See https://gitlab.gnome.org/GNOME/gtk/blob/master/gdk/gdkkeysyms.h for names of keys.
+#
+# "Activate" probably should not be bound, but you can if you want.
+#
+# Binding letters without modifiers is not recommended either.
+#
 # Use uppercase letters.
 # Examples:
-# {key = "S", modifiers = "Control,Shift", action = "Execute /path/to/save-page.sh"},
-# {key = "M", modifiers = "Control", action = "Execute /path/to/mangadex-url-clipboard.sh"},
-# {key = "Down", modifiers = "Shift", action = "Jump +10"},
-# {key = "Up", modifiers = "Shift", action = "Jump -10"},
-# {key = "B", modifiers = "Shift", action = "SetBackground ffffffff"},
+# {key = "H", modifiers = "Alt", action = "Script /path/to/rofi-jump-home.sh"},
 shortcuts = [
   {key = "question", modifiers = "Shift", action = "Help"},
 
-  {key = "Down", action = "ScrollDown"},
-  {key = "Up", action = "ScrollUp"},
-  {key = "Right", action = "ScrollRight"},
-  {key = "Left", action = "ScrollLeft"},
+  {key = "C", modifiers = "Control", action = "Copy"},
+  {key = "X", modifiers = "Control", action = "Cut"},
+  {key = "V", modifiers = "Control", action = "Paste"},
 
-  {key = "Down", modifiers = "Shift", action = "SnapBottom"},
-  {key = "Up", modifiers = "Shift", action = "SnapTop"},
-  {key = "Right", modifiers = "Shift", action = "SnapRight"},
-  {key = "Left", modifiers = "Shift", action = "SnapLeft"},
+  {key = "H", modifiers = "Control", action = "Navigate /home/" },
 
-  {key = "Down", modifiers = "Control", action = "ScrollDown 1"},
-  {key = "Up", modifiers = "Control", action = "ScrollUp 1"},
-  {key = "Right", modifiers = "Control", action = "ScrollRight 1"},
-  {key = "Left", modifiers = "Control", action = "ScrollLeft 1"},
+  {key = "F", modifiers = "Control", action = "Search"},
 
-  {key = "Page_Down", action = "NextPage"},
-  {key = "Page_Up", action = "PreviousPage"},
-  {key = "End", action = "LastPage"},
-  {key = "Home", action = "FirstPage"},
-  {key = "Escape", action = "Quit"},
-  {key = "Q", action = "Quit"},
-  {key = "bracketright", action = "NextArchive"}, # ]
-  {key = "bracketleft", action = "PreviousArchive"}, # [
-  {key = "U", action = "Upscaling toggle"},
-  {key = "H", action = "UI toggle"},
-  {key = "B", action = "SetBackground"},
-  {key = "F", action = "Fullscreen toggle"},
-  {key = "M", action = "MangaMode toggle"},
-  {key = "J", action = "Jump"},
-  {key = "O", modifiers = "Control", action = "Open"},
-  {key = "O", modifiers = "Control, Shift", action = "OpenFolder"},
+  {key = "R", modifiers = "Control", action = "Rename"},
 
-  {key = "F", modifiers = "Alt", action = "FullSize" },
-  {key = "C", modifiers = "Alt", action = "FitToContainer" },
-  {key = "W", modifiers = "Alt", action = "FitToWidth" },
-  {key = "H", modifiers = "Alt", action = "FitToHeight" },
+  {key = "Up", modifiers = "Alt", action = "Parent"},
+  {key = "Down", modifiers = "Alt", action = "Child"},
 
-  {key = "S", modifiers = "Alt", action = "SinglePage"},
-  {key = "V", modifiers = "Alt", action = "VerticalStrip"},
-  {key = "O", modifiers = "Alt", action = "HorizontalStrip"},
-  {key = "D", modifiers = "Alt", action = "DualPage"},
-  {key = "R", modifiers = "Alt", action = "DualPageReversed"},
-
-  {key = "space", action = "Playing toggle"},
-
-  {key = "Page_Down", modifiers = "Control", action = "NextPage Current"},
-  {key = "Page_Up", modifiers = "Control", action = "PreviousPage Current"},
+  {key = "F5", action = "Refresh"},
 ]
 
 # Context Menu
@@ -114,93 +74,33 @@ context_menu = [
   {name = "Dual Page (Reversed)", section = "display", action = "DualPageReversed"},
 ]
 
-# VRAM available for GPU acceleration
-# Processing, namely downscaling, on the GPU is much faster and less disruptive than on the CPU, but
-# vram is usually more limited than system ram.
-# This can increase the baseline memory usage of aw-man.
-# This number does not affect the VRAM used to display images or used by the upscaler.
-# Specify a whole number of gigabytes. Comment out or set to 0 to disable some gpu acceleration.
-gpu_vram_limit_gb = 2
-
-# Only consider GPUs with names matching this prefix for acceleration.
-# See the output of --show-gpus.
-# Case sensitive. Leave empty or blank to pick the first GPU found.
-# gpu_prefix = "NVIDIA"
-
-# Allow use of "unrar" binary, if available, for rar files.
-# Some rar files are supported by libarchive but many are not.
-# This is recommended but disabled by default.
-allow_external_extractors = false
 
 # ------------------------------------------------------------------------------------------------
 # More advanced configuration options below. They probably do not need to be changed.
 # ------------------------------------------------------------------------------------------------
 
-# Use a different upscaler instead of the default waifu2x-ncnn-vulkan implementation.
-# The upscaler needs to be compatible with https://github.com/awused/aw-upscale
-# alternate_upscaler = ''
-
-# Whether to force the use of RGBA images, which are faster but consume more memory.
-# By default aw-man prefers to save on memory by using RGB or greyscale formats when possible, but
-# this results in much slower data uploads to the GPU than RGBA.
-# The default is still very fast and should be unnoticeable, but RGBA can be forced for performance.
-# force_rgba = false
-
-# How many future images to upscale in advance.
-# This will cause future chapters/archives to be extracted and upscaled even outside of manga mode.
-# Set this high enough so that it stays ahead of your reading speed, but not so high that the GPU
-# usage is annoying to you in other programs.
-#
-# The maximum number of images that will be actively upscaled at any one time,
-# taking up space or memory in the temp_directory, is given by
-# max(preload_ahead, prescale) + preload_behind + 1.
-# prescale = 20
-
-# Allow vertical and horizontal strip modes to load more images to fill the viewport if the images
-# are too small.
-# No effect if smaller than preload_ahead.
-# max_strip_preload_ahead = 50
-
-# If set, create unix sockets in this directory for very simple IPC.
-# One socket will be created for each running instance of aw-man.
-# The sockets will be named "aw-man${PID}.sock" and will be listening for any requests.
-# It will respond to requests with UTF-8 encoded JSON.
-# socket_dir = '/tmp/'
-
-# The timeout, in seconds, for upscaling tasks.
-# This should be set generously since it's only really intended to avoid blocking on hung processes.
-# Comment out or set to 0 to disable, not recommended.
-upscale_timeout = 60
-
-
 # Thread Settings --------------------------------------------------------------------------------
 
-# Files are extracted, then scanned, then possibly upscaled, then loaded into memory.
+# How many concurrent thumbnail processes we allow.
+# There are tradeoffs between how fast thumbnails are generated and how responsive the UI remains.
+# Thumbnailing is done in separate threads but GTK.
+#
+# The slower the thumbnail process, the less choppy this is even at higher values. Too high and
+# directories with many cheap thumbnails cause the process to slow down. Too low and expensive
+# thumbnails take forever.
+#
+# Experimentally 8 is a bit past the acceptable limit in pathologically bad cases like many tiny
+# images, while in directories with many videos up to 16 is beneficial.
+#
+# Max 255 (bad idea), 0 entirely disables thumbnail loading.
+max_thumbnailers = 8
 
-# It's very rare that the application will need to be extracting multiple files at once.
-# default 2, higher numbers will very rarely matter.
-# Each extraction also gets a few writer threads, so the true number of threads is more than this.
-# extraction_threads = 2
-
-# Loading can involve converting from expensive formats (HEIF/AVIF/etc) to faster formats.
-# NFS can be temperamental so setting this lower may help.
-# default max(logical cpu cores / 2, 2)
-# This is the bottleneck for expensive formats.
-# loading_threads = 8
-
-# Upscaling is primarily limited by GPU throughput and VRAM with the default waifu2x-ncnn-vulkan.
-# Each instance uses about 1.2GB of VRAM, not included in `gpu_vram_limit_gb` above.
-# Using two threads will slightly increase throughput but greatly increase latency.
-# default 1; values higher than 2 are not advised without switching to a cheaper upscaler.
-# upscaling_threads = 1
-
-# Downscaling can be cpu intensive.
-# If you're noticing images "pop-in" after a second when downscaling, it's because aw-man downscales
-# in linear light but will display images with naive gpu scaling before that completes.
-# Increasing this can lower the latency for that pop-in.
-# This is is the bottleneck for the most common formats that are easy to decode and large images.
-# default max(logical cpu cores / 2, 4)
-# downscaling_threads = 8
+# How many thumbnailers to run in the background.
+# This is used for open directories that are not currently visible.
+#
+# Max 255, 0 disables background thumbnailing.
+# No effect if larger than max_thumbnailers.
+background_thumbnailers = 2
 
 
 # ------------------------------------------------------------------------------------------------

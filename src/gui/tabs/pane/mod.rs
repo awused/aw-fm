@@ -14,9 +14,9 @@ use gtk::{
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
-use super::{SavedViewState, Tab};
+use super::{SavedViewState, Tab, TabId};
 use crate::com::{DirSettings, Disconnector, DisplayMode, EntryObject, SortSettings};
-use crate::gui::tabs_run;
+use crate::gui::{applications, tabs_run};
 
 mod details;
 mod element;
@@ -58,14 +58,28 @@ fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
     }
 }
 
+pub(super) trait PaneExt {
+    fn display(&self, parent: &gtk::Box);
+
+    fn update_settings(&mut self, settings: DirSettings);
+
+    fn get_view_state(&self, list: &super::Contents) -> SavedViewState;
+
+    fn apply_view_state(&mut self, state: SavedViewState);
+
+    fn workaround_scroller(&self) -> &ScrolledWindow;
+
+    fn activate(&self);
+}
+
 #[derive(Debug)]
 pub(super) struct Pane {
     contents: Contents,
 
     element: PaneElement,
-    signals: PaneSignals,
-
-    tab: super::TabId,
+    contents_signals: PaneSignals,
+    // entry_signalsn: EntrySignals...
+    tab: TabId,
     selection: MultiSelection,
 }
 
@@ -80,6 +94,8 @@ impl Drop for Pane {
 }
 
 impl Pane {
+    // new(tab_id, settings, Selection)
+    // new_search(tab_id, settings, Selection)
     pub(super) fn new(tab: &Tab) -> Self {
         debug!("Creating {:?} pane for {:?}: {:?}", tab.settings.display_mode, tab.id, tab.path);
 
@@ -99,12 +115,13 @@ impl Pane {
             )),
         };
 
+        element.imp().location.set_text(&tab.path.to_string_lossy());
 
         Self {
             contents,
 
             element,
-            signals,
+            contents_signals: signals,
 
             tab: tab.id.copy(),
             selection: tab.contents.selection.clone(),
@@ -146,13 +163,6 @@ impl Pane {
         self.element.imp().location.set_text(&path.to_string_lossy());
     }
 
-    pub(super) fn apply_view_state(&mut self, state: SavedViewState) {
-        match &self.contents {
-            Contents::Icons(icons) => icons.scroll_to(state.scroll_pos),
-            Contents::Details(details) => details.scroll_to(state.scroll_pos),
-        }
-    }
-
     pub(super) fn get_view_state(&self, list: &super::Contents) -> SavedViewState {
         let eo = match &self.contents {
             Contents::Icons(ic) => ic.get_first_visible(),
@@ -163,11 +173,73 @@ impl Pane {
             eo.and_then(|obj| list.position_by_sorted_entry(&obj.get())).unwrap_or_default();
 
 
-        SavedViewState { scroll_pos }
+        SavedViewState { scroll_pos, search: None }
     }
 
     // Most view state code should be moved here.
     pub(super) fn workaround_scroller(&self) -> &ScrolledWindow {
         &self.element.imp().scroller
+    }
+}
+
+impl PaneExt for Pane {
+    // TODO -- maybe just fold this up into new() and assume it is always visible
+    fn display(&self, parent: &gtk::Box) {
+        if let Some(parent) = self.element.parent() {
+            error!("Called display() on pane that was already visible");
+        } else {
+            parent.append(&self.element);
+        }
+    }
+
+    fn update_settings(&mut self, settings: DirSettings) {
+        if self.contents.matches(settings.display_mode) {
+            self.contents.update_settings(settings);
+            return;
+        }
+
+        self.contents = match settings.display_mode {
+            DisplayMode::Icons => Contents::Icons(IconView::new(
+                &self.element.imp().scroller,
+                self.tab,
+                &self.selection,
+            )),
+            DisplayMode::List => Contents::Details(DetailsView::new(
+                &self.element.imp().scroller,
+                self.tab,
+                settings,
+                &self.selection,
+            )),
+        };
+    }
+
+    fn get_view_state(&self, list: &super::Contents) -> SavedViewState {
+        let eo = match &self.contents {
+            Contents::Icons(ic) => ic.get_first_visible(),
+            Contents::Details(_) => todo!(),
+        };
+
+        let scroll_pos =
+            eo.and_then(|obj| list.position_by_sorted_entry(&obj.get())).unwrap_or_default();
+
+
+        SavedViewState { scroll_pos, search: None }
+    }
+
+    fn apply_view_state(&mut self, state: SavedViewState) {
+        match &self.contents {
+            Contents::Icons(icons) => icons.scroll_to(state.scroll_pos),
+            Contents::Details(details) => details.scroll_to(state.scroll_pos),
+        }
+    }
+
+    // Most view state code should be moved here.
+    fn workaround_scroller(&self) -> &ScrolledWindow {
+        &self.element.imp().scroller
+    }
+
+    fn activate(&self) {
+        let display = self.element.display();
+        applications::activate(self.tab, &display, &self.selection);
     }
 }

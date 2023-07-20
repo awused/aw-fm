@@ -39,6 +39,7 @@ strum = "0.25.0"
 strum_macros = "0.25"
 tempfile = "3.6.0"
 tokio = { version = "1.29.1", features = ["fs", "net", "macros", "process", "rt", "sync", "time"] }
+toml = "0.7.6"
 
 
 # This is auto-generated, but pretty much left unmaintained and abandoned.

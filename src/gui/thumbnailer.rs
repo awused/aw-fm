@@ -21,27 +21,8 @@ use rayon::{ThreadBuilder, ThreadPool, ThreadPoolBuilder};
 use self::send::SendFactory;
 use super::gui_run;
 use crate::com::EntryObject;
+use crate::config::CONFIG;
 use crate::{closing, handle_panic};
-
-// How many concurrent thumbnail processes we allow.
-// There are tradeoffs between how fast we want to generate the thumbnails the user is looking at
-// and how much we can accept in terms of choppiness.
-//
-// The slower the thumbnail process, the less choppy this is even at higher values. Too high and
-// directories with many cheap thumbnails cause the process to slow down. Too low and expensive
-// thumbnails take forever (though burning tons of CPU isn't great either).
-//
-// 0 entirely disables thumbnail loading.
-//
-// Experimentally, 8 is a bit past the limit of what's acceptable, but only in pathologically bad
-// directories where there are many extremely cheap thumbnails to generate. In directories with
-// expensive thumbnails we would want even more (though not more than 16). Something adaptive might
-// be worth exploring later.
-static MAX_CONCURRENT: usize = 8;
-// Low priority runs with this many threads. No effect if higher than MAX_TICKETS.
-//
-// If 0, no thumbnails will be generated in the background.
-static LOW_PRIORITY: usize = 2;
 
 #[derive(Debug, Default)]
 struct PendingThumbs {
@@ -71,34 +52,45 @@ pub struct Thumbnailer {
     // Did test a fully glib-async version that uses GTasks under the hood, but the performance
     // wasn't any better and was sometimes much worse.
     pool: ThreadPool,
+
+    high: u16,
+    low: u16,
 }
 
 impl Thumbnailer {
     pub fn new() -> Self {
+        let max = CONFIG.max_thumbnailers as u16;
+        let low = CONFIG.background_thumbnailers as u16;
+
         let mut pending = PendingThumbs {
-            factories: SendFactory::make(MAX_CONCURRENT),
+            factories: SendFactory::make(max.into()),
             ..PendingThumbs::default()
         };
 
         let pool = ThreadPoolBuilder::new()
             .thread_name(|n| format!("thumbnailer-{n}"))
             .panic_handler(handle_panic)
-            .num_threads(MAX_CONCURRENT)
+            .num_threads(max.into())
             .build()
             .unwrap();
 
-        Self { pending: pending.into(), pool }
+        Self {
+            pending: pending.into(),
+            pool,
+            high: max,
+            low,
+        }
     }
 
     pub fn low_priority(&self, weak: WeakRef<EntryObject>) {
-        if LOW_PRIORITY > 0 && MAX_CONCURRENT > 0 {
+        if self.low > 0 && self.high > 0 {
             self.pending.borrow_mut().low_priority.push(weak);
             self.process();
         }
     }
 
     pub fn high_priority(&self, weak: WeakRef<EntryObject>) {
-        if MAX_CONCURRENT > 0 {
+        if self.high > 0 {
             self.pending.borrow_mut().high_priority.push_back(weak);
             self.process();
         }
@@ -149,8 +141,8 @@ impl Thumbnailer {
             }
         }
 
-        if MAX_CONCURRENT > LOW_PRIORITY && MAX_CONCURRENT - pending.factories.len() > LOW_PRIORITY
-        {
+        // pending.factories.len() <= self.high
+        if self.high > self.low && self.high - pending.factories.len() as u16 > self.low {
             return None;
         }
 
@@ -162,13 +154,13 @@ impl Thumbnailer {
             }
         }
 
-        // Don't spam this if it's only for single updates.
-        if pending.high_priority.capacity() + pending.low_priority.capacity() > 10 {
-            pending.high_priority.shrink_to_fit();
-            pending.low_priority.shrink_to_fit();
-
+        // Don't spam this if it's only for only a few updates.
+        if pending.high_priority.capacity() + pending.low_priority.capacity() > 32 {
             debug!("Finished loading all thumbnails (none pending).");
         }
+
+        pending.high_priority.shrink_to_fit();
+        pending.low_priority.shrink_to_fit();
 
         None
     }
@@ -221,7 +213,11 @@ impl Thumbnailer {
 
             match factory.generate_and_save_thumbnail(&uri, &mime_type, mtime_sec) {
                 Some(tex) => {
-                    trace!("Generated new thumbnail in {:?} for {uri:?}", start.elapsed());
+                    trace!(
+                        "Generated new thumbnail in {:?} for {:?}",
+                        start.elapsed(),
+                        path.file_name().unwrap_or(path.as_os_str())
+                    );
                     Self::finish_thumbnail(factory, tex, path);
                 }
                 None => Self::fail_thumbnail(factory, path),
@@ -328,7 +324,7 @@ mod send {
 
                     if e.domain() == Quark::from_str("g-exec-error-quark") {
                         // These represent errors with the thumbnail process itself, such as being
-                        // killed. If the process exits normally but fails it should be in the
+                        // killed. If the process exits on its own but fails the
                         // domain will be g-spawn-exit-error-quark.
                         error!("Thumbnailing failed abnormally for {uri:?} ({mime_type}): {e}");
                         return None;

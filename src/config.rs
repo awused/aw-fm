@@ -25,13 +25,13 @@ pub struct Opt {
     pub file_name: Option<PathBuf>,
 }
 
-// #[derive(Debug, Deserialize)]
-// pub struct Shortcut {
-//     pub action: String,
-//     pub key: String,
-//     pub modifiers: Option<String>,
-// }
-//
+#[derive(Debug, Deserialize)]
+pub struct Shortcut {
+    pub action: String,
+    pub key: String,
+    pub modifiers: Option<String>,
+}
+
 // #[derive(Debug, Deserialize)]
 // #[serde(rename_all = "lowercase")]
 // pub enum ContextMenuGroup {
@@ -49,9 +49,6 @@ pub struct Opt {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
-    // pub target_resolution: Res,
-    // #[serde(default, deserialize_with = "empty_string_is_none")]
-    // pub minimum_resolution: Option<Res>,
     #[serde(default, deserialize_with = "empty_path_is_none")]
     pub temp_directory: Option<PathBuf>,
 
@@ -71,14 +68,17 @@ pub struct Config {
 
     #[serde(default, deserialize_with = "empty_path_is_none")]
     pub database: Option<PathBuf>,
-    // #[serde(default)]
-    // pub shortcuts: Vec<Shortcut>,
+
+    #[serde(default)]
+    pub shortcuts: Vec<Shortcut>,
+
     // #[serde(default)]
     // pub context_menu: Vec<ContextMenuEntry>,
-
-    // TODO -- with preloading this is probably unnecessary
-    // #[serde(default, deserialize_with = "empty_path_is_none")]
-    // pub socket_dir: Option<PathBuf>,
+    // TODO --
+    #[serde(default)]
+    pub max_thumbnailers: u8,
+    #[serde(default)]
+    pub background_thumbnailers: u8,
 }
 
 fn one() -> NonZeroUsize {
@@ -147,10 +147,19 @@ where
 
 pub static OPTIONS: Lazy<Opt> = Lazy::new(Opt::parse);
 
+static DEFAULT_CONFIG: &str = include_str!("../aw-fm.toml.sample");
+
 pub static CONFIG: Lazy<Config> =
     Lazy::new(|| match awconf::load_config::<Config>("aw-fm", &OPTIONS.awconf) {
         Ok(conf) => conf,
         Err(awconf::Error::Deserialization(e)) => {
+            if let Some(path) = &OPTIONS.awconf {
+                if !path.is_file() && !path.is_dir() {
+                    // It's not a regular file or a directory, use the default config.
+                    warn!("Error loading config file, using default instead: {e:#?}");
+                    return toml::from_str(DEFAULT_CONFIG).unwrap();
+                }
+            }
             error!("Error parsing config: {e}");
             panic!("Error parsing config: {e}");
         }
@@ -160,7 +169,7 @@ pub static CONFIG: Lazy<Config> =
         }
         Err(e) => {
             warn!("Error loading config file, using default instead: {e:#?}");
-            Config::default()
+            toml::from_str(DEFAULT_CONFIG).unwrap()
         }
     });
 

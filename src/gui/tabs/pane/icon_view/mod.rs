@@ -10,7 +10,7 @@ use self::icon_tile::IconTile;
 use super::get_first_visible_child;
 use crate::com::{DisplayMode, EntryObject};
 use crate::gui::tabs::{Tab, TabId};
-use crate::gui::GUI;
+use crate::gui::{applications, GUI};
 
 #[derive(Debug)]
 pub(super) struct IconView {
@@ -59,11 +59,11 @@ impl IconView {
         scroller.set_child(Some(&grid));
 
 
-        grid.connect_activate(move |g, a| {
-            let model = g.model().unwrap();
+        grid.connect_activate(move |gv, a| {
+            let display = gv.display();
+            let model = gv.model().and_downcast::<MultiSelection>().unwrap();
 
-            let selection = model.selection();
-            println!("activate {g:?}, {tab_id:?}: {} {:?}", selection.size(), selection);
+            applications::activate(tab_id, &display, &model)
         });
 
         Self { grid }

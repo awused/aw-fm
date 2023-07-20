@@ -13,6 +13,9 @@ use crate::com::{DirSettings, Entry, EntryObject, EntryObjectSnapshot, SortSetti
 pub struct Contents {
     list: ListStore,
     sort: SortSettings,
+    // Stale means the entries in this list are for the previous directory.
+    // They remain visible for up to the ~1s it takes for a snapshot of a slow directory to arrive.
+    stale: bool,
     pub selection: MultiSelection,
 }
 
@@ -26,23 +29,33 @@ impl Contents {
     pub fn new(sort: SortSettings) -> Self {
         let list = ListStore::new(EntryObject::static_type());
         let selection = MultiSelection::new(Some(list.clone()));
-        Self { list, sort, selection }
+        Self { list, sort, stale: false, selection }
     }
 
     pub fn clone_from(&mut self, source: &Self, sort: SortSettings) {
-        self.list.remove_all();
-        self.sort = sort;
+        self.clear(sort);
 
-        self.list.extend(source.list.iter::<EntryObject>().flatten());
+        if !source.stale {
+            self.list.extend(source.list.iter::<EntryObject>().flatten());
+        } else {
+            warn!("Cloning from stale tab Contents. This is unusual but not necessarily wrong.");
+        }
+
         if sort != source.sort {
             self.list.sort(sort.comparator());
         }
     }
 
-    pub fn apply_snapshot(&mut self, snap: EntryObjectSnapshot) {
+    pub fn apply_snapshot(&mut self, snap: EntryObjectSnapshot, sort: SortSettings) {
         if snap.id.kind.initial() {
-            assert!(self.list.n_items() == 0);
+            if self.stale {
+                self.stale = false;
+                debug!("Clearing out stale items");
+            }
+            self.clear(sort);
+            debug_assert!(self.list.n_items() == 0);
         }
+        debug_assert_eq!(self.sort, sort);
 
         self.list.extend(snap.entries.into_iter());
         let start = Instant::now();
@@ -153,5 +166,10 @@ impl Contents {
     pub fn clear(&mut self, sort: SortSettings) {
         self.list.remove_all();
         self.sort = sort;
+    }
+
+    pub fn mark_stale(&mut self) {
+        debug!("Marking {self:?} as stale");
+        self.stale = true;
     }
 }

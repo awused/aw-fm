@@ -166,7 +166,8 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
                         entries.push(ent);
                     }
                     ReadResult::DirUnreadable(e) => {
-                        if let Err(e) = gui_sender.send(
+                        if let Err(e) =
+                            gui_sender.send(
                             GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
                             if !closing::closed() {
                                 error!("{e}");
@@ -174,12 +175,10 @@ async fn read_dir_sync_thread(path: Arc<Path>, gui_sender: glib::Sender<GuiActio
                         }
                         return false;
                     }
-                    ReadResult::DirError(e) => {
-                        todo!()
-                    }
-                    ReadResult::EntryError(p, e) => {
-                        todo!()
-                    }
+                    ReadResult::DirError(e) => drop(
+                        gui_sender.send(GuiAction::DirectoryError(path.clone(), e.to_string()))),
+                    ReadResult::EntryError(p, e) => drop(
+                        gui_sender.send(GuiAction::EntryReadError(path.clone(), p, e.to_string()))),
                 }
             }
             true

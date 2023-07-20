@@ -5,6 +5,9 @@
     <property name="title">aw-fm</property>
     <property name="default-width">800</property>
     <property name="default-height">600</property>
+    <style>
+      <class name="main"/>
+    </style>
 
     <child>
       <object class="GtkOverlay">

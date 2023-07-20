@@ -20,10 +20,11 @@ use gtk::{glib, Box, MultiSelection, Orientation, ScrolledWindow};
 use path_clean::PathClean;
 
 use self::contents::Contents;
-use self::pane::Pane;
+use self::pane::{Pane, PaneExt};
+use self::search::SearchPane;
 use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, Entry, EntryObject, EntryObjectSnapshot, FileTime,
-    GuiAction, GuiActionContext, ManagerAction, SnapshotId, SnapshotKind, SortMode, SortSettings,
+    GuiAction, ManagerAction, SnapshotId, SnapshotKind, SortMode, SortSettings,
 };
 use crate::gui::Update;
 use crate::natsort::ParsedString;
@@ -31,8 +32,10 @@ use crate::natsort::ParsedString;
 mod contents;
 mod list;
 mod pane;
+mod search;
 
-use id::{TabId, TabUid};
+pub(super) use id::TabId;
+use id::TabUid;
 pub(super) use list::TabsList;
 
 use super::{gui_run, tabs_run};
@@ -54,23 +57,15 @@ struct WatchedDir {
 impl Drop for WatchedDir {
     fn drop(&mut self) {
         gui_run(|g| {
-            g.send_manager((
-                ManagerAction::Close(self.path.clone()),
-                GuiActionContext::default(),
-                None,
-            ));
+            g.send_manager(ManagerAction::Unwatch(self.path.clone()));
         });
-
-        // TODO -- trigger a cleanup of dangling EntityObject weak refs
-        // Doing it here should be okay, but would need to ensure that all liststores are cleared
-        // out first.
     }
 }
 
 impl WatchedDir {
     fn start(path: Arc<Path>) -> Self {
         gui_run(|g| {
-            g.send_manager((ManagerAction::Open(path.clone()), GuiActionContext::default(), None));
+            g.send_manager(ManagerAction::Open(path.clone()));
         });
 
         Self { path }
@@ -90,9 +85,7 @@ enum PartiallyAppliedUpdate {
 impl PartiallyAppliedUpdate {
     fn is_in_subdir(&self, ancestor: &Path) -> bool {
         let entry = match self {
-            PartiallyAppliedUpdate::Mutate(_, eo)
-            | PartiallyAppliedUpdate::Insert(eo)
-            | PartiallyAppliedUpdate::Delete(eo) => eo.get(),
+            Self::Mutate(_, eo) | Self::Insert(eo) | Self::Delete(eo) => eo.get(),
         };
 
         if Some(ancestor) == entry.abs_path.parent() {
@@ -139,7 +132,7 @@ struct HistoryEntry {
     // If there is a matching tab when we activate this history entry, steal that Arc and state.
     // If there is none, we need a new, fresh Arc<> that definitely has no pending snapshots.
     location: Rc<Path>,
-    scroll_pos: f64, // View snapshot?
+    scroll_pos: SavedViewState,
 }
 
 // Not kept up to date, maybe an enum?
@@ -149,10 +142,50 @@ struct SavedViewState {
     // If the directory has updated we just don't care, it'll be wrong.
     pub scroll_pos: u32,
     // Selected items?
+    pub search: Option<String>,
 }
 
-#[derive(Debug)]
-struct Search();
+#[derive(Debug, Default)]
+enum CurrentPane {
+    #[default]
+    Nothing,
+    Flat(Pane),
+    Search(SearchPane),
+}
+
+
+impl CurrentPane {
+    // Nothing is going to happen so often that dynamic dispatch is a problem.
+    fn get(&self) -> Option<&dyn PaneExt> {
+        match self {
+            Self::Nothing => None,
+            Self::Flat(p) => Some(p),
+            Self::Search(p) => Some(p),
+        }
+    }
+
+    fn get_mut(&mut self) -> Option<&mut dyn PaneExt> {
+        match self {
+            Self::Nothing => None,
+            Self::Flat(p) => Some(p),
+            Self::Search(p) => Some(p),
+        }
+    }
+
+    fn flat(&mut self) -> Option<&mut Pane> {
+        match self {
+            Self::Nothing | Self::Search(_) => None,
+            Self::Flat(p) => Some(p),
+        }
+    }
+
+    fn search(&mut self) -> Option<&mut SearchPane> {
+        match self {
+            Self::Nothing | Self::Flat(_) => None,
+            Self::Search(p) => Some(p),
+        }
+    }
+}
 
 // Current limitations:
 // - Tabs cannot be unloaded, refreshed, or reopened while they're opening
@@ -174,8 +207,6 @@ struct Tab {
     // displayed_path: PathBuf,
     id: TabUid,
     path: Arc<Path>,
-    // visible: bool, -- whether the tab contents are currently visible -- only needed to support
-    // paned views.
     settings: DirSettings,
     dir_state: Rc<RefCell<DirState>>,
     contents: Contents,
@@ -187,11 +218,7 @@ struct Tab {
 
     // Each tab can only be open in one pane at once.
     // In theory we could do many-to-many but it's too niche.
-    pane: Option<Pane>,
-    // Searches do not share state with other searches and aren't copied.
-    // Each Search gets its own dedicated recursive notify watcher, if we care to listen for search
-    // updates.
-    search: Option<Search>,
+    pane: CurrentPane,
 }
 
 impl Tab {
@@ -211,7 +238,7 @@ impl Tab {
         other.iter().filter(|t| self.matches_arc(&t.path))
     }
 
-    pub(super) fn new(id: TabUid, path: PathBuf, element: (), existing_tabs: &[Self]) -> Self {
+    fn new(id: TabUid, path: PathBuf, element: (), existing_tabs: &[Self]) -> Self {
         // Clean the path without resolving symlinks.
         let mut path = path.clean();
         if path.is_relative() {
@@ -240,8 +267,7 @@ impl Tab {
             history: VecDeque::new(),
             future: Vec::new(),
             element,
-            pane: None,
-            search: None,
+            pane: CurrentPane::Nothing,
         };
 
         t.copy_from_donor(existing_tabs, &[]);
@@ -249,7 +275,7 @@ impl Tab {
         t
     }
 
-    pub(super) fn cloned(id: TabUid, source: &Self, element: ()) -> Self {
+    fn cloned(id: TabUid, source: &Self, element: ()) -> Self {
         // Assumes inactive tabs cannot be cloned.
         let view_state = source.take_view_snapshot();
         let mut contents = Contents::new(source.settings.sort);
@@ -265,8 +291,7 @@ impl Tab {
             history: source.history.clone(),
             future: source.future.clone(),
             element,
-            pane: None,
-            search: None,
+            pane: CurrentPane::default(),
         }
     }
 
@@ -331,7 +356,7 @@ impl Tab {
 
     fn apply_snapshot_inner(&mut self, snap: EntryObjectSnapshot) {
         if self.settings.display_mode == DisplayMode::Icons {
-            if let Some(pane) = &self.pane {
+            if let Some(pane) = &self.pane.get() {
                 if pane.workaround_scroller().vscrollbar_policy() != gtk::PolicyType::Never {
                     error!("Locking scrolling to work around gtk crash");
                     pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Never);
@@ -339,7 +364,9 @@ impl Tab {
             }
         }
 
-        self.contents.apply_snapshot(snap);
+        self.contents.apply_snapshot(snap, self.settings.sort);
+        // TODO [search]
+        // self.search.apply_tab_snapshot(snap, self.settings.sort);
         self.search_extend();
     }
 
@@ -386,11 +413,6 @@ impl Tab {
             // Not completed, no changes to dir loading state.
             return;
         }
-
-        println!(
-            "Test get_view_state {:?}",
-            self.pane.as_ref().unwrap().get_view_state(&self.contents)
-        );
 
         // If we're finished, update all tabs to reflect this.
         let mut sb = self.dir_state.borrow_mut();
@@ -451,7 +473,7 @@ impl Tab {
         let mut search_mutate = None;
 
         let partial = match (up, local_position, existing_global) {
-            // It simply can't exist globally but not locally
+            // It simply can't exist locally but not globally
             (_, Some(_), None) => unreachable!(),
             (Update::Entry(entry), Some(pos), Some(obj)) => {
                 let Some(old) = obj.update(entry) else {
@@ -532,15 +554,14 @@ impl Tab {
     }
 
     fn search_sort_after_snapshot(&mut self) {
-        let Some(search) = &self.search else {
+        let Some(search) = self.pane.search() else {
             return;
         };
-        // if !searching return
         // TODO [search]
     }
 
     fn search_extend(&mut self) {
-        let Some(search) = &self.search else {
+        let Some(search) = self.pane.search() else {
             return;
         };
         // TODO [search]
@@ -572,7 +593,7 @@ impl Tab {
     }
 
     fn finish_search_update(&mut self, update: &PartiallyAppliedUpdate) {
-        let Some(search) = &self.search else {
+        let Some(search) = self.pane.search() else {
             return;
         };
 
@@ -603,8 +624,7 @@ impl Tab {
     fn update_sort(&mut self, sort: SortSettings) {
         self.settings.sort = sort;
         self.contents.sort(sort);
-        // TODO [search]
-        if let Some(p) = self.pane.as_mut() {
+        if let Some(p) = self.pane.get_mut() {
             p.update_settings(self.settings)
         }
         self.save_settings();
@@ -612,16 +632,21 @@ impl Tab {
 
     fn update_display_mode(&mut self, mode: DisplayMode) {
         self.settings.display_mode = mode;
-        // TODO [search]
-        if let Some(p) = self.pane.as_mut() {
+        if let Some(p) = self.pane.get_mut() {
             p.update_settings(self.settings)
         }
         self.save_settings();
     }
 
+    // Changes location without managing history or view states.
     fn change_location(&mut self, left_tabs: &[Self], right_tabs: &[Self], target: &Path) {
         self.view_state = None;
-        self.search = None;
+        if self.pane.search().is_some() {
+            // TODO [search]
+            // replace existing search pane with flat pane
+            // And make sure said flat pane is empty.
+            todo!()
+        }
 
         self.path = target.into();
 
@@ -630,10 +655,16 @@ impl Tab {
 
             self.dir_state.replace(DirState::Unloaded);
             self.settings = gui_run(|g| g.database.get(&self.path));
-            self.contents.clear(self.settings.sort);
+            // Deliberately do not clear or update self.contents here, not yet.
+            // This allows us to keep something visible just a tiny bit longer.
+            if self.pane.flat().is_some() {
+                self.contents.mark_stale();
+            } else {
+                self.contents.clear(self.settings.sort);
+            }
         }
 
-        if let Some(pane) = &mut self.pane {
+        if let Some(pane) = self.pane.flat() {
             pane.update_location(&self.path, self.settings);
             self.load(left_tabs, right_tabs);
         }
@@ -642,12 +673,12 @@ impl Tab {
     fn navigate(&mut self, left_tabs: &[Self], right_tabs: &[Self], target: &Path) {
         info!("Navigating from {:?} to {:?}", self.path, target);
 
-        // TODO -- is an active search part of a history entry?
-        //
+        // TODO -- view snapshots
         // self.take_view_snapshot()
-        // Look for another matching tab and steal its state.
-        // Only if that fails do we open a new watcher.
-        // todo!()
+        // push onto history
+        //
+
+        self.change_location(left_tabs, right_tabs, target)
     }
 
     fn forward(&mut self) {
@@ -686,33 +717,36 @@ impl Tab {
     }
 
     fn start_apply_view_state(&mut self) {
-        let Some(pane) = &self.pane else {
+        let Some(pane) = self.pane.get_mut() else {
             trace!("Ignoring start_apply_view_state on tab {:?} with no pane", self.id);
             return;
         };
 
-        let id = self.id.copy();
-        let finish = move || tabs_run(|t| t.finish_apply_view_state(id));
 
-        if self.settings.display_mode != DisplayMode::Icons {
-        } else {
+        if self.settings.display_mode == DisplayMode::Icons {
             error!("Unsetting GTK crash workaround");
             pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
             // glib::timeout_add_local_once(Duration::from_millis(300), finish);
         }
+
         // Doing this immediately can cause it to be skipped
-        glib::idle_add_local_once(finish);
+        // let id = self.id.copy();
+        // TODO -- inline once we confirm new scrolling code doesn't crash GTK
+        self.finish_apply_view_state();
+        // let finish = move || tabs_run(|t| t.finish_apply_view_state(id));
+        // glib::idle_add_local_once(finish);
     }
 
     // TODO -- include index or have the TabsList allocate boxes and pass those down.
-    pub(super) fn display(&mut self, parent: &gtk::Box) {
-        if let Some(pane) = &self.pane {
-            trace!("Displaying existing pane");
+    fn display(&mut self, parent: &gtk::Box) {
+        // TODO -- panes must always be displayed
+        if let Some(pane) = self.pane.get_mut() {
+            error!("Displaying existing pane");
             pane.display(parent);
         } else {
             let pane = Pane::new(self);
             pane.display(parent);
-            self.pane = Some(pane);
+            self.pane = CurrentPane::Flat(pane);
         }
 
         if matches!(&*self.dir_state.borrow(), DirState::Loaded(_)) {
@@ -721,18 +755,26 @@ impl Tab {
     }
 
     fn hide(&mut self) {
+        // TODO [search]
         if matches!(&*self.dir_state.borrow(), DirState::Loaded(_)) {
             self.take_view_snapshot();
         }
     }
 
-    pub(super) fn finish_apply_view_state(&mut self) {
-        let Some(pane) = &mut self.pane else {
+    fn finish_apply_view_state(&mut self) {
+        if let Some(search) = self.pane.search() {
+            // TODO [search]
+            // It might be possible to switch to search through a &mut dyn Pane
+            return;
+        }
+
+        let Some(pane) = self.pane.flat() else {
             warn!("Pane was closed after we asked to apply view state");
             return;
         };
         let view_state = self.view_state.take().unwrap_or_default();
 
+        // self.pane.apply_view_state
         pane.apply_view_state(view_state);
     }
 
