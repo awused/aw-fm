@@ -7,7 +7,9 @@ use gtk::traits::{SelectionModelExt, WidgetExt};
 use gtk::{glib, Bitset, MultiSelection};
 
 use crate::com::{Disconnector, EntryObject};
-use crate::gui::tabs::Tab;
+use crate::gui::tabs::contents::Contents;
+use crate::gui::tabs::id::TabId;
+use crate::gui::tabs::tab::Tab;
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
@@ -18,23 +20,23 @@ glib::wrapper! {
 pub(super) struct PaneSignals(Disconnector<MultiSelection>, Disconnector<MultiSelection>);
 
 impl PaneElement {
-    pub(super) fn new(tab: &Tab) -> (Self, PaneSignals) {
+    pub(super) fn new(tab_id: TabId, contents: &Contents) -> (Self, PaneSignals) {
         let s: Self = glib::Object::new();
-        s.imp().tab_id.set(tab.id()).unwrap();
-        let signals = s.setup_signals(tab);
+        s.imp().tab_id.set(tab_id).unwrap();
+        let signals = s.setup_signals(tab_id, contents);
 
         (s, signals)
     }
 
-    fn setup_signals(&self, tab: &Tab) -> PaneSignals {
+    fn setup_signals(&self, tab_id: TabId, contents: &Contents) -> PaneSignals {
         let count_label = &*self.imp().count;
         let selection_label = &*self.imp().selection;
 
         let count = count_label.clone();
-        let count_signal = tab.contents.selection.connect_items_changed(move |list, _p, _a, _r| {
+        let count_signal = contents.selection.connect_items_changed(move |list, _p, _a, _r| {
             count.set_text(&format!("{} items", list.n_items()));
         });
-        let count_signal = Disconnector::new(&tab.contents.selection, count_signal);
+        let count_signal = Disconnector::new(&contents.selection, count_signal);
 
         let count = count_label.clone();
         let selected = selection_label.clone();
@@ -67,11 +69,11 @@ impl PaneElement {
             selected.set_text(&selected_string(selection, &set));
         };
 
-        update_selected(&tab.contents.selection, 0, 0);
+        update_selected(&contents.selection, 0, 0);
 
-        let selection_signal = tab.contents.selection.connect_selection_changed(update_selected);
+        let selection_signal = contents.selection.connect_selection_changed(update_selected);
 
-        let selection_signal = Disconnector::new(&tab.contents.selection, selection_signal);
+        let selection_signal = Disconnector::new(&contents.selection, selection_signal);
 
         PaneSignals(count_signal, selection_signal)
     }
@@ -88,7 +90,7 @@ mod imp {
     use once_cell::unsync::OnceCell;
 
     use crate::com::{Disconnector, EntryObject, Thumbnail};
-    use crate::gui::tabs::TabId;
+    use crate::gui::tabs::id::TabId;
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "element.ui")]

@@ -10,7 +10,8 @@ use gtk::traits::{BoxExt, WidgetExt};
 use gtk::Orientation;
 use path_clean::PathClean;
 
-use super::{Tab, TabId};
+use super::id::TabId;
+use super::tab::Tab;
 use crate::com::{DirSnapshot, DisplayMode, EntryObjectSnapshot, SortSettings, Update};
 use crate::config::OPTIONS;
 use crate::gui::main_window::MainWindow;
@@ -31,8 +32,8 @@ const PANE_COLOURS: [RGBA; MAX_PANES] = [RGBA::BLUE, RGBA::GREEN, RGBA::RED];
 pub struct TabsList {
     tabs: Vec<Tab>,
 
-    // There is always one active tab or no open tabs.
-    // This may be a dangling ID.
+    // There is always one active tab or no visible tabs.
+    // There may be tabs that are not visible.
     active: Option<TabId>,
 
     //tabs_store: gio::ListStore,
@@ -71,7 +72,7 @@ impl TabsList {
 
         self.tabs.push(Tab::new(next_id(), path, first_tab_element, &[]));
         self.tabs[0].load(&mut [], &mut []);
-        self.tabs[0].display(&self.pane_container);
+        self.tabs[0].new_pane(&self.pane_container);
     }
 
     pub fn update_sort(&mut self, id: TabId, settings: SortSettings) {
@@ -175,11 +176,13 @@ impl TabsList {
     pub fn close_tab(&mut self, id: TabId) {
         let index = self.position(id).unwrap();
         // TODO -- If all tabs are active
-        if self.tabs.len() == 1 {
-            self.open_tab(".".into(), id);
-        }
 
         let tab = &self.tabs[index];
+        if tab.visible() {
+            // Handle pane is visible
+            // let next_tab =
+        }
+
         let pane_index = Some(0); // ???
 
         // let active = self.tabs[index].is_active()
@@ -194,12 +197,38 @@ impl TabsList {
         // }
     }
 
-    // This is necessary to attempt to avoid a gtk crash
-    pub fn finish_apply_view_state(&mut self, id: TabId) {
-        let Some(index) = self.position(id) else {
+    pub fn close_active_tab(&mut self) {
+        let Some(active) = self.active else {
+            warn!("CloseTab called with no active tab");
             return;
         };
 
-        self.tabs[index].finish_apply_view_state();
+        self.close_tab(active);
+    }
+
+    pub fn close_active_pane(&mut self) {
+        let Some(active) = self.active else {
+            warn!("ClosePane called with no open panes");
+            return;
+        };
+
+        // TODO -- find parent ex-sibling pane, if any,
+        // if let Some(sibling) = self.find_sibling_tab(active) {
+        //     self.active = Some(sibling);
+        //     // Move focus to that pane.
+        //     self.move_focus_into(sibling);
+        // } else {
+        //     self.active = None;
+        // }
+
+        let index = self.position(active).unwrap();
+        self.tabs[index].close_pane();
+    }
+
+    pub fn close_active_both(&mut self) {
+        let Some(active) = self.active else {
+            warn!("ClosePaneAndTab called with no open panes");
+            return;
+        };
     }
 }

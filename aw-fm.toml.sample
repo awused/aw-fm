@@ -48,6 +48,9 @@ shortcuts = [
   {key = "Up", modifiers = "Alt", action = "Parent"},
   {key = "Down", modifiers = "Alt", action = "Child"},
 
+  {key = "1", modifiers = "Control", action = "Mode icons"},
+  {key = "2", modifiers = "Control", action = "Mode details"},
+
   {key = "F5", action = "Refresh"},
 ]
 

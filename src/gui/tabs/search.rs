@@ -20,10 +20,6 @@ impl SearchPane {
 }
 
 impl PaneExt for SearchPane {
-    fn display(&self, parent: &gtk::Box) {
-        todo!()
-    }
-
     fn update_settings(&mut self, settings: crate::com::DirSettings) {
         todo!()
     }

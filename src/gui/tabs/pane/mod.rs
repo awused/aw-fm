@@ -14,7 +14,8 @@ use gtk::{
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
-use super::{SavedViewState, Tab, TabId};
+use super::id::TabId;
+use super::{Contents, SavedViewState};
 use crate::com::{DirSettings, Disconnector, DisplayMode, EntryObject, SortSettings};
 use crate::gui::{applications, tabs_run};
 
@@ -23,12 +24,12 @@ mod element;
 mod icon_view;
 
 #[derive(Debug)]
-enum Contents {
+enum View {
     Icons(IconView),
     Details(DetailsView),
 }
 
-impl Contents {
+impl View {
     const fn matches(&self, mode: DisplayMode) -> bool {
         match (self, mode) {
             (Self::Icons(_), DisplayMode::Icons) | (Self::Details(_), DisplayMode::List) => true,
@@ -59,11 +60,9 @@ fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
 }
 
 pub(super) trait PaneExt {
-    fn display(&self, parent: &gtk::Box);
-
     fn update_settings(&mut self, settings: DirSettings);
 
-    fn get_view_state(&self, list: &super::Contents) -> SavedViewState;
+    fn get_view_state(&self, list: &Contents) -> SavedViewState;
 
     fn apply_view_state(&mut self, state: SavedViewState);
 
@@ -74,7 +73,7 @@ pub(super) trait PaneExt {
 
 #[derive(Debug)]
 pub(super) struct Pane {
-    contents: Contents,
+    view: View,
 
     element: PaneElement,
     contents_signals: PaneSignals,
@@ -85,71 +84,99 @@ pub(super) struct Pane {
 
 impl Drop for Pane {
     fn drop(&mut self) {
-        // TODO -- if panes are always displayed, this can be unwrap()
-        if let Some(parent) = self.element.parent() {
-            let parent = parent.downcast_ref::<gtk::Box>().unwrap();
-            parent.remove(&self.element);
-        }
+        let Some(parent) = self.element.parent() else {
+            // If parent is None here, we've explicitly detached it to replace it with another
+            // pane.
+            return;
+        };
+
+        let parent = parent.downcast_ref::<gtk::Box>().unwrap();
+        parent.remove(&self.element);
+
+        // TODO [split]
+        // if let Some(split) = parent.downcast_ref::<Split>() {
+        //     split.remove_child(self);
+        // }
     }
 }
 
 impl Pane {
-    // new(tab_id, settings, Selection)
     // new_search(tab_id, settings, Selection)
-    pub(super) fn new(tab: &Tab) -> Self {
-        debug!("Creating {:?} pane for {:?}: {:?}", tab.settings.display_mode, tab.id, tab.path);
+    fn create(tab: TabId, path: &Path, settings: DirSettings, contents: &Contents) -> Self {
+        debug!("Creating {:?} pane for {:?}: {:?}", settings.display_mode, tab, path);
+        let (element, signals) = PaneElement::new(tab, contents);
 
-        let (element, signals) = PaneElement::new(tab);
-
-        let contents = match tab.settings.display_mode {
-            DisplayMode::Icons => Contents::Icons(IconView::new(
+        let view = match settings.display_mode {
+            DisplayMode::Icons => {
+                View::Icons(IconView::new(&element.imp().scroller, tab, &contents.selection))
+            }
+            DisplayMode::List => View::Details(DetailsView::new(
                 &element.imp().scroller,
-                tab.id.copy(),
-                &tab.contents.selection,
-            )),
-            DisplayMode::List => Contents::Details(DetailsView::new(
-                &element.imp().scroller,
-                tab.id.copy(),
-                tab.settings,
-                &tab.contents.selection,
+                tab,
+                settings,
+                &contents.selection,
             )),
         };
 
-        element.imp().location.set_text(&tab.path.to_string_lossy());
+        element.imp().location.set_text(&path.to_string_lossy());
+
 
         Self {
-            contents,
+            view,
 
             element,
             contents_signals: signals,
 
-            tab: tab.id.copy(),
-            selection: tab.contents.selection.clone(),
+            tab,
+            selection: contents.selection.clone(),
         }
     }
 
-    // TODO -- maybe just fold this up into new() and assume it is always visible
-    pub(super) fn display(&self, parent: &gtk::Box) {
-        if let Some(parent) = self.element.parent() {
-            error!("Called display() on pane that was already visible");
-        } else {
-            parent.append(&self.element);
-        }
+    // pub(super) fn new(tab: &Tab, parent: &gtk::Box) -> Self {
+    pub(super) fn new(
+        tab: TabId,
+        path: &Path,
+        settings: DirSettings,
+        contents: &Contents,
+        parent: &gtk::Box,
+    ) -> Self {
+        let pane = Self::create(tab, path, settings, contents);
+
+        // New tabs are always to the right/bottom, so always blindly append.
+        parent.append(&pane.element);
+
+        pane
+    }
+
+    pub(super) fn replace(
+        tab: TabId,
+        path: &Path,
+        settings: DirSettings,
+        contents: &Contents,
+        other: Self,
+    ) -> Self {
+        let pane = Self::create(tab, path, settings, contents);
+
+        let parent = other.element.parent().unwrap();
+        let parent = parent.downcast::<gtk::Box>().unwrap();
+
+        parent.insert_child_after(&pane.element, Some(&other.element));
+        parent.remove(&other.element);
+
+        pane
     }
 
     pub(super) fn update_settings(&mut self, settings: DirSettings) {
-        if self.contents.matches(settings.display_mode) {
-            self.contents.update_settings(settings);
+        if self.view.matches(settings.display_mode) {
+            self.view.update_settings(settings);
             return;
         }
 
-        self.contents = match settings.display_mode {
-            DisplayMode::Icons => Contents::Icons(IconView::new(
-                &self.element.imp().scroller,
-                self.tab,
-                &self.selection,
-            )),
-            DisplayMode::List => Contents::Details(DetailsView::new(
+        self.view = match settings.display_mode {
+            DisplayMode::Icons => {
+                View::Icons(IconView::new(&self.element.imp().scroller, self.tab, &self.selection))
+            }
+            DisplayMode::List => View::Details(DetailsView::new(
                 &self.element.imp().scroller,
                 self.tab,
                 settings,
@@ -163,10 +190,10 @@ impl Pane {
         self.element.imp().location.set_text(&path.to_string_lossy());
     }
 
-    pub(super) fn get_view_state(&self, list: &super::Contents) -> SavedViewState {
-        let eo = match &self.contents {
-            Contents::Icons(ic) => ic.get_first_visible(),
-            Contents::Details(_) => todo!(),
+    pub(super) fn get_view_state(&self, list: &Contents) -> SavedViewState {
+        let eo = match &self.view {
+            View::Icons(ic) => ic.get_first_visible(),
+            View::Details(_) => todo!(),
         };
 
         let scroll_pos =
@@ -183,28 +210,17 @@ impl Pane {
 }
 
 impl PaneExt for Pane {
-    // TODO -- maybe just fold this up into new() and assume it is always visible
-    fn display(&self, parent: &gtk::Box) {
-        if let Some(parent) = self.element.parent() {
-            error!("Called display() on pane that was already visible");
-        } else {
-            parent.append(&self.element);
-        }
-    }
-
     fn update_settings(&mut self, settings: DirSettings) {
-        if self.contents.matches(settings.display_mode) {
-            self.contents.update_settings(settings);
+        if self.view.matches(settings.display_mode) {
+            self.view.update_settings(settings);
             return;
         }
 
-        self.contents = match settings.display_mode {
-            DisplayMode::Icons => Contents::Icons(IconView::new(
-                &self.element.imp().scroller,
-                self.tab,
-                &self.selection,
-            )),
-            DisplayMode::List => Contents::Details(DetailsView::new(
+        self.view = match settings.display_mode {
+            DisplayMode::Icons => {
+                View::Icons(IconView::new(&self.element.imp().scroller, self.tab, &self.selection))
+            }
+            DisplayMode::List => View::Details(DetailsView::new(
                 &self.element.imp().scroller,
                 self.tab,
                 settings,
@@ -213,10 +229,10 @@ impl PaneExt for Pane {
         };
     }
 
-    fn get_view_state(&self, list: &super::Contents) -> SavedViewState {
-        let eo = match &self.contents {
-            Contents::Icons(ic) => ic.get_first_visible(),
-            Contents::Details(_) => todo!(),
+    fn get_view_state(&self, list: &Contents) -> SavedViewState {
+        let eo = match &self.view {
+            View::Icons(ic) => ic.get_first_visible(),
+            View::Details(_) => todo!(),
         };
 
         let scroll_pos =
@@ -227,9 +243,9 @@ impl PaneExt for Pane {
     }
 
     fn apply_view_state(&mut self, state: SavedViewState) {
-        match &self.contents {
-            Contents::Icons(icons) => icons.scroll_to(state.scroll_pos),
-            Contents::Details(details) => details.scroll_to(state.scroll_pos),
+        match &self.view {
+            View::Icons(icons) => icons.scroll_to(state.scroll_pos),
+            View::Details(details) => details.scroll_to(state.scroll_pos),
         }
     }
 

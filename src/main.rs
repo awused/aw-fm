@@ -65,7 +65,7 @@ fn main() {
     gtk::init().expect("GTK could not be initialized");
 
     let (manager_sender, manager_receiver) = tokio::sync::mpsc::unbounded_channel();
-    // PRIORITY_DEFAULT is enough to be higher priority than GTK redrawing events.
+    // PRIORITY_LOW prioritize GTK redrawing events.
     let (gui_sender, gui_receiver) = glib::MainContext::channel(glib::PRIORITY_LOW);
 
     closing::init(gui_sender.clone());

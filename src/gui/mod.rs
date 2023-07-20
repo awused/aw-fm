@@ -29,7 +29,7 @@ use path_clean::PathClean;
 use tokio::sync::mpsc::UnboundedSender;
 
 use self::main_window::MainWindow;
-use self::tabs::TabsList;
+use self::tabs::list::TabsList;
 use self::thumbnailer::Thumbnailer;
 use super::com::*;
 use crate::config::{CONFIG, OPTIONS};

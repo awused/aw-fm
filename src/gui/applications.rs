@@ -8,7 +8,7 @@ use gtk::prelude::{AppInfoExt, Cast, DisplayExt, ListModelExt};
 use gtk::traits::SelectionModelExt;
 use gtk::{glib, MultiSelection};
 
-use super::tabs::TabId;
+use super::tabs::id::TabId;
 use super::tabs_run;
 use crate::com::EntryObject;
 use crate::gui::gui_run;
@@ -23,8 +23,8 @@ fn cached_lookup(mime: &str) -> Option<AppInfo> {
     DEFAULT_CACHE.with(|c| {
         let mut m = c.borrow_mut();
 
-        if let Some(Some(ai)) = m.get(mime) {
-            return Some(ai.clone());
+        if let Some(ai) = m.get(mime) {
+            return ai.clone();
         }
 
         let ai = AppInfo::default_for_type(mime, false);
