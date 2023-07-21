@@ -43,23 +43,40 @@ On fedora all required dependencies can be installed with `dnf install gtk4-deve
 
 Keyboard shortcuts and context menu entries can be customized in [aw-man.toml](aw-man.toml.sample). See the comments in the config file for how to specify them.
 
-Recognized internal commands:
+Recognized commands:
 
 * Help
   * List current keybinds.
 * Quit
+
+Navigation
+* Parent
+  * Navigates to the parent of the current directory
+
+Settings
+* Mode icons|columns
+  * Changes the mode of the current directory
+
+TODO ---------------------------------
+
+* Child
+    * Navigates to the child of the current directory.
+    * If there is more than one child this will fail unless "Parent" was used earlier.
+
 * Activate
-  * Activates the current selection.
-  * The same as if the user hits "Enter" with the pane focused.
+  * The same as hitting enter or using "Open" in the menu on selected files.
+  * It is not recommended to bind this as a shortcut
+
+
 * Cut/Copy
   * Cuts or copies the current selection.
   * Clears the clipboard if nothing is selected.
 * Paste
   * Pastes into the current tab.
   * Calling this from scripts would be strange.
-* JumpToFile
-  * 
-  * Examples: `JumpToFile /home/me/some_important_file.png`
+* JumpToFile file
+  * Opens the parent directory in the current tab (or creates a new tab) and navigates to file.
+  * Examples: `JumpTo /home/me/some_important_file.png`
 * OpenToFile
   * Like JumpToFile but always opens a new tab.
   * Examples: `OpenToFile /home/me/some_important_file.png`
@@ -73,8 +90,8 @@ Recognized internal commands:
 * Script
   * Like Execute but reads stdout from the executable as a series of commands to run, one per line.
   * Example: `Script /path/to/sample-script.sh`
-* Open
-  * Example `Open /first/path/file.jpg /second/path/file2.jpg "/path/with spaces/file3.jpg"`
+
+TODO ---------------------------------
 
 # Custom Actions
 

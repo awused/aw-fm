@@ -30,8 +30,7 @@ idle_timeout = 600
 # Binding letters without modifiers is not recommended either.
 #
 # Use uppercase letters.
-# Examples:
-# {key = "H", modifiers = "Alt", action = "Script /path/to/rofi-jump-home.sh"},
+# Defaults and Examples:
 shortcuts = [
   {key = "question", modifiers = "Shift", action = "Help"},
 
@@ -39,7 +38,8 @@ shortcuts = [
   {key = "X", modifiers = "Control", action = "Cut"},
   {key = "V", modifiers = "Control", action = "Paste"},
 
-  {key = "H", modifiers = "Control", action = "Navigate /home/" },
+  # {key = "H", modifiers = "Control", action = "Navigate /home/" },
+  # {key = "H", modifiers = "Alt", action = "Script /path/to/rofi-jump-home.sh"},
 
   {key = "F", modifiers = "Control", action = "Search"},
 
@@ -49,9 +49,10 @@ shortcuts = [
   {key = "Down", modifiers = "Alt", action = "Child"},
 
   {key = "1", modifiers = "Control", action = "Mode icons"},
-  {key = "2", modifiers = "Control", action = "Mode details"},
+  {key = "2", modifiers = "Control", action = "Mode columns"},
 
   {key = "F5", action = "Refresh"},
+  {key = "F5", modifiers="Control", action = "Refresh all"},
 ]
 
 # Context Menu
@@ -77,6 +78,10 @@ context_menu = [
   {name = "Dual Page (Reversed)", section = "display", action = "DualPageReversed"},
 ]
 
+# Whether to entirely skip the trash or not when deleting files.
+#
+# aw-fm doesn't really deal with trash and can't empty it for you.
+skip_trash = false
 
 # ------------------------------------------------------------------------------------------------
 # More advanced configuration options below. They probably do not need to be changed.

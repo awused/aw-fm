@@ -130,10 +130,6 @@ pub mod id {
     }
 
     impl TabUid {
-        fn steal(&self) -> bool {
-            true
-        }
-
         pub const fn copy(&self) -> TabId {
             TabId(self.0)
         }

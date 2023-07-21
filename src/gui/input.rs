@@ -2,6 +2,7 @@ use std::cell::Ref;
 use std::collections::hash_map;
 use std::ffi::OsString;
 use std::rc::Rc;
+use std::str::FromStr;
 
 use ahash::AHashMap;
 use gtk::gdk::{Key, ModifierType};
@@ -12,7 +13,7 @@ use gtk::traits::{EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt}
 
 use super::Gui;
 use crate::closing;
-use crate::com::{ManagerAction, Toggle};
+use crate::com::{DisplayMode, ManagerAction, Toggle};
 use crate::config::{Shortcut, CONFIG};
 
 #[derive(Debug, Default)]
@@ -281,6 +282,10 @@ impl Gui {
             let arg = arg.trim_start();
 
             let _ = match cmd {
+                "Mode" => match DisplayMode::from_str(arg) {
+                    Ok(m) => return self.tabs.borrow_mut().active_display_mode(m),
+                    Err(e) => true,
+                },
                 "Execute" => {
                     return self
                         .send_manager(ManagerAction::Execute(arg.to_string(), self.get_env()));
@@ -308,6 +313,8 @@ impl Gui {
             }
             "Help" => return self.help_dialog(),
 
+            "Parent" => return self.tabs.borrow_mut().active_parent(),
+            //"Child" => return self.tabs.borrow_mut().active_child(),
             _ => true,
         };
 

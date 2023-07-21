@@ -3,13 +3,14 @@ use std::fmt::Write;
 use gtk::gio::ListStore;
 use gtk::prelude::{Cast, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{SelectionModelExt, WidgetExt};
-use gtk::{glib, Bitset, MultiSelection};
+use gtk::traits::{EditableExt, EntryExt, SelectionModelExt, WidgetExt};
+use gtk::{glib, Bitset, EventControllerFocus, MultiSelection, Widget};
 
-use crate::com::{Disconnector, EntryObject};
+use crate::com::{EntryObject, SignalHolder};
 use crate::gui::tabs::contents::Contents;
 use crate::gui::tabs::id::TabId;
 use crate::gui::tabs::tab::Tab;
+use crate::gui::tabs_run;
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
@@ -17,26 +18,38 @@ glib::wrapper! {
 }
 
 #[derive(Debug)]
-pub(super) struct PaneSignals(Disconnector<MultiSelection>, Disconnector<MultiSelection>);
+pub(super) struct PaneSignals(SignalHolder<MultiSelection>, SignalHolder<MultiSelection>);
 
 impl PaneElement {
-    pub(super) fn new(tab_id: TabId, contents: &Contents) -> (Self, PaneSignals) {
+    pub(super) fn new(tab: TabId, selection: &MultiSelection) -> (Self, PaneSignals) {
         let s: Self = glib::Object::new();
-        s.imp().tab_id.set(tab_id).unwrap();
-        let signals = s.setup_signals(tab_id, contents);
+        let signals = s.setup_signals(tab, selection);
+
+        let focus = EventControllerFocus::new();
+        focus.connect_enter(move |_| {
+            trace!("Focus entered {tab:?}");
+            tabs_run(|t| t.set_active(tab));
+        });
+        s.add_controller(focus);
+
+        let imp = s.imp();
+
+        imp.tab.set(tab).unwrap();
+
+        imp.text_entry.set_enable_undo(true);
 
         (s, signals)
     }
 
-    fn setup_signals(&self, tab_id: TabId, contents: &Contents) -> PaneSignals {
+    fn setup_signals(&self, tab_id: TabId, selection: &MultiSelection) -> PaneSignals {
         let count_label = &*self.imp().count;
         let selection_label = &*self.imp().selection;
 
         let count = count_label.clone();
-        let count_signal = contents.selection.connect_items_changed(move |list, _p, _a, _r| {
+        let count_signal = selection.connect_items_changed(move |list, _p, _a, _r| {
             count.set_text(&format!("{} items", list.n_items()));
         });
-        let count_signal = Disconnector::new(&contents.selection, count_signal);
+        let count_signal = SignalHolder::new(selection, count_signal);
 
         let count = count_label.clone();
         let selected = selection_label.clone();
@@ -69,11 +82,11 @@ impl PaneElement {
             selected.set_text(&selected_string(selection, &set));
         };
 
-        update_selected(&contents.selection, 0, 0);
+        update_selected(selection, 0, 0);
 
-        let selection_signal = contents.selection.connect_selection_changed(update_selected);
+        let selection_signal = selection.connect_selection_changed(update_selected);
 
-        let selection_signal = Disconnector::new(&contents.selection, selection_signal);
+        let selection_signal = SignalHolder::new(selection, selection_signal);
 
         PaneSignals(count_signal, selection_signal)
     }
@@ -89,14 +102,14 @@ mod imp {
     use gtk::{glib, CompositeTemplate};
     use once_cell::unsync::OnceCell;
 
-    use crate::com::{Disconnector, EntryObject, Thumbnail};
+    use crate::com::{EntryObject, SignalHolder, Thumbnail};
     use crate::gui::tabs::id::TabId;
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "element.ui")]
     pub struct Pane {
         #[template_child]
-        pub location: TemplateChild<gtk::Entry>,
+        pub text_entry: TemplateChild<gtk::Entry>,
 
         #[template_child]
         pub scroller: TemplateChild<gtk::ScrolledWindow>,
@@ -107,7 +120,8 @@ mod imp {
         #[template_child]
         pub selection: TemplateChild<gtk::Label>,
 
-        pub tab_id: OnceCell<TabId>,
+        pub original_text: RefCell<String>,
+        pub tab: OnceCell<TabId>,
     }
 
     #[glib::object_subclass]

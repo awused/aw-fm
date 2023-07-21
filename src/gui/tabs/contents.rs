@@ -49,12 +49,12 @@ impl Contents {
     pub fn apply_snapshot(&mut self, snap: EntryObjectSnapshot, sort: SortSettings) {
         if snap.id.kind.initial() {
             if self.stale {
-                self.stale = false;
                 debug!("Clearing out stale items");
             }
             self.clear(sort);
             debug_assert!(self.list.n_items() == 0);
         }
+        assert!(!self.stale);
         debug_assert_eq!(self.sort, sort);
 
         self.list.extend(snap.entries.into_iter());
@@ -78,9 +78,13 @@ impl Contents {
     // "entry's corresponding EntryObject" the list will be sorted.
     // So using the old version of the entry we can search for the old location.
     pub fn position_by_sorted_entry(&self, entry: &Entry) -> Option<u32> {
+        assert!(!self.stale);
         let mut start = 0;
         let mut end = self.list.n_items();
-        assert_ne!(end, 0);
+
+        if end == 0 {
+            return None;
+        }
 
         while start < end {
             let mid = start + (end - start) / 2;
@@ -108,6 +112,7 @@ impl Contents {
     }
 
     pub fn reinsert_updated(&mut self, i: u32, new: &EntryObject) {
+        assert!(!self.stale);
         let comp = self.sort.comparator();
 
         if (i == 0 || comp(&self.list.item(i - 1).unwrap(), new.upcast_ref::<Object>()).is_lt())
@@ -131,11 +136,14 @@ impl Contents {
     }
 
     pub fn insert(&mut self, new: &EntryObject, sort: SortSettings) {
+        assert!(!self.stale);
         debug_assert!(self.position_by_sorted_entry(&new.get()).is_none());
         self.list.insert_sorted(new, self.sort.comparator());
     }
 
     pub(super) fn finish_update(&mut self, update: &PartiallyAppliedUpdate) {
+        assert!(!self.stale);
+
         match update {
             PartiallyAppliedUpdate::Mutate(old, new) => {
                 let old_position = self.position_by_sorted_entry(old).unwrap();
@@ -157,6 +165,10 @@ impl Contents {
     }
 
     pub fn sort(&mut self, sort: SortSettings) {
+        if self.stale {
+            self.clear(sort);
+        }
+
         self.sort = sort;
         let start = Instant::now();
         self.list.sort(sort.comparator());
@@ -164,6 +176,7 @@ impl Contents {
     }
 
     pub fn clear(&mut self, sort: SortSettings) {
+        self.stale = false;
         self.list.remove_all();
         self.sort = sort;
     }

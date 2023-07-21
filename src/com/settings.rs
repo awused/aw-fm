@@ -12,7 +12,7 @@ use super::EntryObject;
 pub enum DisplayMode {
     #[default]
     Icons,
-    List,
+    Columns,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy, EnumString, AsRefStr)]

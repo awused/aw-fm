@@ -247,8 +247,8 @@ impl Tab {
         }
     }
 
-    fn copy_from_donor(&mut self, left_tabs: &[Self], right_tabs: &[Self]) -> bool {
-        for t in left_tabs.iter().chain(right_tabs) {
+    fn copy_from_donor(&mut self, left: &[Self], right: &[Self]) -> bool {
+        for t in left.iter().chain(right) {
             // Check for value equality, not reference equality
             if *self.path == *t.path {
                 self.path = t.path.clone();
@@ -262,7 +262,7 @@ impl Tab {
     }
 
     // Only make this take &mut [Self] if truly necessary
-    pub fn load(&mut self, left_tabs: &[Self], right_tabs: &[Self]) {
+    pub fn load(&mut self, left: &[Self], right: &[Self]) {
         let mut sb = self.dir_state.borrow_mut();
         let dstate = &mut *sb;
         match dstate {
@@ -278,7 +278,7 @@ impl Tab {
 
         // TODO -- spinners
         //self.show_spinner()
-        for t in self.matching(left_tabs).chain(self.matching(right_tabs)) {
+        for t in self.matching(left).chain(self.matching(right)) {
             //t.show_spinner();
         }
     }
@@ -324,12 +324,7 @@ impl Tab {
 
     // Returns true if we had any search updates. Expected to be rare, so that path isn't
     // terribly efficient.
-    pub fn apply_snapshot(
-        &mut self,
-        left_tabs: &mut [Self],
-        right_tabs: &mut [Self],
-        snap: DirSnapshot,
-    ) {
+    pub fn apply_snapshot(&mut self, left: &mut [Self], right: &mut [Self], snap: DirSnapshot) {
         let start = Instant::now();
         assert!(self.matches_snapshot(&snap.id));
         let snap: EntryObjectSnapshot = snap.into();
@@ -339,7 +334,7 @@ impl Tab {
 
         // The actual tab order doesn't matter here, so long as it's applied to every matching tab.
         // Avoid one clone by doing the other tabs first.
-        self.matching_mut(right_tabs).for_each(|t| t.apply_snapshot_inner(snap.clone()));
+        self.matching_mut(right).for_each(|t| t.apply_snapshot_inner(snap.clone()));
 
         let kind = snap.id.kind;
         let len = snap.entries.len();
@@ -348,8 +343,8 @@ impl Tab {
 
         if force_search_sort {
             // We just sorted this tab and all matching tabs to the right.
-            left_tabs.iter_mut().for_each(Self::search_sort_after_snapshot);
-            right_tabs
+            left.iter_mut().for_each(Self::search_sort_after_snapshot);
+            right
                 .iter_mut()
                 .filter(|t| !t.matches_arc(&self.path))
                 .for_each(Self::search_sort_after_snapshot);
@@ -379,11 +374,11 @@ impl Tab {
         drop(sb);
 
         for u in updates {
-            self.matched_update(left_tabs, right_tabs, u);
+            self.matched_update(left, right, u);
         }
 
         self.start_apply_view_state();
-        self.matching_mut(right_tabs).for_each(Self::start_apply_view_state);
+        self.matching_mut(right).for_each(Self::start_apply_view_state);
         // TODO -- stop showing spinners.
         info!("Finished loading {:?}", self.path);
     }
@@ -397,7 +392,7 @@ impl Tab {
         Some(&*self.path) == ev.path().parent()
     }
 
-    pub fn matched_update(&mut self, left_tabs: &mut [Self], right_tabs: &mut [Self], up: Update) {
+    pub fn matched_update(&mut self, left: &mut [Self], right: &mut [Self], up: Update) {
         assert!(self.matches_update(&up));
 
         let mut sb = self.dir_state.borrow_mut();
@@ -488,7 +483,7 @@ impl Tab {
         };
 
 
-        for t in self.matching_mut(right_tabs) {
+        for t in self.matching_mut(right) {
             t.contents.finish_update(&partial);
         }
 
@@ -500,7 +495,7 @@ impl Tab {
 
         // Apply to any matching search tabs, even to the left.
         let other_tab_search_update = search_mutate.unwrap_or(partial);
-        for t in left_tabs.iter_mut().chain(right_tabs.iter_mut()) {
+        for t in left.iter_mut().chain(right.iter_mut()) {
             t.finish_search_update(&other_tab_search_update)
         }
     }
@@ -563,21 +558,21 @@ impl Tab {
     // Need to handle this to avoid the case where a directory is "Loaded" but no watcher is
     // listening for events.
     // Even if the directory is recreated, the watcher won't work.
-    pub fn handle_directory_deleted(&mut self, left_tabs: &[Self], right_tabs: &[Self]) {
+    pub fn handle_directory_deleted(&mut self, left: &[Self], right: &[Self]) {
         let cur_path = self.path.clone();
         let mut path = &*cur_path;
         while !path.exists() || !path.is_dir() {
             path = path.parent().unwrap()
         }
 
-        self.change_location(left_tabs, right_tabs, path);
+        self.change_location(left, right, path);
     }
 
     pub fn update_sort(&mut self, sort: SortSettings) {
         self.settings.sort = sort;
         self.contents.sort(sort);
         if let Some(p) = self.pane.get_mut() {
-            p.update_settings(self.settings)
+            p.update_settings(self.settings, &self.contents)
         }
         self.save_settings();
     }
@@ -585,13 +580,17 @@ impl Tab {
     pub fn update_display_mode(&mut self, mode: DisplayMode) {
         self.settings.display_mode = mode;
         if let Some(p) = self.pane.get_mut() {
-            p.update_settings(self.settings)
+            p.update_settings(self.settings, &self.contents)
         }
         self.save_settings();
     }
 
     // Changes location without managing history or view states.
-    fn change_location(&mut self, left_tabs: &[Self], right_tabs: &[Self], target: &Path) {
+    fn change_location(&mut self, left: &[Self], right: &[Self], target: &Path) {
+        if &*self.path == target {
+            return;
+        }
+
         self.view_state = None;
         if self.pane.search().is_some() {
             // TODO [search]
@@ -600,9 +599,10 @@ impl Tab {
             todo!()
         }
 
+        // It is important we always create a new Arc here.
         self.path = target.into();
 
-        if !self.copy_from_donor(left_tabs, right_tabs) {
+        if !self.copy_from_donor(left, right) {
             // We couldn't find any state to steal, so we know we're the only matching tab.
 
             self.dir_state.replace(DirState::Unloaded);
@@ -617,20 +617,30 @@ impl Tab {
         }
 
         if let Some(pane) = self.pane.flat() {
-            pane.update_location(&self.path, self.settings);
-            self.load(left_tabs, right_tabs);
+            pane.update_location(&self.path, self.settings, &self.contents);
+            self.load(left, right);
         }
     }
 
-    pub fn navigate(&mut self, left_tabs: &[Self], right_tabs: &[Self], target: &Path) {
+    pub fn navigate(&mut self, left: &[Self], right: &[Self], target: &Path) {
         info!("Navigating from {:?} to {:?}", self.path, target);
 
         // TODO -- view snapshots
-        // self.take_view_snapshot()
+        // self.take_view_snapshot()take_view_snapshot
         // push onto history
-        //
 
-        self.change_location(left_tabs, right_tabs, target)
+
+        self.change_location(left, right, target)
+    }
+
+    pub(super) fn parent(&mut self, left: &[Self], right: &[Self]) {
+        let Some(parent) = self.path.parent() else {
+            warn!("No parent for {:?}", self.path);
+            return;
+        };
+
+        let target = parent.to_path_buf();
+        self.navigate(left, right, &target)
     }
 
     fn forward(&mut self) {
@@ -638,10 +648,6 @@ impl Tab {
     }
 
     pub(super) fn backward(&mut self) {
-        todo!()
-    }
-
-    pub(super) fn parent(&mut self) {
         todo!()
     }
 
@@ -695,15 +701,15 @@ impl Tab {
         todo!()
     }
 
-    // TODO -- include index or have the TabsList allocate boxes and pass those down.
     pub fn new_pane(&mut self, parent: &gtk::Box) {
-        // TODO -- panes must always be displayed
         if let Some(pane) = self.pane.get_mut() {
             debug!("Pane already displayed");
             return;
         }
 
-        let pane = Pane::new(self.id(), &self.path, self.settings, &self.contents, parent);
+
+        let pane =
+            Pane::new_flat(self.id(), &self.path, self.settings, &self.contents.selection, parent);
         self.pane = CurrentPane::Flat(pane);
 
         if matches!(&*self.dir_state.borrow(), DirState::Loaded(_)) {

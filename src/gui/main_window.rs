@@ -3,7 +3,7 @@ use gtk::prelude::ObjectExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{glib, Application};
 
-use crate::com::{Disconnector, EntryObject};
+use crate::com::{EntryObject, SignalHolder};
 
 
 glib::wrapper! {
@@ -45,7 +45,7 @@ mod imp {
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
-    use crate::com::{Disconnector, EntryObject, Thumbnail};
+    use crate::com::{EntryObject, SignalHolder, Thumbnail};
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "main_window.ui")]

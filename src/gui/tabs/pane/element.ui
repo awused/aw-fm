@@ -7,7 +7,7 @@
     <property name="vexpand">true</property>
 
     <child>
-      <object class="GtkEntry" id="location">
+      <object class="GtkEntry" id="text_entry">
         <style>
           <class name="location-bar"/>
         </style>

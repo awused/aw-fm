@@ -5,7 +5,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{AccessibleExt, EventControllerExt, GestureExt, WidgetExt};
 use gtk::{glib, EventController, GestureClick};
 
-use crate::com::{Disconnector, EntryObject};
+use crate::com::{EntryObject, SignalHolder};
 
 
 thread_local! {
@@ -56,7 +56,7 @@ impl IconTile {
             None
         });
 
-        let d = Disconnector::new(obj, id);
+        let d = SignalHolder::new(obj, id);
         assert!(imp.update_connection.replace(Some(d)).is_none())
     }
 
@@ -80,7 +80,7 @@ mod imp {
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
-    use crate::com::{Disconnector, EntryObject, Thumbnail};
+    use crate::com::{EntryObject, SignalHolder, Thumbnail};
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "icon_tile.ui")]
@@ -94,7 +94,7 @@ mod imp {
         pub size: TemplateChild<gtk::Inscription>,
 
         pub bound_object: RefCell<Option<EntryObject>>,
-        pub update_connection: Cell<Option<Disconnector<EntryObject>>>,
+        pub update_connection: Cell<Option<SignalHolder<EntryObject>>>,
     }
 
     #[glib::object_subclass]

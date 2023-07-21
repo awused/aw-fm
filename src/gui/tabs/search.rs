@@ -1,5 +1,6 @@
 use super::contents::Contents;
 use super::pane::{Pane, PaneExt};
+use crate::com::DirSettings;
 
 // Search is handled as, effectively, an overlay on top of a flat tab.
 //
@@ -20,7 +21,7 @@ impl SearchPane {
 }
 
 impl PaneExt for SearchPane {
-    fn update_settings(&mut self, settings: crate::com::DirSettings) {
+    fn update_settings(&mut self, settings: DirSettings, _ignored: &Contents) {
         todo!()
     }
 

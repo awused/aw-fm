@@ -111,10 +111,12 @@ impl<T> fmt::Debug for DebugIgnore<T> {
 }
 
 // Makes sure to disconnect a signal handler when the rust object drops.
+// This isn't necessary when connecting to widgets that will dispose of all their connectors when
+// they are disposed of.
 #[derive(Debug)]
-pub struct Disconnector<T: IsA<Object>>(T, Option<SignalHandlerId>);
+pub struct SignalHolder<T: IsA<Object>>(T, Option<SignalHandlerId>);
 
-impl<T: IsA<Object>> Drop for Disconnector<T> {
+impl<T: IsA<Object>> Drop for SignalHolder<T> {
     fn drop(&mut self) {
         self.0.disconnect(self.1.take().unwrap());
     }
@@ -122,7 +124,7 @@ impl<T: IsA<Object>> Drop for Disconnector<T> {
 
 // We CAN make something super safe that connects in here so that the signal ID is always correct
 // for this object, but just not worth it.
-impl<T: IsA<Object>> Disconnector<T> {
+impl<T: IsA<Object>> SignalHolder<T> {
     pub fn new(obj: &T, id: SignalHandlerId) -> Self {
         Self(obj.clone(), Some(id))
     }

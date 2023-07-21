@@ -6,7 +6,7 @@ use gtk::gio::ListStore;
 use gtk::glib::SignalHandlerId;
 use gtk::prelude::{Cast, ListModelExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{AdjustmentExt, BoxExt, EditableExt, SelectionModelExt, WidgetExt};
+use gtk::traits::{AdjustmentExt, BoxExt, EditableExt, EntryExt, SelectionModelExt, WidgetExt};
 use gtk::{
     Bitset, ColumnView, GridView, ListView, MultiSelection, Orientation, ScrolledWindow, Widget,
 };
@@ -16,7 +16,7 @@ use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
 use super::id::TabId;
 use super::{Contents, SavedViewState};
-use crate::com::{DirSettings, Disconnector, DisplayMode, EntryObject, SortSettings};
+use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder, SortSettings};
 use crate::gui::{applications, tabs_run};
 
 mod details;
@@ -32,8 +32,10 @@ enum View {
 impl View {
     const fn matches(&self, mode: DisplayMode) -> bool {
         match (self, mode) {
-            (Self::Icons(_), DisplayMode::Icons) | (Self::Details(_), DisplayMode::List) => true,
-            (Self::Icons(_), DisplayMode::List) | (Self::Details(_), DisplayMode::Icons) => false,
+            (Self::Icons(_), DisplayMode::Icons) | (Self::Details(_), DisplayMode::Columns) => true,
+            (Self::Icons(_), DisplayMode::Columns) | (Self::Details(_), DisplayMode::Icons) => {
+                false
+            }
         }
     }
 
@@ -60,7 +62,8 @@ fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
 }
 
 pub(super) trait PaneExt {
-    fn update_settings(&mut self, settings: DirSettings);
+    // I don't like needing to pass list into this, but it needs to check that it's not stale.
+    fn update_settings(&mut self, settings: DirSettings, list: &Contents);
 
     fn get_view_state(&self, list: &Contents) -> SavedViewState;
 
@@ -77,7 +80,6 @@ pub(super) struct Pane {
 
     element: PaneElement,
     contents_signals: PaneSignals,
-    // entry_signalsn: EntrySignals...
     tab: TabId,
     selection: MultiSelection,
 }
@@ -95,30 +97,28 @@ impl Drop for Pane {
 
         // TODO [split]
         // if let Some(split) = parent.downcast_ref::<Split>() {
+        //     let sibling = split.get_child
         //     split.remove_child(self);
+        //     let grandparent = split.parent().unwrap();
+        //     grandparent.insert_child_after(sibling.element, Some(&split));
+        //     grandparent.remove(&split)
         // }
     }
 }
 
 impl Pane {
     // new_search(tab_id, settings, Selection)
-    fn create(tab: TabId, path: &Path, settings: DirSettings, contents: &Contents) -> Self {
-        debug!("Creating {:?} pane for {:?}: {:?}", settings.display_mode, tab, path);
-        let (element, signals) = PaneElement::new(tab, contents);
+    fn create(tab: TabId, settings: DirSettings, selection: &MultiSelection) -> Self {
+        let (element, signals) = PaneElement::new(tab, selection);
 
         let view = match settings.display_mode {
             DisplayMode::Icons => {
-                View::Icons(IconView::new(&element.imp().scroller, tab, &contents.selection))
+                View::Icons(IconView::new(&element.imp().scroller, tab, selection))
             }
-            DisplayMode::List => View::Details(DetailsView::new(
-                &element.imp().scroller,
-                tab,
-                settings,
-                &contents.selection,
-            )),
+            DisplayMode::Columns => {
+                View::Details(DetailsView::new(&element.imp().scroller, tab, settings, selection))
+            }
         };
-
-        element.imp().location.set_text(&path.to_string_lossy());
 
 
         Self {
@@ -128,34 +128,57 @@ impl Pane {
             contents_signals: signals,
 
             tab,
-            selection: contents.selection.clone(),
+            selection: selection.clone(),
         }
     }
 
-    // pub(super) fn new(tab: &Tab, parent: &gtk::Box) -> Self {
-    pub(super) fn new(
+    fn setup_flat(mut self, tab: TabId, path: &Path) -> Self {
+        debug!("Creating new flat pane for {:?}: {:?}", tab, path);
+
+        let location = path.to_string_lossy().to_string();
+
+        let imp = self.element.imp();
+        imp.text_entry.set_text(&location);
+        imp.original_text.replace(location);
+
+
+        // TODO -- autocomplete for directories only (should be fast since they're always first)
+
+        // imp.text_entry.connect_changed(|e| {
+        //     println!("TODO -- changed {e:?}");
+        // });
+        //
+        imp.text_entry.connect_activate(|e| {
+            println!("TODO -- activated {e:?}");
+        });
+
+
+        self
+    }
+
+    pub(super) fn new_flat(
         tab: TabId,
         path: &Path,
         settings: DirSettings,
-        contents: &Contents,
+        selection: &MultiSelection,
         parent: &gtk::Box,
     ) -> Self {
-        let pane = Self::create(tab, path, settings, contents);
+        let pane = Self::create(tab, settings, selection).setup_flat(tab, path);
 
-        // New tabs are always to the right/bottom, so always blindly append.
+        // New tabs are always to the right/bottom
         parent.append(&pane.element);
 
         pane
     }
 
-    pub(super) fn replace(
+    pub(super) fn replace_flat(
         tab: TabId,
         path: &Path,
         settings: DirSettings,
-        contents: &Contents,
+        selection: &MultiSelection,
         other: Self,
     ) -> Self {
-        let pane = Self::create(tab, path, settings, contents);
+        let pane = Self::create(tab, settings, selection).setup_flat(tab, path);
 
         let parent = other.element.parent().unwrap();
         let parent = parent.downcast::<gtk::Box>().unwrap();
@@ -166,41 +189,12 @@ impl Pane {
         pane
     }
 
-    pub(super) fn update_settings(&mut self, settings: DirSettings) {
-        if self.view.matches(settings.display_mode) {
-            self.view.update_settings(settings);
-            return;
-        }
+    pub(super) fn update_location(&mut self, path: &Path, settings: DirSettings, list: &Contents) {
+        self.update_settings(settings, list);
 
-        self.view = match settings.display_mode {
-            DisplayMode::Icons => {
-                View::Icons(IconView::new(&self.element.imp().scroller, self.tab, &self.selection))
-            }
-            DisplayMode::List => View::Details(DetailsView::new(
-                &self.element.imp().scroller,
-                self.tab,
-                settings,
-                &self.selection,
-            )),
-        };
-    }
-
-    pub(super) fn update_location(&mut self, path: &Path, settings: DirSettings) {
-        self.update_settings(settings);
-        self.element.imp().location.set_text(&path.to_string_lossy());
-    }
-
-    pub(super) fn get_view_state(&self, list: &Contents) -> SavedViewState {
-        let eo = match &self.view {
-            View::Icons(ic) => ic.get_first_visible(),
-            View::Details(_) => todo!(),
-        };
-
-        let scroll_pos =
-            eo.and_then(|obj| list.position_by_sorted_entry(&obj.get())).unwrap_or_default();
-
-
-        SavedViewState { scroll_pos, search: None }
+        let location = path.to_string_lossy().to_string();
+        self.element.imp().text_entry.set_text(&location);
+        self.element.imp().original_text.replace(location);
     }
 
     // Most view state code should be moved here.
@@ -210,23 +204,27 @@ impl Pane {
 }
 
 impl PaneExt for Pane {
-    fn update_settings(&mut self, settings: DirSettings) {
+    fn update_settings(&mut self, settings: DirSettings, list: &Contents) {
         if self.view.matches(settings.display_mode) {
             self.view.update_settings(settings);
             return;
         }
 
+        let vs = self.get_view_state(list);
+
         self.view = match settings.display_mode {
             DisplayMode::Icons => {
                 View::Icons(IconView::new(&self.element.imp().scroller, self.tab, &self.selection))
             }
-            DisplayMode::List => View::Details(DetailsView::new(
+            DisplayMode::Columns => View::Details(DetailsView::new(
                 &self.element.imp().scroller,
                 self.tab,
                 settings,
                 &self.selection,
             )),
         };
+
+        self.apply_view_state(vs);
     }
 
     fn get_view_state(&self, list: &Contents) -> SavedViewState {

@@ -55,9 +55,6 @@ where
         .unwrap_or_else(|_| panic!("Error spawning thread {name}"))
 }
 
-// type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-// type Fut<T> = Pin<Box<dyn Future<Output = T>>>;
-
 fn main() {
     elapsedlogger::init_logging();
     config::init();
@@ -70,7 +67,6 @@ fn main() {
 
     closing::init(gui_sender.clone());
 
-    // let sock_handle = socket::init(&gui_sender);
     let man_handle = manager::run(manager_receiver, gui_sender);
 
     // No one should ever have this disabled

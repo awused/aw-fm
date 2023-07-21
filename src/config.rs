@@ -72,6 +72,8 @@ pub struct Config {
     #[serde(default)]
     pub shortcuts: Vec<Shortcut>,
 
+    #[serde(default)]
+    pub skip_trash: bool,
     // #[serde(default)]
     // pub context_menu: Vec<ContextMenuEntry>,
     // TODO --

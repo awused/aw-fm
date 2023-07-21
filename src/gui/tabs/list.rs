@@ -81,6 +81,12 @@ impl TabsList {
         self.find_mut(id).unwrap().update_sort(settings);
     }
 
+    pub fn set_active(&mut self, id: TabId) {
+        debug_assert!(self.position(id).is_some());
+
+        self.active = Some(id);
+    }
+
     fn find_mut(&mut self, id: TabId) -> Option<&mut Tab> {
         self.tabs.iter_mut().find(|t| t.id() == id)
     }
@@ -179,11 +185,11 @@ impl TabsList {
 
         let tab = &self.tabs[index];
         if tab.visible() {
-            // Handle pane is visible
+            // If there's another tab that isn't visible, use it.
+            // We want to prioritize the first tab to the left/above in the visible list.
+            // If there is no tab at all, we'll also be closing the pane.
             // let next_tab =
         }
-
-        let pane_index = Some(0); // ???
 
         // let active = self.tabs[index].is_active()
         self.tabs.remove(index);
@@ -197,7 +203,7 @@ impl TabsList {
         // }
     }
 
-    pub fn close_active_tab(&mut self) {
+    pub fn active_close_tab(&mut self) {
         let Some(active) = self.active else {
             warn!("CloseTab called with no active tab");
             return;
@@ -206,11 +212,17 @@ impl TabsList {
         self.close_tab(active);
     }
 
-    pub fn close_active_pane(&mut self) {
+    pub fn active_close_pane(&mut self) {
         let Some(active) = self.active else {
             warn!("ClosePane called with no open panes");
             return;
         };
+
+        // TODO -- maybe allow for empty views.
+        // if self.tabs.len() == 1 {
+        //     warn!("ClosePane called with only one tab");
+        //     return;
+        // }
 
         // TODO -- find parent ex-sibling pane, if any,
         // if let Some(sibling) = self.find_sibling_tab(active) {
@@ -225,10 +237,31 @@ impl TabsList {
         self.tabs[index].close_pane();
     }
 
-    pub fn close_active_both(&mut self) {
+    pub fn active_close_both(&mut self) {
         let Some(active) = self.active else {
             warn!("ClosePaneAndTab called with no open panes");
             return;
         };
+    }
+
+    pub fn active_display_mode(&mut self, mode: DisplayMode) {
+        let Some(active) = self.active else {
+            warn!("Mode called with no open panes");
+            return;
+        };
+
+        let index = self.position(active).unwrap();
+        self.tabs[index].update_display_mode(mode);
+    }
+
+    pub fn active_parent(&mut self) {
+        let Some(active) = self.active else {
+            warn!("Parent called with no open panes");
+            return;
+        };
+
+        let index = self.position(active).unwrap();
+        let (left, tab, right) = self.split_around_mut(index);
+        tab.parent(left, right);
     }
 }
