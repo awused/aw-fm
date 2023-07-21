@@ -73,6 +73,7 @@ impl IconView {
         self.grid.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
     }
 
+    // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
     pub(super) fn get_first_visible(&self) -> Option<EntryObject> {
         let model = self.grid.model().unwrap();
         if model.n_items() == 0 {

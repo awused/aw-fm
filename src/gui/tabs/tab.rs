@@ -606,10 +606,12 @@ impl Tab {
             // We couldn't find any state to steal, so we know we're the only matching tab.
 
             self.dir_state.replace(DirState::Unloaded);
+            let old_settings = self.settings;
             self.settings = gui_run(|g| g.database.get(&self.path));
             // Deliberately do not clear or update self.contents here, not yet.
             // This allows us to keep something visible just a tiny bit longer.
-            if self.pane.flat().is_some() {
+            // Safe enough when the settings match.
+            if self.pane.flat().is_some() && self.settings == old_settings {
                 self.contents.mark_stale();
             } else {
                 self.contents.clear(self.settings.sort);

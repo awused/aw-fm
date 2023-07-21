@@ -11,7 +11,7 @@ use gtk::{
     Bitset, ColumnView, GridView, ListView, MultiSelection, Orientation, ScrolledWindow, Widget,
 };
 
-use self::details::DetailsView;
+use self::columns::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
 use super::id::TabId;
@@ -19,21 +19,21 @@ use super::{Contents, SavedViewState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder, SortSettings};
 use crate::gui::{applications, tabs_run};
 
-mod details;
+mod columns;
 mod element;
 mod icon_view;
 
 #[derive(Debug)]
 enum View {
     Icons(IconView),
-    Details(DetailsView),
+    Columns(DetailsView),
 }
 
 impl View {
     const fn matches(&self, mode: DisplayMode) -> bool {
         match (self, mode) {
-            (Self::Icons(_), DisplayMode::Icons) | (Self::Details(_), DisplayMode::Columns) => true,
-            (Self::Icons(_), DisplayMode::Columns) | (Self::Details(_), DisplayMode::Icons) => {
+            (Self::Icons(_), DisplayMode::Icons) | (Self::Columns(_), DisplayMode::Columns) => true,
+            (Self::Icons(_), DisplayMode::Columns) | (Self::Columns(_), DisplayMode::Icons) => {
                 false
             }
         }
@@ -42,7 +42,7 @@ impl View {
     fn update_settings(&self, settings: DirSettings) {
         match self {
             Self::Icons(_) => (),
-            Self::Details(details) => details.update_sort(settings.sort),
+            Self::Columns(details) => details.update_sort(settings.sort),
         }
     }
 }
@@ -116,7 +116,7 @@ impl Pane {
                 View::Icons(IconView::new(&element.imp().scroller, tab, selection))
             }
             DisplayMode::Columns => {
-                View::Details(DetailsView::new(&element.imp().scroller, tab, settings, selection))
+                View::Columns(DetailsView::new(&element.imp().scroller, tab, settings, selection))
             }
         };
 
@@ -216,7 +216,7 @@ impl PaneExt for Pane {
             DisplayMode::Icons => {
                 View::Icons(IconView::new(&self.element.imp().scroller, self.tab, &self.selection))
             }
-            DisplayMode::Columns => View::Details(DetailsView::new(
+            DisplayMode::Columns => View::Columns(DetailsView::new(
                 &self.element.imp().scroller,
                 self.tab,
                 settings,
@@ -230,7 +230,7 @@ impl PaneExt for Pane {
     fn get_view_state(&self, list: &Contents) -> SavedViewState {
         let eo = match &self.view {
             View::Icons(ic) => ic.get_first_visible(),
-            View::Details(_) => todo!(),
+            View::Columns(cv) => cv.get_first_visible(),
         };
 
         let scroll_pos =
@@ -243,7 +243,7 @@ impl PaneExt for Pane {
     fn apply_view_state(&mut self, state: SavedViewState) {
         match &self.view {
             View::Icons(icons) => icons.scroll_to(state.scroll_pos),
-            View::Details(details) => details.scroll_to(state.scroll_pos),
+            View::Columns(details) => details.scroll_to(state.scroll_pos),
         }
     }
 

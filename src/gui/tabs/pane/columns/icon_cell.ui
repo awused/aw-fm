@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="IconCell" parent="GtkWidget">
+    <child>
+      <object class="GtkImage" id="image">
+        <property name="pixel-size">28</property>
+        <property name="width-request">28</property>
+        <property name="height-request">28</property>
+      </object>
+    </child>
+  </template>
+</interface>
