@@ -8,6 +8,8 @@ use std::num::NonZeroU64;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -20,6 +22,7 @@ use gtk::{glib, Box, MultiSelection, Orientation, ScrolledWindow};
 use path_clean::PathClean;
 
 use super::contents::Contents;
+use super::element::TabElement;
 use super::id::{TabId, TabUid};
 use super::pane::{Pane, PaneExt};
 use super::search::SearchPane;
@@ -43,10 +46,12 @@ use crate::natsort::ParsedString;
 #[derive(Debug)]
 struct WatchedDir {
     path: Arc<Path>,
+    cancel: Arc<AtomicBool>,
 }
 
 impl Drop for WatchedDir {
     fn drop(&mut self) {
+        self.cancel.store(true, Relaxed);
         gui_run(|g| {
             g.send_manager(ManagerAction::Unwatch(self.path.clone()));
         });
@@ -55,11 +60,12 @@ impl Drop for WatchedDir {
 
 impl WatchedDir {
     fn start(path: Arc<Path>) -> Self {
+        let cancel: Arc<AtomicBool> = Arc::default();
         gui_run(|g| {
-            g.send_manager(ManagerAction::Open(path.clone()));
+            g.send_manager(ManagerAction::Open(path.clone(), cancel.clone()));
         });
 
-        Self { path }
+        Self { path, cancel }
     }
 }
 
@@ -136,10 +142,6 @@ impl CurrentPane {
 }
 
 // Current limitations:
-// - Tabs cannot be unloaded, refreshed, or reopened while they're opening
-//   - Tabs can be closed while opening
-//   - Dropping this requirement isn't super hard but leaves room for bugs.
-//   - Likely to be too niche to really matter.
 // - All tabs open to the same directory are in the same TabState
 //   - Slightly increases memory usage over the absolute bare minimum.
 //
@@ -162,11 +164,17 @@ pub(super) struct Tab {
     view_state: Option<SavedViewState>,
     history: VecDeque<HistoryEntry>,
     future: VecDeque<HistoryEntry>,
-    element: (),
+    element: TabElement,
 
     // Each tab can only be open in one pane at once.
     // In theory we could do many-to-many but it's too niche.
     pane: CurrentPane,
+}
+
+impl Drop for Tab {
+    fn drop(&mut self) {
+        todo!()
+    }
 }
 
 impl Tab {
@@ -190,7 +198,7 @@ impl Tab {
         other.iter().filter(|t| self.matches_arc(&t.path))
     }
 
-    pub fn new(id: TabUid, path: PathBuf, element: (), existing_tabs: &[Self]) -> Self {
+    pub fn new(id: TabUid, path: PathBuf, existing_tabs: &[Self]) -> (Self, TabElement) {
         // Clean the path without resolving symlinks.
         let mut path = path.clean();
         if path.is_relative() {
@@ -209,6 +217,8 @@ impl Tab {
 
         let contents = Contents::new(settings.sort);
 
+        let element = TabElement::new(id.copy(), "TODO -- title");
+
         let mut t = Self {
             id,
             path,
@@ -218,36 +228,41 @@ impl Tab {
             view_state: None,
             history: VecDeque::new(),
             future: VecDeque::new(),
-            element,
+            element: element.clone(),
             pane: CurrentPane::Nothing,
         };
 
         t.copy_from_donor(existing_tabs, &[]);
 
-        t
+        (t, element)
     }
 
-    pub fn cloned(id: TabUid, source: &Self, element: ()) -> Self {
+    pub fn cloned(id: TabUid, source: &Self) -> (Self, TabElement) {
         // Assumes inactive tabs cannot be cloned.
         let view_state = source.take_view_snapshot();
         let mut contents = Contents::new(source.settings.sort);
         contents.clone_from(&source.contents, source.settings.sort);
+        // TODO -- clone tab_element state, like spinner
 
-        Self {
-            id,
-            path: source.path.clone(),
-            settings: source.settings,
-            dir_state: source.dir_state.clone(),
-            contents,
-            view_state,
-            history: source.history.clone(),
-            future: source.future.clone(),
-            element,
-            pane: CurrentPane::default(),
-        }
+        (
+            Self {
+                id,
+                path: source.path.clone(),
+                settings: source.settings,
+                dir_state: source.dir_state.clone(),
+                contents,
+                view_state,
+                history: source.history.clone(),
+                future: source.future.clone(),
+                element: todo!(),
+                pane: CurrentPane::default(),
+            },
+            todo!(),
+        )
     }
 
     fn copy_from_donor(&mut self, left: &[Self], right: &[Self]) -> bool {
+        // TODO -- clone tab_element state from donor, like spinner
         for t in left.iter().chain(right) {
             // Check for value equality, not reference equality
             if *self.path == *t.path {
@@ -293,16 +308,10 @@ impl Tab {
         let sb = self.dir_state.borrow();
 
         match (&snap.kind, &*sb) {
-            (_, DirState::Unloaded) => {
-                // This should never happen. Maybe unloading needs to forcibly change the Arc out
-                // for a new one.
-                unreachable!("Received {:?} snapshot for an unloaded tab", snap.kind);
+            (_, DirState::Unloaded | DirState::Loaded(_)) => false,
+            (Complete | Start | Middle | End, DirState::Loading { watch, .. }) => {
+                Arc::ptr_eq(&watch.cancel, &snap.id)
             }
-            (_, DirState::Loaded(_)) => {
-                // This should never happen while loading/reloading.
-                unreachable!("Received {:?} snapshot for loaded tab.", snap.kind);
-            }
-            (Complete | Start | Middle | End, DirState::Loading { .. }) => true,
         }
     }
 
@@ -635,7 +644,7 @@ impl Tab {
         self.change_location(left, right, target)
     }
 
-    pub(super) fn parent(&mut self, left: &[Self], right: &[Self]) {
+    pub fn parent(&mut self, left: &[Self], right: &[Self]) {
         let Some(parent) = self.path.parent() else {
             warn!("No parent for {:?}", self.path);
             return;
@@ -645,16 +654,16 @@ impl Tab {
         self.navigate(left, right, &target)
     }
 
-    fn forward(&mut self) {
+    pub fn forward(&mut self, left: &[Self], right: &[Self]) {
         todo!()
     }
 
-    pub(super) fn backward(&mut self) {
+    pub(super) fn backward(&mut self, left: &[Self], right: &[Self]) {
         todo!()
     }
 
     // Goes to the child directory if one was previous open or if there's only one.
-    pub(super) fn child(&mut self) {
+    pub(super) fn child(&mut self, left: &[Self], right: &[Self]) {
         todo!()
     }
 

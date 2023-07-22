@@ -245,12 +245,12 @@ impl Manager {
         use ManagerAction::*;
 
         match ma {
-            Open(path) => {
+            Open(path, cancel) => {
                 if self.watch_dir(&path) {
-                    self.start_read_dir(path);
+                    self.start_read_dir(path, cancel);
                 }
             }
-            Refresh(path) => self.start_read_dir(path),
+            Refresh(path, cancel) => self.start_read_dir(path, cancel),
             Unwatch(path) => self.unwatch_dir(&path),
 
             Execute(s, env) => self.execute(s, env),

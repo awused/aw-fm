@@ -3,8 +3,10 @@ use std::fmt::Write;
 use gtk::gio::ListStore;
 use gtk::prelude::{Cast, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{EditableExt, EntryExt, SelectionModelExt, WidgetExt};
-use gtk::{glib, Bitset, EventControllerFocus, MultiSelection, Widget};
+use gtk::traits::{
+    EditableExt, EntryExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
+};
+use gtk::{glib, Bitset, EventControllerFocus, GestureClick, MultiSelection, Widget};
 
 use crate::com::{EntryObject, SignalHolder};
 use crate::gui::tabs::contents::Contents;
@@ -26,16 +28,26 @@ impl PaneElement {
         let signals = s.setup_signals(tab, selection);
 
         let focus = EventControllerFocus::new();
-        focus.connect_enter(move |_| {
+        focus.connect_enter(move |focus| {
             trace!("Focus entered {tab:?}");
+            let element = focus.widget().downcast::<PaneElement>().unwrap();
             tabs_run(|t| t.set_active(tab));
         });
         s.add_controller(focus);
 
+        // Maps forward/back on a mouse to Forward/Backward
+        let forward_back_mouse = GestureClick::new();
+        forward_back_mouse.set_button(0);
+        forward_back_mouse.connect_pressed(move |c, n, _x, _y| match c.current_button() {
+            8 => error!("TODO backwards for mouse pane {tab:?}"),
+            9 => error!("TODO forwards for mouse pane {tab:?}"),
+            _ => {}
+        });
+        s.add_controller(forward_back_mouse);
+
         let imp = s.imp();
 
         imp.tab.set(tab).unwrap();
-
         imp.text_entry.set_enable_undo(true);
 
         (s, signals)
@@ -120,6 +132,7 @@ mod imp {
         #[template_child]
         pub selection: TemplateChild<gtk::Label>,
 
+        pub active: Cell<bool>,
         pub original_text: RefCell<String>,
         pub tab: OnceCell<TabId>,
     }

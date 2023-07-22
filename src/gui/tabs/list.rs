@@ -5,11 +5,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gtk::gdk::RGBA;
+use gtk::gio::ListStore;
+use gtk::prelude::{Cast, StaticType};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{BoxExt, WidgetExt};
-use gtk::Orientation;
+use gtk::{NoSelection, Orientation, SignalListItemFactory};
 use path_clean::PathClean;
 
+use super::element::TabElement;
 use super::id::TabId;
 use super::tab::Tab;
 use crate::com::{DirSnapshot, DisplayMode, EntryObjectSnapshot, SortSettings, Update};
@@ -18,16 +21,7 @@ use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 
 
-// Maximum number of panes per window
-const MAX_PANES: usize = 3;
-
-// Unique highlights for each selected tab per pane.
-// TODO -- this or just brighter/darker?
-const PANE_COLOURS: [RGBA; MAX_PANES] = [RGBA::BLUE, RGBA::GREEN, RGBA::RED];
-
-
-// TODO -- to support multiple panes, move active out of this
-// This is tightly couples the Tab implementation, right now.
+// This is tightly coupled the Tab implementation, right now.
 #[derive(Debug)]
 pub struct TabsList {
     tabs: Vec<Tab>,
@@ -36,18 +30,41 @@ pub struct TabsList {
     // There may be tabs that are not visible.
     active: Option<TabId>,
 
-    //tabs_store: gio::ListStore,
+    tab_elements: ListStore,
     tabs_container: gtk::ListView,
     pane_container: gtk::Box,
 }
 
 impl TabsList {
     pub fn new(window: &MainWindow) -> Self {
+        let tabs_container = window.imp().tabs.clone();
+        let tab_elements = ListStore::new(TabElement::static_type());
+
+        let selection = NoSelection::new(Some(tab_elements.clone()));
+
+        let factory = SignalListItemFactory::new();
+        // TODO -- if this is slow, make a TabContents class and use that to bind rendered
+        // TabElements
+        // factory.connect_setup(|_factory, item| {});
+        factory.connect_bind(|_factory, obj| {
+            let item = obj.downcast_ref::<gtk::ListItem>().unwrap();
+            let tab = item.item().unwrap().downcast::<TabElement>().unwrap();
+            item.set_child(Some(&tab));
+        });
+        factory.connect_bind(|_factory, obj| {
+            let item = obj.downcast_ref::<gtk::ListItem>().unwrap();
+            item.set_child(None::<&TabElement>);
+        });
+
+
+        tabs_container.set_factory(Some(&factory));
+
         Self {
             tabs: Vec::new(),
             active: None,
 
-            tabs_container: window.imp().tabs.clone(),
+            tab_elements,
+            tabs_container,
             pane_container: window.imp().panes.clone(),
         }
     }
@@ -68,9 +85,10 @@ impl TabsList {
             path = abs.clean();
         }
 
-        let first_tab_element = ();
+        let (tab, element) = Tab::new(next_id(), path, &[]);
 
-        self.tabs.push(Tab::new(next_id(), path, first_tab_element, &[]));
+        self.tabs.push(tab);
+        self.tab_elements.append(&element);
         self.tabs[0].load(&mut [], &mut []);
         self.tabs[0].new_pane(&self.pane_container);
     }
@@ -167,19 +185,20 @@ impl TabsList {
     }
 
     fn clone_tab(&mut self, index: usize) {
-        let mut new_tab = Tab::cloned(next_id(), &self.tabs[index], ());
+        // let mut new_tab = Tab::cloned(next_id(), &self.tabs[index], ());
 
-        self.tabs.insert(index + 1, new_tab);
+        // self.tabs.insert(index + 1, new_tab);
     }
 
     // For now, tabs always open right of the active tab
-    fn open_tab(&mut self, path: PathBuf, active_tab: TabId) {
-        let mut new_tab = Tab::new(next_id(), path, (), &self.tabs);
+    fn open_tab(&mut self, path: PathBuf) {
+        let (mut new_tab, element) = Tab::new(next_id(), path, &self.tabs);
 
-        self.tabs.insert(self.position(active_tab).unwrap() + 1, new_tab);
+        // TODO
+        // self.tabs.insert(self.position(active_tab).unwrap() + 1, new_tab);
     }
 
-    pub fn close_tab(&mut self, id: TabId) {
+    fn close_tab(&mut self, id: TabId) {
         let index = self.position(id).unwrap();
         // TODO -- If all tabs are active
 
@@ -192,15 +211,47 @@ impl TabsList {
         }
 
         // let active = self.tabs[index].is_active()
-        self.tabs.remove(index);
 
-        // if let Some(pane_index) = pane_index {
-        //     // TODO -- handle case where multiple tabs are active in panes
-        //     // Should grab the next
-        //     let (left, new_active, right) = self.split_around_mut(self.active);
-        //     new_active.load(left, right);
-        //     self.tabs[self.active].display(&self.pane_container);
-        // }
+        // Order doesn't matter.
+        let removed = self.tabs.swap_remove(index);
+
+        todo!("remove element")
+    }
+
+    // Helper function for common cases.
+    fn run_tab<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(&mut self, id: TabId, f: F) {
+        let Some(index) = self.position(id) else {
+            error!("Couldn't find tab for {id:?}");
+            return;
+        };
+
+        let (left, tab, right) = self.split_around_mut(index);
+        f(tab, left, right);
+    }
+
+    // Don't want to expose the Tab methods to Gui
+    pub fn active_forward(&mut self) {
+        if let Some(active) = self.active {
+            self.run_tab(active, Tab::forward)
+        }
+    }
+
+    pub fn active_back(&mut self) {
+        if let Some(active) = self.active {
+            self.run_tab(active, Tab::backward)
+        }
+    }
+
+    pub fn active_parent(&mut self) {
+        if let Some(active) = self.active {
+            self.run_tab(active, Tab::parent)
+        }
+    }
+
+    pub fn active_child(&mut self) {
+        if let Some(active) = self.active {
+            self.run_tab(active, Tab::child)
+        }
     }
 
     pub fn active_close_tab(&mut self) {
@@ -252,16 +303,5 @@ impl TabsList {
 
         let index = self.position(active).unwrap();
         self.tabs[index].update_display_mode(mode);
-    }
-
-    pub fn active_parent(&mut self) {
-        let Some(active) = self.active else {
-            warn!("Parent called with no open panes");
-            return;
-        };
-
-        let index = self.position(active).unwrap();
-        let (left, tab, right) = self.split_around_mut(index);
-        tab.parent(left, right);
     }
 }

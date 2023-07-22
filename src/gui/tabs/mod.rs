@@ -30,6 +30,7 @@ use crate::gui::Update;
 use crate::natsort::ParsedString;
 
 mod contents;
+mod element;
 pub mod list;
 mod pane;
 mod search;

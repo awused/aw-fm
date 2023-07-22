@@ -42,6 +42,7 @@ struct PendingThumbs {
     factories: Vec<SendFactory>,
     // TODO -- Save a map lookup?
     // ongoing: Vec<(Arc<Path>, WeakRef<EntryObject>)>,
+    processed: usize,
 }
 
 
@@ -59,27 +60,22 @@ pub struct Thumbnailer {
 
 impl Thumbnailer {
     pub fn new() -> Self {
-        let max = CONFIG.max_thumbnailers as u16;
+        let high = CONFIG.max_thumbnailers as u16;
         let low = CONFIG.background_thumbnailers as u16;
 
         let mut pending = PendingThumbs {
-            factories: SendFactory::make(max.into()),
+            factories: SendFactory::make(high),
             ..PendingThumbs::default()
         };
 
         let pool = ThreadPoolBuilder::new()
             .thread_name(|n| format!("thumbnailer-{n}"))
             .panic_handler(handle_panic)
-            .num_threads(max.into())
+            .num_threads(high.into())
             .build()
             .unwrap();
 
-        Self {
-            pending: pending.into(),
-            pool,
-            high: max,
-            low,
-        }
+        Self { pending: pending.into(), pool, high, low }
     }
 
     pub fn low_priority(&self, weak: WeakRef<EntryObject>) {
@@ -136,12 +132,12 @@ impl Thumbnailer {
         while let Some(weak) = pending.high_priority.pop_front() {
             if let Some(strong) = weak.upgrade() {
                 if strong.mark_thumbnail_loading_high() {
+                    pending.processed += 1;
                     return Some((strong, pending.factories.pop().unwrap()));
                 }
             }
         }
 
-        // pending.factories.len() <= self.high
         if self.high > self.low && self.high - pending.factories.len() as u16 > self.low {
             return None;
         }
@@ -149,16 +145,23 @@ impl Thumbnailer {
         while let Some(weak) = pending.low_priority.pop() {
             if let Some(strong) = weak.upgrade() {
                 if strong.mark_thumbnail_loading_low() {
+                    pending.processed += 1;
                     return Some((strong, pending.factories.pop().unwrap()));
                 }
             }
         }
 
-        // Don't spam this if it's only for only a few updates.
-        if pending.high_priority.capacity() + pending.low_priority.capacity() > 32 {
+        if pending.factories.len() < self.high as usize {
+            // Wait until all processing is done.
+            return None;
+        }
+
+        if pending.processed > 32 {
+            // Don't spam this if it's only for only a few updates.
             debug!("Finished loading all thumbnails (none pending).");
         }
 
+        pending.processed = 0;
         pending.high_priority.shrink_to_fit();
         pending.low_priority.shrink_to_fit();
 
@@ -192,7 +195,8 @@ impl Thumbnailer {
                 match Texture::from_file(&gfile) {
                     Ok(tex) => {
                         // This is just too spammy outside of debugging
-                        // trace!("Loaded existing thumbnail for {uri:?} in {:?}", start.elapsed());
+                        // trace!("Loaded existing thumbnail for {uri:?} in {:?}",
+                        // start.elapsed());
                         return Self::finish_thumbnail(factory, tex, path);
                     }
                     Err(e) => {
@@ -278,8 +282,8 @@ mod send {
     }
 
     impl SendFactory {
-        pub fn make(n: usize) -> Vec<Self> {
-            let mut factories = Vec::with_capacity(n);
+        pub fn make(n: u16) -> Vec<Self> {
+            let mut factories = Vec::with_capacity(n as usize);
             if n > 0 {
                 let current_thread = unsafe { g_thread_self() };
                 let f = DesktopThumbnailFactory::new(DesktopThumbnailSize::Normal);

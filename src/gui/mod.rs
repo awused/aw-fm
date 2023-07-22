@@ -120,12 +120,6 @@ pub fn run(
     manager_sender: UnboundedSender<ManagerAction>,
     gui_receiver: glib::Receiver<GuiAction>,
 ) {
-    let start = Instant::now();
-    println!("{:?}", gio::AppInfo::default_for_type("video/mp4", false).unwrap().name());
-    println!("Listed applications in {:?}", start.elapsed());
-    println!("{:?}", gio::AppInfo::default_for_type("video/mp4", false).unwrap().name());
-    println!("Listed applications in {:?}", start.elapsed());
-
     let flags = if CONFIG.unique {
         gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::SEND_ENVIRONMENT
     } else {

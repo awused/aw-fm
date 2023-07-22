@@ -17,7 +17,7 @@ use self::icon_view::IconView;
 use super::id::TabId;
 use super::{Contents, SavedViewState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder, SortSettings};
-use crate::gui::{applications, tabs_run};
+use crate::gui::{applications, gui_run, tabs_run};
 
 mod columns;
 mod element;
@@ -92,8 +92,39 @@ impl Drop for Pane {
             return;
         };
 
-        let parent = parent.downcast_ref::<gtk::Box>().unwrap();
-        parent.remove(&self.element);
+        if let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
+            let start = paned.start_child().unwrap();
+            let end = paned.end_child().unwrap();
+            paned.set_start_child(None::<&gtk::Widget>);
+            paned.set_end_child(None::<&gtk::Widget>);
+
+            let sibling = if start.downcast_ref::<PaneElement>().unwrap().imp().tab.get().unwrap()
+                == &self.tab
+            {
+                end
+            } else {
+                start
+            };
+
+            // A split will always have a parent.
+            let grandparent = paned.parent().unwrap();
+            if let Some(grandpane) = grandparent.downcast_ref::<gtk::Paned>() {
+                if grandpane.start_child().unwrap().downcast_ref::<gtk::Paned>().unwrap().eq(paned)
+                {
+                    grandpane.set_start_child(Some(&sibling));
+                } else {
+                    grandpane.set_end_child(Some(&sibling));
+                }
+            } else {
+                // Single pane, just remove it.
+            }
+            let parent = parent.downcast_ref::<gtk::Box>().unwrap();
+            parent.remove(&self.element);
+            todo!("Handle split")
+        } else {
+            let parent = parent.downcast_ref::<gtk::Box>().unwrap();
+            parent.remove(&self.element);
+        }
 
         // TODO [split]
         // if let Some(split) = parent.downcast_ref::<Split>() {
@@ -185,6 +216,8 @@ impl Pane {
 
         parent.insert_child_after(&pane.element, Some(&other.element));
         parent.remove(&other.element);
+
+        // TODO -- handle focus
 
         pane
     }

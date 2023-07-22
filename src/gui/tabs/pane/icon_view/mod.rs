@@ -15,6 +15,7 @@ use crate::gui::{applications, GUI};
 #[derive(Debug)]
 pub(super) struct IconView {
     grid: GridView,
+    selection: MultiSelection,
 }
 
 impl IconView {
@@ -66,11 +67,16 @@ impl IconView {
             applications::activate(tab_id, &display, &model)
         });
 
-        Self { grid }
+        Self { grid, selection: selection.clone() }
     }
 
     pub(super) fn scroll_to(&self, pos: u32) {
+        if self.selection.n_items() <= pos {
+            return;
+        }
+        println!("scroll-to");
         self.grid.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
+        println!("scroll-todone")
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688

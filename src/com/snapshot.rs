@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use super::{Entry, EntryObject};
@@ -30,6 +31,7 @@ impl SnapshotKind {
 #[derive(Debug, Clone)]
 pub struct SnapshotId {
     pub kind: SnapshotKind,
+    pub id: Arc<AtomicBool>,
     pub path: Arc<Path>,
 }
 
@@ -40,8 +42,16 @@ pub struct DirSnapshot {
 }
 
 impl DirSnapshot {
-    pub const fn new(kind: SnapshotKind, path: Arc<Path>, entries: Vec<Entry>) -> Self {
-        Self { id: SnapshotId { kind, path }, entries }
+    pub fn new(
+        kind: SnapshotKind,
+        path: &Arc<Path>,
+        id: &Arc<AtomicBool>,
+        entries: Vec<Entry>,
+    ) -> Self {
+        Self {
+            id: SnapshotId { kind, id: id.clone(), path: path.clone() },
+            entries,
+        }
     }
 }
 

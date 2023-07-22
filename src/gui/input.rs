@@ -58,18 +58,6 @@ impl Gui {
 
         self.window.add_controller(click);
 
-        // Maps forward/back on a mouse to Forward/Backward
-        let forward_back_mouse = gtk::GestureClick::new();
-
-        forward_back_mouse.set_button(0);
-        forward_back_mouse.connect_pressed(|c, n, _x, _y| match c.current_button() {
-            8 => error!("TODO backwards for mouse pane"),
-            9 => error!("TODO forwards for mouse pane"),
-            _ => {}
-        });
-
-        self.window.add_controller(forward_back_mouse);
-
         //     let drop_target = gtk::DropTarget::new(FileList::static_type(), DragAction::COPY);
         //
         //     let g = self.clone();

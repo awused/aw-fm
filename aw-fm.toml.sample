@@ -67,20 +67,12 @@ shortcuts = [
 # {name = "Save Page", action = "Execute /path/to/save-page.sh"},
 # {name = "Sample Script", action = "Script /path/to/sample-script.sh"},
 context_menu = [
-  {name = "Container", submenu = "Fit", action = "FitToContainer"},
-  {name = "Width", submenu = "Fit", action = "FitToWidth"},
-  {name = "Height", submenu = "Fit", action = "FitToHeight"},
-  {name = "Full", submenu = "Fit", action = "FullSize"},
-  {name = "Single Page", section = "display", action = "SinglePage"},
-  {name = "Vertical Strip", section = "display", action = "VerticalStrip"},
-  {name = "Horizontal Strip", section = "display", action = "HorizontalStrip"},
-  {name = "Dual Page", section = "display", action = "DualPage"},
-  {name = "Dual Page (Reversed)", section = "display", action = "DualPageReversed"},
 ]
 
 # Whether to entirely skip the trash or not when deleting files.
 #
 # aw-fm doesn't really deal with trash and can't empty it for you.
+# UNIMPLEMENTED
 skip_trash = false
 
 # ------------------------------------------------------------------------------------------------

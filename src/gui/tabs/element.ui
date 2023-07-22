@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="AwFmTab" parent="GtkBox">
+    <property name="orientation">horizontal</property>
+    <property name="spacing">0</property>
+    <property name="hexpand">true</property>
+
+    <child>
+      <object class="GtkSpinner" id="spinner">
+            <!-- <property name="visible">false</property> -->
+      </object>
+    </child>
+
+
+    <child>
+      <object class="GtkLabel" id="title">
+        <property name="ellipsize">PANGO_ELLIPSIZE_START</property>
+        <property name="hexpand">true</property>
+
+        <style>
+          <class name="tab-title"/>
+        </style>
+      </object>
+    </child>
+
+  </template>
+</interface>
+
+
+

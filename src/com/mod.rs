@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -52,8 +53,8 @@ impl Update {
 
 #[derive(Debug)]
 pub enum ManagerAction {
-    Open(Arc<Path>),
-    Refresh(Arc<Path>),
+    Open(Arc<Path>, Arc<AtomicBool>),
+    Refresh(Arc<Path>, Arc<AtomicBool>),
     Unwatch(Arc<Path>),
     // Close(PathBuf),
     // StartSearch(),

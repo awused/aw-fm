@@ -250,6 +250,7 @@ pub enum Thumbnail {
 mod internal {
     use std::cell::{OnceCell, Ref, RefCell};
     use std::ops::Deref;
+    use std::time::Instant;
 
     use gtk::gdk::Texture;
     use gtk::gdk_pixbuf::Pixbuf;
@@ -407,7 +408,9 @@ mod internal {
                 }
             }
             drop(b);
+            let start = Instant::now();
             self.obj().emit_by_name::<()>("update", &[]);
+            println!("Emitted update {:?}", start.elapsed());
         }
 
         pub(super) fn should_request_low_priority_thumb(&self) -> bool {
