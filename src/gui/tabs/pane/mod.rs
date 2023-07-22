@@ -11,7 +11,7 @@ use gtk::{
     Bitset, ColumnView, GridView, ListView, MultiSelection, Orientation, ScrolledWindow, Widget,
 };
 
-use self::columns::DetailsView;
+use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
 use super::id::TabId;
@@ -19,7 +19,7 @@ use super::{Contents, SavedViewState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder, SortSettings};
 use crate::gui::{applications, gui_run, tabs_run};
 
-mod columns;
+mod details;
 mod element;
 mod icon_view;
 
@@ -89,6 +89,7 @@ impl Drop for Pane {
         let Some(parent) = self.element.parent() else {
             // If parent is None here, we've explicitly detached it to replace it with another
             // pane.
+            trace!("Dropping detached pane");
             return;
         };
 
@@ -120,7 +121,6 @@ impl Drop for Pane {
             }
             let parent = parent.downcast_ref::<gtk::Box>().unwrap();
             parent.remove(&self.element);
-            todo!("Handle split")
         } else {
             let parent = parent.downcast_ref::<gtk::Box>().unwrap();
             parent.remove(&self.element);

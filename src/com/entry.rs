@@ -12,7 +12,7 @@ use gtk::gdk::Texture;
 use gtk::gdk_pixbuf::Pixbuf;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
-    self, Cancellable, FileInfo, FileQueryInfoFlags, Icon,
+    self, Cancellable, FileInfo, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
     FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE, FILE_ATTRIBUTE_STANDARD_ICON,
     FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE, FILE_ATTRIBUTE_STANDARD_TYPE,
     FILE_ATTRIBUTE_TIME_CREATED, FILE_ATTRIBUTE_TIME_CREATED_USEC, FILE_ATTRIBUTE_TIME_MODIFIED,
@@ -33,7 +33,9 @@ use crate::natsort::{self, ParsedString};
 static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
     [
         FILE_ATTRIBUTE_STANDARD_TYPE,
-        FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE,
+        // FAST_CONTENT_TYPE doesn't sniff mimetypes, but even getting the icon involves getting
+        // the slow content type.
+        FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
         FILE_ATTRIBUTE_STANDARD_ICON,
         FILE_ATTRIBUTE_STANDARD_IS_SYMLINK,
         FILE_ATTRIBUTE_STANDARD_SIZE,
@@ -165,10 +167,7 @@ impl Entry {
         //     usec: info.attribute_uint32(FILE_ATTRIBUTE_TIME_CREATED_USEC),
         // };
 
-        let mime = info
-            .attribute_string(FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE)
-            .unwrap()
-            .to_string();
+        let mime = info.attribute_string(FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE).unwrap().to_string();
 
         let size = info.attribute_uint64(FILE_ATTRIBUTE_STANDARD_SIZE);
 
@@ -410,7 +409,6 @@ mod internal {
             drop(b);
             let start = Instant::now();
             self.obj().emit_by_name::<()>("update", &[]);
-            println!("Emitted update {:?}", start.elapsed());
         }
 
         pub(super) fn should_request_low_priority_thumb(&self) -> bool {

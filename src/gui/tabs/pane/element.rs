@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::time::Instant;
 
 use gtk::gio::ListStore;
 use gtk::prelude::{Cast, ListModelExt};
@@ -29,8 +30,8 @@ impl PaneElement {
 
         let focus = EventControllerFocus::new();
         focus.connect_enter(move |focus| {
-            trace!("Focus entered {tab:?}");
-            let element = focus.widget().downcast::<PaneElement>().unwrap();
+            debug!("Focus entered {tab:?}");
+            let element = focus.widget().downcast::<Self>().unwrap();
             tabs_run(|t| t.set_active(tab));
         });
         s.add_controller(focus);
@@ -58,7 +59,14 @@ impl PaneElement {
         let selection_label = &*self.imp().selection;
 
         let count = count_label.clone();
+        let selected = selection_label.clone();
         let count_signal = selection.connect_items_changed(move |list, _p, _a, _r| {
+            // There is no selection_changed event on item removal
+            // selection().size() is comparatively expensive but unavoidable.
+            if !count.get_visible() && (list.n_items() == 0 || list.selection().size() == 0) {
+                selected.set_visible(false);
+                count.set_visible(true);
+            }
             count.set_text(&format!("{} items", list.n_items()));
         });
         let count_signal = SignalHolder::new(selection, count_signal);

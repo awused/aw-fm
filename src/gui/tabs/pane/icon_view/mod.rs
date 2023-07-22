@@ -8,7 +8,7 @@ use gtk::{gio, glib, GridView, ListView, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
 use super::get_first_visible_child;
-use crate::com::{DisplayMode, EntryObject};
+use crate::com::{DisplayMode, EntryObject, SignalHolder};
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, GUI};
 
@@ -16,6 +16,8 @@ use crate::gui::{applications, GUI};
 pub(super) struct IconView {
     grid: GridView,
     selection: MultiSelection,
+
+    workaround_rubberband: SignalHolder<MultiSelection>,
 }
 
 impl IconView {
@@ -67,16 +69,26 @@ impl IconView {
             applications::activate(tab_id, &display, &model)
         });
 
-        Self { grid, selection: selection.clone() }
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
+        grid.set_enable_rubberband(selection.n_items() != 0);
+        let g = grid.clone();
+        let signal = selection.connect_items_changed(move |sel, _, _, _| {
+            g.set_enable_rubberband(sel.n_items() != 0);
+        });
+        let workaround_rubberband = SignalHolder::new(selection, signal);
+
+        Self {
+            grid,
+            selection: selection.clone(),
+            workaround_rubberband,
+        }
     }
 
     pub(super) fn scroll_to(&self, pos: u32) {
         if self.selection.n_items() <= pos {
             return;
         }
-        println!("scroll-to");
         self.grid.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
-        println!("scroll-todone")
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688

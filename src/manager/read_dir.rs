@@ -31,6 +31,9 @@ use crate::{closing, handle_panic};
 mod constants {
     use std::time::Duration;
 
+    // Experimentally, a directory that takes more than 1s is probably going to take a lot more.
+    // The same can be said for 500ms but large NFS directories can get close enough that it
+    // sometimes causes two snapshots instead of one.
     pub static FAST_TIMEOUT: Duration = Duration::from_millis(1000);
     // Aim to send batches at least this large to the gui.
     // Subsequent batches grow larger to avoid taking quadratic time.

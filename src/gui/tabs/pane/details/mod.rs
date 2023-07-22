@@ -19,7 +19,8 @@ use self::icon_cell::IconCell;
 use self::string_cell::{EntryString, StringCell};
 use super::get_first_visible_child;
 use crate::com::{
-    DirSettings, DisplayMode, Entry, EntryKind, EntryObject, SortDir, SortMode, SortSettings,
+    DirSettings, DisplayMode, Entry, EntryKind, EntryObject, SignalHolder, SortDir, SortMode,
+    SortSettings,
 };
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, tabs_run, GUI};
@@ -32,7 +33,10 @@ const DATE_MODIFIED: &str = "Date Modified";
 #[derive(Debug)]
 pub(super) struct DetailsView {
     column_view: ColumnView,
+    selection: MultiSelection,
     current_sort: Rc<Cell<SortSettings>>,
+
+    workaround_rubberband: SignalHolder<MultiSelection>,
 }
 
 
@@ -88,7 +92,21 @@ impl DetailsView {
 
         scroller.set_child(Some(&column_view));
 
-        Self { column_view, current_sort }
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
+        column_view.set_enable_rubberband(selection.n_items() != 0);
+        let cv = column_view.clone();
+        let signal = selection.connect_items_changed(move |sel, _, _, _| {
+            cv.set_enable_rubberband(sel.n_items() != 0);
+        });
+        let workaround_rubberband = SignalHolder::new(selection, signal);
+
+        Self {
+            column_view,
+            current_sort,
+            selection: selection.clone(),
+
+            workaround_rubberband,
+        }
     }
 
     pub(super) fn update_sort(&self, sort: SortSettings) {
@@ -102,6 +120,10 @@ impl DetailsView {
     }
 
     pub(super) fn scroll_to(&self, pos: u32) {
+        if self.selection.n_items() <= pos {
+            return;
+        }
+        self.column_view.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
         error!("TODO -- scroll_to in column view")
     }
 
