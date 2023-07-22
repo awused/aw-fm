@@ -89,10 +89,10 @@ mod imp {
         pub image: TemplateChild<gtk::Image>,
         #[template_child]
         pub name: TemplateChild<gtk::Inscription>,
-        // pub name: TemplateChild<gtk::Label>,
         #[template_child]
         pub size: TemplateChild<gtk::Inscription>,
 
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
         pub bound_object: RefCell<Option<EntryObject>>,
         pub update_connection: Cell<Option<SignalHolder<EntryObject>>>,
     }

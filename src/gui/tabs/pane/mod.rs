@@ -51,10 +51,12 @@ impl View {
 fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
     let mut child = parent.first_child()?;
     loop {
-        let allocation = child.allocation();
-        // Assume we're dealing with a vertical list.
-        if allocation.y() + allocation.height() > 0 {
-            break Some(child);
+        if child.is_visible() && child.is_mapped() {
+            let allocation = child.allocation();
+            // Assume we're dealing with a vertical list.
+            if allocation.y() + allocation.height() > 0 {
+                break Some(child);
+            }
         }
 
         child = child.next_sibling()?;
@@ -257,6 +259,7 @@ impl PaneExt for Pane {
             )),
         };
 
+        println!("{vs:?}");
         self.apply_view_state(vs);
     }
 

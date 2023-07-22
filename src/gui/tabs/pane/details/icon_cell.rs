@@ -63,6 +63,7 @@ mod imp {
         #[template_child]
         pub image: TemplateChild<gtk::Image>,
 
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
         pub bound_object: RefCell<Option<EntryObject>>,
         pub update_connection: Cell<Option<SignalHolder<EntryObject>>>,
     }

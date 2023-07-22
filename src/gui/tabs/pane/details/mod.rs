@@ -11,8 +11,8 @@ use gtk::glib::Object;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{
-    gio, glib, ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, GridView, ListView,
-    MultiSelection, ScrolledWindow, SignalListItemFactory, Widget,
+    gio, glib, ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, GridView, ListItem,
+    ListView, MultiSelection, ScrolledWindow, SignalListItemFactory, Widget,
 };
 
 use self::icon_cell::IconCell;
@@ -134,17 +134,24 @@ impl DetailsView {
             return None;
         }
 
-        error!("TODO -- get_first_visible for column view");
+        let list_view = self.column_view.first_child();
 
-        let list_view = self.column_view.upcast_ref::<gtk::Widget>();
-        // let gc
+        let obj = self
+            .column_view
+            .first_child()
+            .and_then(|c| c.next_sibling())
+            .as_ref()
+            .and_then(get_first_visible_child)
+            .and_then(|c| c.first_child())
+            .and_then(|c| c.first_child())
+            .and_downcast::<IconCell>()
+            .and_then(|ic| ic.bound_object());
 
-        // get_first_visible_child(self.column_view.upcast_ref::<gtk::Widget>())
-        //     .and_then(|w| w.first_child())
-        //     .and_downcast::<IconTile>()
-        //     .and_then(|it: IconTile| it.bound_object())
-        //
-        None
+        if obj.is_none() && self.selection.n_items() != 0 {
+            error!("Failed to find visible item in list with at least one item");
+        }
+
+        obj
     }
 }
 
