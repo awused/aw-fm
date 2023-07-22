@@ -16,24 +16,20 @@ use gtk::gio::{Cancellable, ReadInputStream};
 use gtk::glib::ffi::{g_get_user_data_dir, g_main_context_default, g_thread_self, GThread};
 use gtk::glib::{Bytes, WeakRef};
 use gtk::prelude::{FileExt, IconExt, ObjectExt};
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use rayon::{ThreadBuilder, ThreadPool, ThreadPoolBuilder};
 
 use self::send::SendFactory;
-use super::gui_run;
+use super::{gui_run, ThumbPriority};
 use crate::com::EntryObject;
 use crate::config::CONFIG;
 use crate::{closing, handle_panic};
 
+
 #[derive(Debug, Default)]
 struct PendingThumbs {
-    // Neither FIFO or FILO here is really perfect.
-    // FIFO is probably better more of the time than FILO.
-    // The files the user is actually looking at right now are often somewhere in the middle.
-    // FIFO can't really help with that but it at least tends to generate thumbnails from the top
-    // down.
     high_priority: VecDeque<WeakRef<EntryObject>>,
-    // For low priority, order doesn't matter much, since the objects can be created in any
-    // order. More trouble than it's worth to get a useful order out of these.
+    med_priority: Vec<WeakRef<EntryObject>>,
     low_priority: Vec<WeakRef<EntryObject>>,
 
     // Never bother cloning these, it's a waste, just pass them around.
@@ -78,18 +74,26 @@ impl Thumbnailer {
         Self { pending: pending.into(), pool, high, low }
     }
 
-    pub fn low_priority(&self, weak: WeakRef<EntryObject>) {
-        if self.low > 0 && self.high > 0 {
-            self.pending.borrow_mut().low_priority.push(weak);
-            self.process();
+    pub fn queue(&self, weak: WeakRef<EntryObject>, p: ThumbPriority) {
+        if self.high == 0 {
+            return;
         }
-    }
 
-    pub fn high_priority(&self, weak: WeakRef<EntryObject>) {
-        if self.high > 0 {
-            self.pending.borrow_mut().high_priority.push_back(weak);
-            self.process();
+        match p {
+            ThumbPriority::Low => {
+                if self.low == 0 {
+                    return;
+                }
+                self.pending.borrow_mut().low_priority.push(weak);
+            }
+            ThumbPriority::Medium => {
+                self.pending.borrow_mut().med_priority.push(weak);
+            }
+            ThumbPriority::High => {
+                self.pending.borrow_mut().high_priority.push_back(weak);
+            }
         }
+        self.process();
     }
 
     fn done_with_ticket(factory: SendFactory) {
@@ -108,7 +112,7 @@ impl Thumbnailer {
                 return;
             };
 
-            obj.update_thumbnail(tex);
+            obj.imp().update_thumbnail(tex);
         });
     }
 
@@ -131,7 +135,16 @@ impl Thumbnailer {
 
         while let Some(weak) = pending.high_priority.pop_front() {
             if let Some(strong) = weak.upgrade() {
-                if strong.mark_thumbnail_loading_high() {
+                if strong.imp().mark_thumbnail_loading(ThumbPriority::High) {
+                    pending.processed += 1;
+                    return Some((strong, pending.factories.pop().unwrap()));
+                }
+            }
+        }
+
+        while let Some(weak) = pending.med_priority.pop() {
+            if let Some(strong) = weak.upgrade() {
+                if strong.imp().mark_thumbnail_loading(ThumbPriority::Medium) {
                     pending.processed += 1;
                     return Some((strong, pending.factories.pop().unwrap()));
                 }
@@ -144,7 +157,7 @@ impl Thumbnailer {
 
         while let Some(weak) = pending.low_priority.pop() {
             if let Some(strong) = weak.upgrade() {
-                if strong.mark_thumbnail_loading_low() {
+                if strong.imp().mark_thumbnail_loading(ThumbPriority::Low) {
                     pending.processed += 1;
                     return Some((strong, pending.factories.pop().unwrap()));
                 }
@@ -163,6 +176,7 @@ impl Thumbnailer {
 
         pending.processed = 0;
         pending.high_priority.shrink_to_fit();
+        pending.med_priority.shrink_to_fit();
         pending.low_priority.shrink_to_fit();
 
         None

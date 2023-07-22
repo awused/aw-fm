@@ -9,32 +9,54 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Fixed;
 }
 
-impl IconCell {
-    pub(super) fn new() -> Self {
-        let obj: Self = glib::Object::new();
-        obj
-    }
+impl Default for IconCell {
+    fn default() -> Self {
+        let s: Self = glib::Object::new();
 
-    pub fn bind(&self, obj: &EntryObject) {
+        s.connect_map(|s| {
+            if let Some(obj) = s.bound_object() {
+                obj.mark_mapped_changed(true);
+            } else {
+                error!("Mapping unbound IconCell");
+            }
+        });
+
+        s.connect_unmap(|s| {
+            if let Some(obj) = s.bound_object() {
+                obj.mark_mapped_changed(false);
+            } else {
+                error!("Unmapping unbound IconCell");
+            }
+        });
+
+        s
+    }
+}
+
+
+impl IconCell {
+    pub fn bind(&self, eo: &EntryObject) {
         let imp = self.imp();
-        imp.update_contents(obj);
+        imp.update_contents(eo);
 
         // Don't need to be weak refs
         let self_ref = self.clone();
-        let id = obj.connect_local("update", false, move |entry| {
+        let id = eo.connect_local("update", false, move |entry| {
             let obj: EntryObject = entry[0].get().unwrap();
             self_ref.imp().update_contents(&obj);
 
             None
         });
 
-        let d = SignalHolder::new(obj, id);
+        eo.mark_bound(self.is_mapped());
+
+        let d = SignalHolder::new(eo, id);
 
         assert!(imp.update_connection.replace(Some(d)).is_none())
     }
 
-    pub fn unbind(&self, obj: &EntryObject) {
-        obj.deprioritize_thumb();
+    pub fn unbind(&self, eo: &EntryObject) {
+        eo.mark_unbound(self.is_mapped());
         self.imp().bound_object.take().unwrap();
         self.imp().update_connection.take().unwrap();
     }
@@ -95,7 +117,7 @@ mod imp {
 
     impl IconCell {
         pub(super) fn update_contents(&self, obj: &EntryObject) {
-            let thumb = obj.thumbnail_for_display();
+            let thumb = obj.imp().thumbnail();
             // There's basically no mutation that won't cause the thumbnail
             // to be regenerated, so this is expensive but never wasted.
             if let Some(texture) = thumb {

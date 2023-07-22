@@ -161,7 +161,7 @@ fn setup_columns(column_view: &ColumnView) {
     let icon_factory = SignalListItemFactory::new();
     icon_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-        let cell = IconCell::new();
+        let cell = IconCell::default();
         item.set_child(Some(&cell));
     });
     icon_factory.connect_bind(move |_factory, item| {

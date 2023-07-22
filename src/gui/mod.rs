@@ -68,12 +68,17 @@ struct WindowState {
     memorized_size: crate::com::Res,
 }
 
-pub fn queue_high_priority_thumb(weak: WeakRef<EntryObject>) {
-    gui_run(|g| g.thumbnailer.high_priority(weak));
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThumbPriority {
+    Low,
+    // Bound, but not mapped (visible)
+    Medium,
+    // Visible
+    High,
 }
 
-pub fn queue_low_priority_thumb(weak: WeakRef<EntryObject>) {
-    gui_run(|g| g.thumbnailer.low_priority(weak));
+pub fn queue_thumb(weak: WeakRef<EntryObject>, p: ThumbPriority) {
+    gui_run(|g| g.thumbnailer.queue(weak, p));
 }
 
 

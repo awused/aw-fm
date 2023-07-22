@@ -25,7 +25,7 @@ use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassIsExt};
 use once_cell::sync::Lazy;
 
 use super::{DirSettings, SortDir, SortMode, SortSettings};
-use crate::gui::{queue_high_priority_thumb, queue_low_priority_thumb};
+use crate::gui::{queue_thumb, ThumbPriority};
 use crate::natsort::{self, ParsedString};
 
 // In theory could use standard::edit-name and standard::display-name instead of taking
@@ -225,16 +225,12 @@ impl Entry {
     }
 }
 
+
 #[derive(Debug)]
 pub enum Thumbnail {
     Nothing,
-    LowPriority,
-    HighPriority(u8),
-    // Only set by the thumbnailer when it starts to load the thumbnail for a file.
-    // This is to avoid race conditions between an update being handled and a second update to the
-    // file.
+    Unloaded,
     Loading,
-    // Loaded(Pixbuf),
     Loaded(Texture),
     // Outdated(Pixbuf),
     // Can do two-pass unloading for all images.
@@ -260,12 +256,27 @@ mod internal {
     use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassExt};
     use once_cell::sync::Lazy;
 
-    use super::{Thumbnail, ALL_ENTRY_OBJECTS};
+    use super::{ThumbPriority, Thumbnail, ALL_ENTRY_OBJECTS};
     use crate::com::EntryKind;
+
+    // (bound, mapped)
+    #[derive(Debug, Default, Clone, Copy)]
+    struct WidgetCounter(u16, u16);
+
+    impl WidgetCounter {
+        const fn priority(self) -> ThumbPriority {
+            match (self.0, self.1) {
+                (0, 0) => ThumbPriority::Low,
+                (_, 0) => ThumbPriority::Medium,
+                (..) => ThumbPriority::High,
+            }
+        }
+    }
 
     #[derive(Debug)]
     struct Entry {
         entry: super::Entry,
+        widgets: WidgetCounter,
         thumbnail: Thumbnail,
     }
 
@@ -300,27 +311,37 @@ mod internal {
     // Might be worth redoing this and moving more logic down into EntryObject.
     // These should not be Entry methods since they don't make sense for a bare Entry.
     impl EntryWrapper {
-        pub(super) fn init(&self, entry: super::Entry) {
-            let thumbnail = match entry.kind {
-                EntryKind::File { .. } => Thumbnail::LowPriority,
-                EntryKind::Directory { .. } => Thumbnail::Nothing,
+        pub(super) fn init(&self, entry: super::Entry) -> Option<ThumbPriority> {
+            let (thumbnail, p) = match entry.kind {
+                EntryKind::File { .. } => (Thumbnail::Unloaded, Some(ThumbPriority::Low)),
+                EntryKind::Directory { .. } => (Thumbnail::Nothing, None),
                 EntryKind::Uninitialized => unreachable!(),
             };
 
             // TODO -- other mechanisms to set thumbnails as Nothing, like mimetype or somesuch
 
-            let wrapped = Entry { entry, thumbnail };
+            let wrapped = Entry {
+                entry,
+                widgets: WidgetCounter(0, 0),
+                thumbnail,
+            };
             assert!(self.0.replace(Some(wrapped)).is_none());
+            p
         }
 
-        pub(super) fn update_inner(&self, mut entry: super::Entry) -> super::Entry {
+        pub(super) fn update_inner(
+            &self,
+            mut entry: super::Entry,
+        ) -> (super::Entry, Option<ThumbPriority>) {
             // TODO -- this is where we'd be able to use "Outdated"
             // Every time there is an update, we have an opportunity to try the thumbnail again if
             // it failed.
 
-            let thumbnail = match entry.kind {
-                EntryKind::File { .. } => Thumbnail::LowPriority,
-                EntryKind::Directory { .. } => Thumbnail::Nothing,
+            let widgets = { self.0.borrow().as_ref().unwrap().widgets };
+
+            let (thumbnail, new_p) = match entry.kind {
+                EntryKind::File { .. } => (Thumbnail::Unloaded, Some(widgets.priority())),
+                EntryKind::Directory { .. } => (Thumbnail::Nothing, None),
                 EntryKind::Uninitialized => unreachable!(),
             };
 
@@ -332,10 +353,12 @@ mod internal {
                 entry.abs_path = old_arc;
             }
 
-            let wrapped = Entry { entry, thumbnail };
+
+            let wrapped = Entry { entry, widgets, thumbnail };
             let old = self.0.replace(Some(wrapped)).unwrap();
             self.obj().emit_by_name::<()>("update", &[]);
-            old.entry
+
+            (old.entry, new_p)
         }
 
         pub(super) fn get(&self) -> Ref<super::Entry> {
@@ -343,65 +366,45 @@ mod internal {
             Ref::map(b, |o| &o.as_ref().unwrap().entry)
         }
 
-        pub(super) fn thumbnail(&self) -> Ref<Thumbnail> {
-            let b = self.0.borrow();
-            Ref::map(b, |o| &o.as_ref().unwrap().thumbnail)
+        // Marks the thumbnail as loading if it matches the given priority.
+        pub fn mark_thumbnail_loading(&self, p: ThumbPriority) -> bool {
+            let mut b = self.0.borrow_mut();
+            let mut inner = &mut b.as_mut().unwrap();
+
+            if !matches!(inner.thumbnail, Thumbnail::Unloaded) {
+                return false;
+            }
+
+            if inner.widgets.priority() == p {
+                inner.thumbnail = Thumbnail::Loading;
+                true
+            } else {
+                false
+            }
         }
 
-        pub(super) fn mark_thumbnail_loading_high(&self) -> bool {
+        pub(super) fn change_widgets(&self, bound: i16, mapped: i16) -> Option<ThumbPriority> {
             let mut b = self.0.borrow_mut();
-            let mut thumb = &mut b.as_mut().unwrap().thumbnail;
+            let w = &mut b.as_mut().unwrap().widgets;
+            let old_p = w.priority();
 
-            if matches!(thumb, Thumbnail::HighPriority(_)) {
-                *thumb = Thumbnail::Loading;
-                return true;
-            }
-            false
-        }
+            // Should never fail, but explicitly check
+            w.0 = w.0.checked_add_signed(bound).unwrap();
+            w.1 = w.1.checked_add_signed(mapped).unwrap();
 
-        pub(super) fn mark_thumbnail_loading_low(&self) -> bool {
-            let mut b = self.0.borrow_mut();
-            let mut thumb = &mut b.as_mut().unwrap().thumbnail;
-
-            if matches!(thumb, Thumbnail::LowPriority) {
-                *thumb = Thumbnail::Loading;
-                return true;
-            }
-            false
-        }
-
-        pub(super) fn deprioritize_thumb(&self) -> bool {
-            let mut b = self.0.borrow_mut();
-            let mut thumb = &mut b.as_mut().unwrap().thumbnail;
-            match &mut thumb {
-                Thumbnail::HighPriority(1) => {
-                    *thumb = Thumbnail::LowPriority;
-                    true
-                }
-                Thumbnail::HighPriority(n) => {
-                    *n -= 1;
-                    false
-                }
-                Thumbnail::Nothing
-                | Thumbnail::Loading
-                | Thumbnail::Loaded(_)
-                | Thumbnail::Failed
-                | Thumbnail::LowPriority => false,
-            }
+            let new_p = w.priority();
+            if new_p != old_p { Some(new_p) } else { None }
         }
 
         // There is a minute risk of a race where we're loading a thumbnail for a file twice at
         // once and the first one finishes second. The risk is so low and the outcome so minor it
         // just isn't worth addressing.
-        pub(super) fn update_thumbnail(&self, tex: Texture) {
+        pub fn update_thumbnail(&self, tex: Texture) {
             let mut b = self.0.borrow_mut();
             let thumb = &mut b.as_mut().unwrap().thumbnail;
 
             match thumb {
-                Thumbnail::Nothing
-                | Thumbnail::LowPriority
-                | Thumbnail::HighPriority(_)
-                | Thumbnail::Failed => return,
+                Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => return,
                 Thumbnail::Loading | Thumbnail::Loaded(_) => {
                     *thumb = Thumbnail::Loaded(tex);
                 }
@@ -411,30 +414,10 @@ mod internal {
             self.obj().emit_by_name::<()>("update", &[]);
         }
 
-        pub(super) fn should_request_low_priority_thumb(&self) -> bool {
-            let mut b = self.0.borrow();
+        pub fn thumbnail(&self) -> Option<Texture> {
+            let b = self.0.borrow();
             let thumb = &b.as_ref().unwrap().thumbnail;
-
-            matches!(thumb, Thumbnail::LowPriority)
-        }
-
-        pub(super) fn high_priority_thumb(&self) -> (bool, Option<Texture>) {
-            let mut b = self.0.borrow_mut();
-            let thumb = &mut b.as_mut().unwrap().thumbnail;
-            match thumb {
-                Thumbnail::LowPriority => {
-                    *thumb = Thumbnail::HighPriority(1);
-                    (true, None)
-                }
-                Thumbnail::HighPriority(n) => {
-                    // This can actually increment it multiple times from update() calls, but
-                    // the worst case there is that we keep it in the high priority queue.
-                    *n += 1;
-                    (false, None)
-                }
-                Thumbnail::Loaded(pb) => (false, Some(pb.clone())),
-                Thumbnail::Nothing | Thumbnail::Failed | Thumbnail::Loading => (false, None),
-            }
+            if let Thumbnail::Loaded(tex) = thumb { Some(tex.clone()) } else { None }
         }
     }
 }
@@ -452,11 +435,8 @@ glib::wrapper! {
 impl EntryObject {
     fn create(entry: Entry) -> Self {
         let obj: Self = Object::new();
-        obj.imp().init(entry);
-
-        if obj.imp().should_request_low_priority_thumb() {
-            queue_low_priority_thumb(obj.downgrade())
-        }
+        let p = obj.imp().init(entry);
+        obj.queue_thumb(p);
 
         obj
     }
@@ -521,11 +501,9 @@ impl EntryObject {
 
         trace!("Update for {:?}", entry.abs_path);
 
-        let old = self.imp().update_inner(entry);
+        let (old, p) = self.imp().update_inner(entry);
+        self.queue_thumb(p);
 
-        if self.imp().should_request_low_priority_thumb() {
-            queue_low_priority_thumb(self.downgrade())
-        }
 
         Some(old)
     }
@@ -538,34 +516,23 @@ impl EntryObject {
         self.imp().get()
     }
 
-    // Gets the thumbnail. If the thumbnail has been requested at a low priority, bumps it to a
-    // high priority.
-    pub fn thumbnail_for_display(&self) -> Option<Texture> {
-        let (was_low, tex) = self.imp().high_priority_thumb();
-        if was_low {
-            queue_high_priority_thumb(self.downgrade());
-        }
-        tex
-    }
-
-    pub fn deprioritize_thumb(&self) {
-        let became_low = self.imp().deprioritize_thumb();
-        if became_low {
-            // This is probably unnecessary.
-            queue_low_priority_thumb(self.downgrade());
+    fn queue_thumb(&self, p: Option<ThumbPriority>) {
+        if let Some(p) = p {
+            queue_thumb(self.downgrade(), p)
         }
     }
 
-    pub fn mark_thumbnail_loading_high(&self) -> bool {
-        self.imp().mark_thumbnail_loading_high()
+    // mapped is whether the widget was mapped at the time of binding.
+    pub fn mark_bound(&self, mapped: bool) {
+        self.queue_thumb(self.imp().change_widgets(1, mapped.into()));
     }
 
-    pub fn mark_thumbnail_loading_low(&self) -> bool {
-        self.imp().mark_thumbnail_loading_low()
+    pub fn mark_unbound(&self, mapped: bool) {
+        self.queue_thumb(self.imp().change_widgets(-1, -i16::from(mapped)));
     }
 
-    pub fn update_thumbnail(&self, tex: Texture) {
-        self.imp().update_thumbnail(tex)
+    pub fn mark_mapped_changed(&self, mapped: bool) {
+        self.queue_thumb(self.imp().change_widgets(0, if mapped { 1 } else { -1 }));
     }
 
     pub fn icon(&self) -> Icon {
