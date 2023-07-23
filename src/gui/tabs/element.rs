@@ -21,36 +21,31 @@ impl TabElement {
     pub(super) fn new(tab: TabId, title: &str) -> Self {
         let s: Self = glib::Object::new();
 
-        let focus = EventControllerFocus::new();
-        focus.connect_enter(move |_| {
-            trace!("Focus entered {tab:?}");
-            tabs_run(|t| t.set_active(tab));
-        });
-        s.add_controller(focus);
-
-        // Maps forward/back on a mouse to Forward/Backward
-        let forward_back_mouse = GestureClick::new();
-        forward_back_mouse.set_button(0);
-        forward_back_mouse.connect_pressed(move |c, n, _x, _y| match c.current_button() {
-            8 => error!("TODO backwards for mouse pane {tab:?}"),
-            9 => error!("TODO forwards for mouse pane {tab:?}"),
-            _ => {}
-        });
-        s.add_controller(forward_back_mouse);
-
         let imp = s.imp();
 
         imp.tab.set(tab).unwrap();
         imp.title.set_text(title);
-        imp.title.set_tooltip_text(Some("TODO"));
+        imp.title.set_tooltip_text(Some(title));
 
         s
+    }
+
+    pub fn clone_from(&self, other: &Self) {
+        let imp = self.imp();
+        let other_imp = other.imp();
+
+        let text = other_imp.title.text();
+        imp.title.set_text(&text);
+        imp.title.set_tooltip_text(Some(&text));
+
+        imp.spinner.set_spinning(other_imp.spinner.is_spinning());
+        imp.spinner.set_visible(other_imp.spinner.is_visible());
     }
 
     pub fn set_title(&self, title: &str) {
         let imp = self.imp();
         imp.title.set_text(title);
-        imp.title.set_tooltip_text(Some("TODO"));
+        imp.title.set_tooltip_text(Some(title));
     }
 
     pub fn set_tab_visible(&self, visible: bool) {

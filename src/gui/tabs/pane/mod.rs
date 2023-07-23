@@ -1,5 +1,5 @@
 use std::fmt::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use gtk::gio::ListStore;
@@ -64,6 +64,8 @@ fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
 }
 
 pub(super) trait PaneExt {
+    fn set_active(&mut self);
+
     // I don't like needing to pass list into this, but it needs to check that it's not stale.
     fn update_settings(&mut self, settings: DirSettings, list: &Contents);
 
@@ -176,13 +178,21 @@ impl Pane {
 
 
         // TODO -- autocomplete for directories only (should be fast since they're always first)
+        // Needs deprecated GtkCompletion which seems buggy
 
         // imp.text_entry.connect_changed(|e| {
         //     println!("TODO -- changed {e:?}");
         // });
         //
-        imp.text_entry.connect_activate(|e| {
-            println!("TODO -- activated {e:?}");
+        imp.text_entry.connect_activate(move |e| {
+            let path: PathBuf = e.text().into();
+            if !path.is_dir() {
+                // TODO -- jump to file instead if it is a file.
+                gui_run(|g| g.warning(&format!("No such directory: {}", path.to_string_lossy())));
+                return;
+            }
+
+            tabs_run(|t| t.navigate(tab, &path));
         });
 
 
@@ -239,6 +249,10 @@ impl Pane {
 }
 
 impl PaneExt for Pane {
+    fn set_active(&mut self) {
+        self.element.add_css_class("active-pane");
+    }
+
     fn update_settings(&mut self, settings: DirSettings, list: &Contents) {
         if self.view.matches(settings.display_mode) {
             self.view.update_settings(settings);
@@ -259,7 +273,6 @@ impl PaneExt for Pane {
             )),
         };
 
-        println!("{vs:?}");
         self.apply_view_state(vs);
     }
 

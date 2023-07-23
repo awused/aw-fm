@@ -9,6 +9,9 @@
 # The colour used for the background.
 # This is any string understood by GDK, such as "black", "magenta", or "#55667788"
 # Transparency is allowed but depends on the display server for support.
+# When set will override all backgrounds.
+#
+# Leave empty to use your default theme.
 background_colour = '#000000be'
 
 # The timeout, in seconds, for detecting idleness.
@@ -93,14 +96,14 @@ skip_trash = false
 # images, while in directories with many videos up to 16 is beneficial.
 #
 # Max 255 (bad idea), 0 entirely disables thumbnail loading.
-max_thumbnailers = 8
+max_thumbnailers = 6
 
 # How many thumbnailers to run in the background.
-# This is used for open directories that are not currently visible.
+# This is used for files that aren't currently visible.
 #
 # Max 255, 0 disables background thumbnailing.
 # No effect if larger than max_thumbnailers.
-background_thumbnailers = 2
+background_thumbnailers = 1
 
 
 # ------------------------------------------------------------------------------------------------

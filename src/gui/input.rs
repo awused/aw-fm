@@ -46,7 +46,7 @@ impl Gui {
         let click = gtk::GestureClick::new();
 
         let g = self.clone();
-        click.connect_released(move |_c, n, _x, _y| {
+        click.connect_released(move |c, n, _x, _y| {
             if n == 2 {
                 if g.window.is_maximized() {
                     g.window.unmaximize()
@@ -203,11 +203,11 @@ impl Gui {
             gtk::Inhibit(false)
         });
 
-        let g = self.clone();
-        dialog.connect_destroy(move |_| {
-            // Nested hacks to avoid dropping two scroll events in a row.
-            g.drop_next_scroll.set(false);
-        });
+        // let g = self.clone();
+        // dialog.connect_destroy(move |_| {
+        //     // Nested hacks to avoid dropping two scroll events in a row.
+        //     g.drop_next_scroll.set(false);
+        // });
 
         dialog.set_visible(true);
 
@@ -308,7 +308,7 @@ impl Gui {
 
         let e = format!("Unrecognized command {cmd:?}");
         warn!("{e}");
-        self.convey_error(&e);
+        self.warning(&e);
     }
 
     fn get_env(&self) -> Vec<(String, OsString)> {

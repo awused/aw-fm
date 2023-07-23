@@ -123,8 +123,14 @@ impl DetailsView {
         if self.selection.n_items() <= pos {
             return;
         }
-        self.column_view.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
-        error!("TODO -- scroll_to in column view")
+        let w = self.column_view.first_child().and_then(|c| c.next_sibling());
+        if let Some(w) = w {
+            glib::idle_add_local_once(move || {
+                w.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
+            });
+        } else {
+            error!("Couldn't find ListView to scroll in details view");
+        }
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
@@ -136,6 +142,7 @@ impl DetailsView {
 
         let list_view = self.column_view.first_child();
 
+        // TODO -- is this robust? Will adding controllers break this?
         let obj = self
             .column_view
             .first_child()

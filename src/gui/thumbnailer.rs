@@ -28,8 +28,10 @@ use crate::{closing, handle_panic};
 
 #[derive(Debug, Default)]
 struct PendingThumbs {
+    // Currently visible.
     high_priority: VecDeque<WeakRef<EntryObject>>,
-    med_priority: Vec<WeakRef<EntryObject>>,
+    // Bound but not visible. Uses the same number of threads as low but runs earlier.
+    med_priority: VecDeque<WeakRef<EntryObject>>,
     low_priority: Vec<WeakRef<EntryObject>>,
 
     // Never bother cloning these, it's a waste, just pass them around.
@@ -87,7 +89,12 @@ impl Thumbnailer {
                 self.pending.borrow_mut().low_priority.push(weak);
             }
             ThumbPriority::Medium => {
-                self.pending.borrow_mut().med_priority.push(weak);
+                if self.low == 0 {
+                    return;
+                }
+                // The ones added first aren't particularly useful, but if we have a bunch of bound
+                // elements the ones added later are less likely to be useful.
+                self.pending.borrow_mut().med_priority.push_back(weak);
             }
             ThumbPriority::High => {
                 self.pending.borrow_mut().high_priority.push_back(weak);
@@ -142,17 +149,17 @@ impl Thumbnailer {
             }
         }
 
-        while let Some(weak) = pending.med_priority.pop() {
+        if self.high > self.low && self.high - pending.factories.len() as u16 > self.low {
+            return None;
+        }
+
+        while let Some(weak) = pending.med_priority.pop_front() {
             if let Some(strong) = weak.upgrade() {
                 if strong.imp().mark_thumbnail_loading(ThumbPriority::Medium) {
                     pending.processed += 1;
                     return Some((strong, pending.factories.pop().unwrap()));
                 }
             }
-        }
-
-        if self.high > self.low && self.high - pending.factories.len() as u16 > self.low {
-            return None;
         }
 
         while let Some(weak) = pending.low_priority.pop() {

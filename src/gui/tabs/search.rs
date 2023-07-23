@@ -35,6 +35,10 @@ impl SearchPane {
 }
 
 impl PaneExt for SearchPane {
+    fn set_active(&mut self) {
+        todo!()
+    }
+
     fn update_settings(&mut self, settings: DirSettings, _ignored: &Contents) {
         todo!()
     }

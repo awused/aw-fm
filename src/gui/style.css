@@ -13,16 +13,16 @@
   padding: 16px 24px;
 }
 
-header>button {
+.main-nobg header>button {
   background: none;
 }
 
-.main scrolledwindow,
-.main listview,
-.main gridview,
-.main columnview,
-.main entry,
-.main scrollbar {
+.main-nobg scrolledwindow,
+.main-nobg listview,
+.main-nobg gridview,
+.main-nobg columnview,
+.main-nobg entry,
+.main-nobg scrollbar {
   background: none;
 }
 
@@ -46,6 +46,18 @@ gridview child box {
 
 gridview .name {
   padding-bottom: 4px;
+}
+
+.active-tab {
+  background: rgba(1, 120, 255, 0.5);
+}
+
+.pane-contents {
+  opacity: 0.6;
+}
+
+.active-pane .pane-contents {
+  opacity: 1;
 }
 
 /* Fix some parts of the title bar not being clickable by moving the padding to the interactive element. */

@@ -71,7 +71,9 @@ struct HistoryEntry {
     // If there is a matching tab when we activate this history entry, steal that Arc and state.
     // If there is none, we need a new, fresh Arc<> that definitely has no pending snapshots.
     location: Rc<Path>,
-    scroll_pos: SavedViewState,
+    // Use the Path as the target if we can find it, otherwise whatever the position was as a
+    // fallback.
+    scroll_pos: Option<(Arc<Path>, u32)>,
 }
 
 // Not kept up to date, maybe an enum?
@@ -79,6 +81,7 @@ struct HistoryEntry {
 struct SavedViewState {
     // First visible element.
     // If the directory has updated we just don't care, it'll be wrong.
+    // pub scroll_pos: Option<(Arc<Path>, u32)>,
     pub scroll_pos: u32,
     // Selected items?
     pub search: Option<String>,

@@ -17,7 +17,7 @@ use gnome_desktop::DesktopThumbnailFactory;
 use gtk::gdk::ModifierType;
 use gtk::gio::ffi::GListStore;
 use gtk::gio::{Cancellable, FileQueryInfoFlags, FILE_ATTRIBUTE_THUMBNAIL_PATH};
-use gtk::glib::{Object, WeakRef};
+use gtk::glib::{Object, SourceId, WeakRef};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::Orientation::Horizontal;
@@ -95,27 +95,12 @@ struct Gui {
     database: DBCon,
     thumbnailer: Thumbnailer,
 
-    page_num: gtk::Label,
-    page_name: gtk::Label,
-    archive_name: gtk::Label,
-    mode: gtk::Label,
-    zoom_level: gtk::Label,
-    edge_indicator: gtk::Label,
-    bottom_bar: gtk::Box,
-    label_updates: RefCell<Option<glib::SourceId>>,
-
-    // layout_manager: RefCell<LayoutManager>,
-    // Called "pad" scrolling to differentiate it with continuous scrolling between pages.
-    pad_scrolling: Cell<bool>,
-    drop_next_scroll: Cell<bool>,
-    animation_playing: Cell<bool>,
-
-    last_action: Cell<Option<Instant>>,
-    first_content_paint: OnceCell<()>,
     open_dialogs: RefCell<input::OpenDialogs>,
     shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, String>>,
 
     manager_sender: UnboundedSender<ManagerAction>,
+
+    warning_timeout: DebugIgnore<Cell<Option<SourceId>>>,
 
     #[cfg(windows)]
     win32: windows::WindowsEx,
@@ -137,20 +122,6 @@ pub fn run(
     let gui_receiver = Cell::from(Some(gui_receiver));
 
     application.connect_activate(move |a| {
-        let provider = gtk::CssProvider::new();
-        let bg = CONFIG.background_colour.unwrap_or(gdk::RGBA::BLACK);
-        provider.load_from_data(
-            &(include_str!("style.css").to_string()
-                + &format!("\n window {{ background: {bg}; }}")),
-        );
-
-        // We give the CssProvider to the default screen so the CSS rules we added
-        // can be applied to our window.
-        gtk::style_context_add_provider_for_display(
-            &gdk::Display::default().expect("Error initializing gtk css provider."),
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
         Gui::new(a, gui_to_manager.take().unwrap(), gui_receiver.take().unwrap());
     });
 
@@ -174,7 +145,28 @@ impl Gui {
         gui_receiver: glib::Receiver<GuiAction>,
     ) -> Rc<Self> {
         let window = MainWindow::new(application);
-        window.remove_css_class("background");
+
+        let provider = gtk::CssProvider::new();
+        let style = include_str!("style.css");
+        if let Some(bg) = CONFIG.background_colour {
+            window.remove_css_class("background");
+            window.add_css_class("main-nobg");
+
+            provider.load_from_data(
+                &(include_str!("style.css").to_string()
+                    + &format!("\n window {{ background: {bg}; }}")),
+            );
+        } else {
+            provider.load_from_data(style);
+        }
+
+        // We give the CssProvider to the default screen so the CSS rules we added
+        // can be applied to our window.
+        gtk::style_context_add_provider_for_display(
+            &window.display(),
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
 
 
         let tabs = TabsList::new(&window);
@@ -190,21 +182,8 @@ impl Gui {
             database: DBCon::connect(),
             thumbnailer: Thumbnailer::new(),
 
-            page_num: gtk::Label::new(None),
-            page_name: gtk::Label::new(None),
-            archive_name: gtk::Label::new(None),
-            mode: gtk::Label::new(None),
-            zoom_level: gtk::Label::new(Some("100%")),
-            edge_indicator: gtk::Label::new(None),
-            bottom_bar: gtk::Box::new(Horizontal, 15),
-            label_updates: RefCell::default(),
+            warning_timeout: DebugIgnore::default(),
 
-            pad_scrolling: Cell::default(),
-            drop_next_scroll: Cell::default(),
-            animation_playing: Cell::new(true),
-
-            last_action: Cell::default(),
-            first_content_paint: OnceCell::default(),
             open_dialogs: RefCell::default(),
             shortcuts: Self::parse_shortcuts(),
 
@@ -327,12 +306,12 @@ impl Gui {
             DirectoryOpenError(path, error) => {
                 // This is a special case where we failed to open a directory or read it at all.
                 // Treat it as if it were closed.
-                self.convey_error(&error);
+                self.error(&error);
                 error!("Treating {path:?} as closed");
                 self.tabs.borrow_mut().directory_failure(path);
             }
             DirectoryError(_, error) | EntryReadError(_, _, error) | ConveyError(error) => {
-                self.convey_error(&error);
+                self.error(&error);
             }
             Action(action) => self.run_command(&action),
             Quit => {
@@ -355,8 +334,39 @@ impl Gui {
         }
     }
 
-    fn convey_error(&self, msg: &str) {
-        self.window.imp().toast.set_text(&msg);
+    // Shows a warning that times out and doesn't need to be dismissed.
+    fn warning(self: &Rc<Self>, msg: &str) {
+        let toast = &self.window.imp().toast;
+        let last_warning = self.warning_timeout.take();
+
+        if toast.is_visible() && last_warning.is_none() {
+            // Warnings cannot preempt errors
+            // TODO -- a queue?
+            return;
+        }
+
+        if let Some(last_warning) = last_warning {
+            last_warning.remove();
+        }
+
+        toast.set_text(msg);
+        toast.set_visible(true);
+
+        let g = self.clone();
+        let timeout = glib::timeout_add_local_once(Duration::from_secs(5), move || {
+            g.window.imp().toast.set_visible(false);
+            g.warning_timeout.set(None);
+        });
+
+        self.warning_timeout.set(Some(timeout));
+    }
+
+    fn error(&self, msg: &str) {
+        if let Some(warning) = self.warning_timeout.take() {
+            warning.remove();
+        }
+
+        self.window.imp().toast.set_text(msg);
         self.window.imp().toast.set_visible(true);
     }
 }

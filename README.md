@@ -32,8 +32,9 @@ and copy it to `~/.config/aw-fm/aw-fm.toml` or `~/.aw-fm.toml`.
 Required:
 
 * GTK - GTK4 libraries and development headers must be installed.
+* gnome-desktop utility libraries
 
-On fedora all required dependencies can be installed with `dnf install gtk4-devel`.
+On fedora all required dependencies can be installed with `dnf install gtk4-devel gnome-desktop4-devel`.
 
 # Usage
 

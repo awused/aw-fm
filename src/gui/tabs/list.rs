@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use gtk::gdk::RGBA;
 use gtk::gio::ListStore;
-use gtk::prelude::{Cast, StaticType};
+use gtk::prelude::{Cast, ListModelExt, StaticType};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{BoxExt, WidgetExt};
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
@@ -40,24 +40,29 @@ impl TabsList {
         let tabs_container = window.imp().tabs.clone();
         let tab_elements = ListStore::new(TabElement::static_type());
 
-        let selection = NoSelection::new(Some(tab_elements.clone()));
 
         let factory = SignalListItemFactory::new();
-        // TODO -- if this is slow, make a TabContents class and use that to bind rendered
-        // TabElements
-        // factory.connect_setup(|_factory, item| {});
         factory.connect_bind(|_factory, obj| {
             let item = obj.downcast_ref::<gtk::ListItem>().unwrap();
             let tab = item.item().unwrap().downcast::<TabElement>().unwrap();
             item.set_child(Some(&tab));
         });
-        factory.connect_bind(|_factory, obj| {
+        factory.connect_unbind(|_factory, obj| {
             let item = obj.downcast_ref::<gtk::ListItem>().unwrap();
             item.set_child(None::<&TabElement>);
         });
 
+        let selection = NoSelection::new(Some(tab_elements.clone()));
 
         tabs_container.set_factory(Some(&factory));
+        tabs_container.set_model(Some(&selection));
+
+        tabs_container.set_single_click_activate(true);
+        tabs_container.connect_activate(|c, a| {
+            let model = c.model().unwrap();
+            let element = model.item(a);
+            println!("TODO -- switch tabs activate {c:?} {a:?}");
+        });
 
         Self {
             tabs: Vec::new(),
@@ -85,12 +90,21 @@ impl TabsList {
             path = abs.clean();
         }
 
+        // for _ in 0..10 {
+        //     let (tab, element) = Tab::new(next_id(), path.clone(), &self.tabs);
+        //     self.tab_elements.append(&element);
+        //     self.tabs.push(tab);
+        // }
+        // let (tab, element) = Tab::new(next_id(), path, &self.tabs);
         let (tab, element) = Tab::new(next_id(), path, &[]);
 
         self.tabs.push(tab);
         self.tab_elements.append(&element);
-        self.tabs[0].load(&mut [], &mut []);
+        // let (left, tab, right) = self.split_around_mut(0);
+        // tab.load(&[], &right);
+        self.tabs[0].load(&[], &[]);
         self.tabs[0].new_pane(&self.pane_container);
+        self.set_active(self.tabs[0].id());
     }
 
     pub fn update_sort(&mut self, id: TabId, settings: SortSettings) {
@@ -100,9 +114,15 @@ impl TabsList {
     }
 
     pub fn set_active(&mut self, id: TabId) {
-        debug_assert!(self.position(id).is_some());
+        // this should be synchronous so should never fail.
+        let index = self.position(id).unwrap();
+
+        if let Some(old) = self.active {
+            error!("TODO -- set_inactive");
+        }
 
         self.active = Some(id);
+        self.tabs[index].set_active();
     }
 
     fn find_mut(&mut self, id: TabId) -> Option<&mut Tab> {
@@ -150,9 +170,9 @@ impl TabsList {
             }
         }
 
-        if let Some(index) = self.tabs.iter().position(|t| t.matches_update(&update)) {
+        if let Some(index) = self.tabs.iter().position(|t| t.matches_flat_update(&update)) {
             let (left_tabs, tab, right_tabs) = self.split_around_mut(index);
-            tab.matched_update(left_tabs, right_tabs, update);
+            tab.matched_flat_update(left_tabs, right_tabs, update);
         } else {
             // TODO [search] handle search updates, which will be expensive but rare,
             // and cheap when there is no search.

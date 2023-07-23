@@ -32,6 +32,8 @@ impl PaneElement {
         focus.connect_enter(move |focus| {
             debug!("Focus entered {tab:?}");
             let element = focus.widget().downcast::<Self>().unwrap();
+            // We set active when focus enters but deliberately do not unset it when focus leaves.
+            // If no other tab grabs focus we keep active set.
             tabs_run(|t| t.set_active(tab));
         });
         s.add_controller(focus);

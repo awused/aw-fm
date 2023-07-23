@@ -4,10 +4,12 @@
     <property name="orientation">horizontal</property>
     <property name="spacing">0</property>
     <property name="hexpand">true</property>
+    <property name="margin-end">5</property>
 
     <child>
       <object class="GtkSpinner" id="spinner">
-            <!-- <property name="visible">false</property> -->
+          <property name="visible">false</property>
+          <property name="spinning">false</property>
       </object>
     </child>
 
@@ -16,6 +18,7 @@
       <object class="GtkLabel" id="title">
         <property name="ellipsize">PANGO_ELLIPSIZE_START</property>
         <property name="hexpand">true</property>
+        <property name="xalign">1.0</property>
 
         <style>
           <class name="tab-title"/>

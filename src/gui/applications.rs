@@ -88,7 +88,7 @@ pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
 
         if !files.is_empty() && !directories.is_empty() {
             error!("{BOTH_ERROR}");
-            gui_run(|g| g.convey_error(BOTH_ERROR));
+            gui_run(|g| g.warning(BOTH_ERROR));
             return;
         }
     }

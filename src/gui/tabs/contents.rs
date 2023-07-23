@@ -21,7 +21,7 @@ pub struct Contents {
 
 impl std::fmt::Debug for Contents {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Contents; [{}]", self.list.n_items())
+        write!(f, "[Contents: {}]", self.list.n_items())
     }
 }
 

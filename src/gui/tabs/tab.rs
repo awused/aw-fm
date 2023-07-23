@@ -21,6 +21,7 @@ use gtk::traits::{AdjustmentExt, BoxExt, SelectionModelExt, WidgetExt};
 use gtk::{glib, Box, MultiSelection, Orientation, ScrolledWindow};
 use path_clean::PathClean;
 
+use self::flat_dir::{DirState, FlatDir};
 use super::contents::Contents;
 use super::element::TabElement;
 use super::id::{TabId, TabUid};
@@ -42,62 +43,6 @@ use crate::natsort::ParsedString;
  * the only way to make this code actually simple is to completely abandon efficiency -
  * especially in my common case of opening a new tab.
  */
-
-#[derive(Debug)]
-struct WatchedDir {
-    path: Arc<Path>,
-    cancel: Arc<AtomicBool>,
-}
-
-impl Drop for WatchedDir {
-    fn drop(&mut self) {
-        self.cancel.store(true, Relaxed);
-        gui_run(|g| {
-            g.send_manager(ManagerAction::Unwatch(self.path.clone()));
-        });
-    }
-}
-
-impl WatchedDir {
-    fn start(path: Arc<Path>) -> Self {
-        let cancel: Arc<AtomicBool> = Arc::default();
-        gui_run(|g| {
-            g.send_manager(ManagerAction::Open(path.clone(), cancel.clone()));
-        });
-
-        Self { path, cancel }
-    }
-}
-
-
-#[derive(Debug, Default)]
-enum DirState {
-    #[default]
-    Unloaded,
-    Loading {
-        watch: WatchedDir,
-        pending_updates: Vec<Update>,
-    },
-    // ReOpening{} -- Transitions to Opening once a Start arrives, or Opened with Complete
-    // UnloadedWhileOpening -- takes snapshots and drops them
-    Loaded(WatchedDir),
-}
-
-impl DirState {
-    const fn watched(&self) -> Option<&WatchedDir> {
-        match self {
-            Self::Unloaded => None,
-            Self::Loading { watch, .. } | Self::Loaded(watch) => Some(watch),
-        }
-    }
-
-    const fn loaded(&self) -> bool {
-        match self {
-            Self::Unloaded | Self::Loading { .. } => false,
-            Self::Loaded(_) => true,
-        }
-    }
-}
 
 #[derive(Debug, Default)]
 enum CurrentPane {
@@ -156,9 +101,8 @@ impl CurrentPane {
 pub(super) struct Tab {
     // displayed_path: PathBuf,
     id: TabUid,
-    path: Arc<Path>,
+    dir: FlatDir,
     settings: DirSettings,
-    dir_state: Rc<RefCell<DirState>>,
     contents: Contents,
     // TODO -- this should only store snapshots and be sporadically updated/absent
     view_state: Option<SavedViewState>,
@@ -187,15 +131,15 @@ impl Tab {
     }
 
     pub fn matches_arc(&self, other: &Arc<Path>) -> bool {
-        Arc::ptr_eq(&self.path, other)
+        Arc::ptr_eq(self.dir.path(), other)
     }
 
     fn matching_mut<'a>(&'a self, other: &'a mut [Self]) -> impl Iterator<Item = &mut Self> {
-        other.iter_mut().filter(|t| self.matches_arc(&t.path))
+        other.iter_mut().filter(|t| self.matches_arc(t.dir.path()))
     }
 
     fn matching<'a>(&'a self, other: &'a [Self]) -> impl Iterator<Item = &Self> {
-        other.iter().filter(|t| self.matches_arc(&t.path))
+        other.iter().filter(|t| self.matches_arc(t.dir.path()))
     }
 
     pub fn new(id: TabUid, path: PathBuf, existing_tabs: &[Self]) -> (Self, TabElement) {
@@ -208,22 +152,20 @@ impl Tab {
             path = abs.clean();
         }
 
-        let path: Arc<Path> = path.into();
-
         // fetch metatada synchronously, even with a donor
         let settings = gui_run(|g| g.database.get(&path));
 
-        let dir_state = Rc::new(RefCell::new(DirState::Unloaded));
+        let dir = FlatDir::new(path.into());
 
         let contents = Contents::new(settings.sort);
 
-        let element = TabElement::new(id.copy(), "TODO -- title");
+        let element =
+            TabElement::new(id.copy(), "TODO -- titleaaaaaaaaaaa aaaaaaaaaaaaa aaaaaaaaaaaaaaaaa");
 
         let mut t = Self {
             id,
-            path,
+            dir,
             settings,
-            dir_state,
             contents,
             view_state: None,
             history: VecDeque::new(),
@@ -242,14 +184,14 @@ impl Tab {
         let view_state = source.take_view_snapshot();
         let mut contents = Contents::new(source.settings.sort);
         contents.clone_from(&source.contents, source.settings.sort);
-        // TODO -- clone tab_element state, like spinner
+        let element = TabElement::new(id.copy(), "");
+        element.clone_from(&source.element);
 
         (
             Self {
                 id,
-                path: source.path.clone(),
+                dir: source.dir.clone(),
                 settings: source.settings,
-                dir_state: source.dir_state.clone(),
                 contents,
                 view_state,
                 history: source.history.clone(),
@@ -257,7 +199,7 @@ impl Tab {
                 element: todo!(),
                 pane: CurrentPane::default(),
             },
-            todo!(),
+            element,
         )
     }
 
@@ -265,10 +207,19 @@ impl Tab {
         // TODO -- clone tab_element state from donor, like spinner
         for t in left.iter().chain(right) {
             // Check for value equality, not reference equality
-            if *self.path == *t.path {
-                self.path = t.path.clone();
-                self.dir_state = t.dir_state.clone();
+            if **self.dir.path() == **t.dir.path() {
+                println!("found donor");
+                self.dir = t.dir.clone();
                 self.contents.clone_from(&t.contents, self.settings.sort);
+                self.element.clone_from(&t.element);
+
+                if let Some(pane) = self.pane.get() {
+                    if matches!(*self.dir.state(), DirState::Loaded(_)) {
+                        error!("Unsetting GTK crash workaround");
+                        pane.workaround_scroller()
+                            .set_vscrollbar_policy(gtk::PolicyType::Automatic);
+                    }
+                }
 
                 return true;
             }
@@ -278,41 +229,28 @@ impl Tab {
 
     // Only make this take &mut [Self] if truly necessary
     pub fn load(&mut self, left: &[Self], right: &[Self]) {
-        let mut sb = self.dir_state.borrow_mut();
-        let dstate = &mut *sb;
-        match dstate {
-            DirState::Loading { .. } | DirState::Loaded(_) => return,
-            DirState::Unloaded => {
-                debug!("Opening directory for {:?}", self.path);
-                let watch = WatchedDir::start(self.path.clone());
-
-                *dstate = DirState::Loading { watch, pending_updates: Vec::new() };
-            }
+        if !self.dir.load() {
+            return;
         }
-        drop(sb);
 
         // TODO -- spinners
         //self.show_spinner()
+        self.element.imp().spinner.start();
+        self.element.imp().spinner.set_visible(true);
         for t in self.matching(left).chain(self.matching(right)) {
-            //t.show_spinner();
+            println!("matching");
+            t.element.imp().spinner.start();
+            t.element.imp().spinner.set_visible(true);
         }
     }
 
     pub fn matches_snapshot(&self, snap: &SnapshotId) -> bool {
-        if !Arc::ptr_eq(&self.path, &snap.path) {
+        if !Arc::ptr_eq(self.dir.path(), &snap.path) {
             return false;
         }
 
-        use SnapshotKind::*;
 
-        let sb = self.dir_state.borrow();
-
-        match (&snap.kind, &*sb) {
-            (_, DirState::Unloaded | DirState::Loaded(_)) => false,
-            (Complete | Start | Middle | End, DirState::Loading { watch, .. }) => {
-                Arc::ptr_eq(&watch.cancel, &snap.id)
-            }
-        }
+        self.dir.matches(snap)
     }
 
     fn apply_snapshot_inner(&mut self, snap: EntryObjectSnapshot) {
@@ -331,8 +269,6 @@ impl Tab {
         self.search_extend();
     }
 
-    // Returns true if we had any search updates. Expected to be rare, so that path isn't
-    // terribly efficient.
     pub fn apply_snapshot(&mut self, left: &mut [Self], right: &mut [Self], snap: DirSnapshot) {
         let start = Instant::now();
         assert!(self.matches_snapshot(&snap.id));
@@ -351,17 +287,17 @@ impl Tab {
         self.apply_snapshot_inner(snap);
 
         if force_search_sort {
-            // We just sorted this tab and all matching tabs to the right.
+            // We just sorted this tab and all exact matching tabs to the right.
             left.iter_mut().for_each(Self::search_sort_after_snapshot);
             right
                 .iter_mut()
-                .filter(|t| !t.matches_arc(&self.path))
+                .filter(|t| !t.matches_arc(self.dir.path()))
                 .for_each(Self::search_sort_after_snapshot);
         }
 
         debug!(
             "Applied {kind:?} snapshot for {:?} with {len} items in {:?}",
-            self.path,
+            self.dir.path(),
             start.elapsed()
         );
 
@@ -371,51 +307,33 @@ impl Tab {
         }
 
         // If we're finished, update all tabs to reflect this.
-        let mut sb = self.dir_state.borrow_mut();
-        let updates = match std::mem::take(&mut *sb) {
-            DirState::Unloaded | DirState::Loaded(_) => unreachable!(),
-            DirState::Loading { watch, pending_updates } => {
-                *sb = DirState::Loaded(watch);
-                pending_updates
-            }
-        };
-
-        drop(sb);
+        let (updates, start) = self.dir.loaded();
 
         for u in updates {
-            self.matched_update(left, right, u);
+            self.matched_flat_update(left, right, u);
         }
 
-        self.start_apply_view_state();
-        self.matching_mut(right).for_each(Self::start_apply_view_state);
-        // TODO -- stop showing spinners.
-        info!("Finished loading {:?}", self.path);
+        self.finish_flat_load();
+        // there will be no exact matches to the left.
+        self.matching_mut(right).for_each(Self::finish_flat_load);
+        info!("Finished loading {:?} in {:?}", self.dir.path(), start.elapsed());
     }
 
-    pub fn matches_update(&self, ev: &Update) -> bool {
+    pub fn matches_flat_update(&self, ev: &Update) -> bool {
         // Not watching anything -> cannot match an update
-        let Some(watch) = self.dir_state.borrow().watched() else {
+        let Some(watch) = self.dir.state().watched() else {
             return false;
         };
 
-        Some(&*self.path) == ev.path().parent()
+        Some(&**self.dir.path()) == ev.path().parent()
     }
 
-    pub fn matched_update(&mut self, left: &mut [Self], right: &mut [Self], up: Update) {
-        assert!(self.matches_update(&up));
+    pub fn matched_flat_update(&mut self, left: &mut [Self], right: &mut [Self], up: Update) {
+        assert!(self.matches_flat_update(&up));
 
-        let mut sb = self.dir_state.borrow_mut();
-
-        match &mut *sb {
-            DirState::Unloaded => unreachable!(),
-            DirState::Loading { pending_updates, .. } => {
-                pending_updates.push(up);
-                return;
-            }
-            DirState::Loaded(_) => {}
-        }
-        drop(sb);
-
+        let Some(up) = self.dir.consume(up) else {
+            return;
+        };
 
         // If it exists in any tab (search or flat)
         let existing_global = EntryObject::lookup(up.path());
@@ -454,7 +372,8 @@ impl Tab {
                     // This means that a different search tab happened to read a newly created file
                     // before it was inserted into this tab.
                     warn!(
-                        "Search tab read item {:?} before it was inserted into a flat tab.",
+                        "Search tab read item {:?} before it was inserted into a flat tab. This \
+                         should be uncommon.",
                         old.abs_path
                     );
                     search_mutate = Some(PartiallyAppliedUpdate::Mutate(old, obj.clone()));
@@ -561,14 +480,14 @@ impl Tab {
     }
 
     pub fn check_directory_deleted(&self, removed: &Path) -> bool {
-        removed == &*self.path
+        removed == &**self.dir.path()
     }
 
     // Need to handle this to avoid the case where a directory is "Loaded" but no watcher is
     // listening for events.
     // Even if the directory is recreated, the watcher won't work.
     pub fn handle_directory_deleted(&mut self, left: &[Self], right: &[Self]) {
-        let cur_path = self.path.clone();
+        let cur_path = self.dir.path().clone();
         let mut path = &*cur_path;
         while !path.exists() || !path.is_dir() {
             path = path.parent().unwrap()
@@ -596,7 +515,7 @@ impl Tab {
 
     // Changes location without managing history or view states.
     fn change_location(&mut self, left: &[Self], right: &[Self], target: &Path) {
-        if &*self.path == target {
+        if &**self.dir.path() == target {
             return;
         }
 
@@ -609,14 +528,13 @@ impl Tab {
         }
 
         // It is important we always create a new Arc here.
-        self.path = target.into();
+        self.dir = FlatDir::new(target.into());
 
         if !self.copy_from_donor(left, right) {
             // We couldn't find any state to steal, so we know we're the only matching tab.
 
-            self.dir_state.replace(DirState::Unloaded);
             let old_settings = self.settings;
-            self.settings = gui_run(|g| g.database.get(&self.path));
+            self.settings = gui_run(|g| g.database.get(self.dir.path()));
             // Deliberately do not clear or update self.contents here, not yet.
             // This allows us to keep something visible just a tiny bit longer.
             // Safe enough when the settings match.
@@ -628,13 +546,18 @@ impl Tab {
         }
 
         if let Some(pane) = self.pane.flat() {
-            pane.update_location(&self.path, self.settings, &self.contents);
+            pane.update_location(self.dir.path(), self.settings, &self.contents);
             self.load(left, right);
         }
     }
 
+    pub fn set_active(&mut self) {
+        self.pane.get_mut().expect("Called set_active on tab with no pane").set_active();
+        self.element.set_active(true);
+    }
+
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: &Path) {
-        info!("Navigating from {:?} to {:?}", self.path, target);
+        info!("Navigating {:?} from {:?} to {:?}", self.id, self.dir.path(), target);
 
         // TODO -- view snapshots
         // self.take_view_snapshot()take_view_snapshot
@@ -645,8 +568,8 @@ impl Tab {
     }
 
     pub fn parent(&mut self, left: &[Self], right: &[Self]) {
-        let Some(parent) = self.path.parent() else {
-            warn!("No parent for {:?}", self.path);
+        let Some(parent) = self.dir.path().parent() else {
+            warn!("No parent for {:?}", self.dir.path());
             return;
         };
 
@@ -685,18 +608,27 @@ impl Tab {
         self.view_state = self.take_view_snapshot();
     }
 
-    fn start_apply_view_state(&mut self) {
+    fn finish_flat_load(&mut self) {
+        if let Some(search) = self.pane.search() {
+            todo!()
+        } else {
+            let e = self.element.imp();
+            e.spinner.stop();
+            e.spinner.set_visible(false);
+            self.apply_flat_view_state();
+        }
+    }
+
+    fn apply_flat_view_state(&mut self) {
         let Some(pane) = self.pane.get_mut() else {
             trace!("Ignoring start_apply_view_state on tab {:?} with no pane", self.id);
             return;
         };
 
 
-        if self.settings.display_mode == DisplayMode::Icons {
-            error!("Unsetting GTK crash workaround");
-            pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
-            // glib::timeout_add_local_once(Duration::from_millis(300), finish);
-        }
+        error!("Unsetting GTK crash workaround");
+        pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
+        // glib::timeout_add_local_once(Duration::from_millis(300), finish);
 
         // Doing this immediately can cause it to be skipped
         // let id = self.id.copy();
@@ -719,12 +651,17 @@ impl Tab {
         }
 
 
-        let pane =
-            Pane::new_flat(self.id(), &self.path, self.settings, &self.contents.selection, parent);
+        let pane = Pane::new_flat(
+            self.id(),
+            self.dir.path(),
+            self.settings,
+            &self.contents.selection,
+            parent,
+        );
         self.pane = CurrentPane::Flat(pane);
 
-        if matches!(&*self.dir_state.borrow(), DirState::Loaded(_)) {
-            self.start_apply_view_state();
+        if matches!(&*self.dir.state(), DirState::Loaded(_)) {
+            self.apply_flat_view_state();
         }
     }
 
@@ -743,7 +680,7 @@ impl Tab {
 
         // Take the pane,
         // TODO [search]
-        if matches!(&*self.dir_state.borrow(), DirState::Loaded(_)) {
+        if matches!(&*self.dir.state(), DirState::Loaded(_)) {
             self.take_view_snapshot();
         }
 
@@ -773,7 +710,161 @@ impl Tab {
 
     fn save_settings(&self) {
         gui_run(|g| {
-            g.database.store(&self.path, self.settings);
+            g.database.store(self.dir.path(), self.settings);
         });
+    }
+}
+
+
+// These must share fate.
+mod flat_dir {
+    use std::cell::{Ref, RefCell};
+    use std::path::Path;
+    use std::rc::Rc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::Relaxed;
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    use crate::com::{ManagerAction, SnapshotId, SnapshotKind, Update};
+    use crate::gui::gui_run;
+
+    #[derive(Debug)]
+    pub struct WatchedDir {
+        path: Arc<Path>,
+        cancel: Arc<AtomicBool>,
+    }
+
+    impl Drop for WatchedDir {
+        fn drop(&mut self) {
+            self.cancel.store(true, Relaxed);
+            println!("Stopped watching {:?}", self.path);
+            gui_run(|g| {
+                g.send_manager(ManagerAction::Unwatch(self.path.clone()));
+            });
+        }
+    }
+
+    impl WatchedDir {
+        fn start(path: Arc<Path>) -> Self {
+            let cancel: Arc<AtomicBool> = Arc::default();
+            gui_run(|g| {
+                g.send_manager(ManagerAction::Open(path.clone(), cancel.clone()));
+            });
+
+            Self { path, cancel }
+        }
+    }
+
+
+    #[derive(Debug, Default)]
+    pub enum DirState {
+        #[default]
+        Unloaded,
+        Loading {
+            watch: WatchedDir,
+            pending_updates: Vec<Update>,
+            start: Instant,
+        },
+        // ReOpening{} -- Transitions to Opening once a Start arrives, or Opened with Complete
+        // UnloadedWhileOpening -- takes snapshots and drops them
+        Loaded(WatchedDir),
+    }
+
+    impl DirState {
+        pub const fn watched(&self) -> Option<&WatchedDir> {
+            match self {
+                Self::Unloaded => None,
+                Self::Loading { watch, .. } | Self::Loaded(watch) => Some(watch),
+            }
+        }
+
+        pub const fn loaded(&self) -> bool {
+            match self {
+                Self::Unloaded | Self::Loading { .. } => false,
+                Self::Loaded(_) => true,
+            }
+        }
+    }
+
+
+    #[derive(Debug, Clone)]
+    pub struct FlatDir {
+        path: Arc<Path>,
+        state: Rc<RefCell<DirState>>,
+    }
+
+    impl FlatDir {
+        pub fn new(path: Arc<Path>) -> Self {
+            Self { path, state: Rc::default() }
+        }
+
+        pub const fn path(&self) -> &Arc<Path> {
+            &self.path
+        }
+
+        pub fn state(&self) -> Ref<'_, DirState> {
+            self.state.borrow()
+        }
+
+        pub fn matches(&self, snap: &SnapshotId) -> bool {
+            use SnapshotKind::*;
+
+            let sb = self.state.borrow();
+
+            match (&snap.kind, &*sb) {
+                (_, DirState::Unloaded | DirState::Loaded(_)) => false,
+                (Complete | Start | Middle | End, DirState::Loading { watch, .. }) => {
+                    Arc::ptr_eq(&watch.cancel, &snap.id)
+                }
+            }
+        }
+
+        // Returns the update if it wasn't consumed
+        pub fn consume(&self, up: Update) -> Option<Update> {
+            let mut sb = self.state.borrow_mut();
+            match &mut *sb {
+                DirState::Unloaded => {
+                    warn!("Dropping update {up:?} for unloaded tab.");
+                    None
+                }
+                DirState::Loading { pending_updates, .. } => {
+                    pending_updates.push(up);
+                    None
+                }
+                DirState::Loaded(_) => Some(up),
+            }
+        }
+
+        pub fn load(&self) -> bool {
+            let mut sb = self.state.borrow_mut();
+            let dstate = &mut *sb;
+            match dstate {
+                DirState::Loading { .. } | DirState::Loaded(_) => false,
+                DirState::Unloaded => {
+                    let start = Instant::now();
+                    debug!("Opening directory for {:?}", self.path);
+                    let watch = WatchedDir::start(self.path.clone());
+
+                    *dstate = DirState::Loading {
+                        watch,
+                        pending_updates: Vec::new(),
+                        start,
+                    };
+                    true
+                }
+            }
+        }
+
+        pub fn loaded(&self) -> (Vec<Update>, Instant) {
+            let mut sb = self.state.borrow_mut();
+            match std::mem::take(&mut *sb) {
+                DirState::Unloaded | DirState::Loaded(_) => unreachable!(),
+                DirState::Loading { watch, pending_updates, start } => {
+                    *sb = DirState::Loaded(watch);
+                    (pending_updates, start)
+                }
+            }
+        }
     }
 }
