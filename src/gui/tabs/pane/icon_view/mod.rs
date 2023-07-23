@@ -7,9 +7,10 @@ use gtk::subclass::prelude::*;
 use gtk::{gio, glib, GridView, ListView, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
-use super::get_first_visible_child;
+use super::get_last_visible_child;
 use crate::com::{DisplayMode, EntryObject, SignalHolder};
 use crate::gui::tabs::id::TabId;
+use crate::gui::tabs::ScrollPosition;
 use crate::gui::{applications, GUI};
 
 #[derive(Debug)]
@@ -84,23 +85,35 @@ impl IconView {
         }
     }
 
-    pub(super) fn scroll_to(&self, pos: u32) {
-        if self.selection.n_items() <= pos {
+    pub(super) fn scroll_to(&self, pos: Option<ScrollPosition>) {
+        let index = match pos {
+            Some(pos) => pos.index,
+            None => 0,
+        };
+
+        if self.selection.n_items() <= index {
+            println!("nonono");
             return;
         }
-        self.grid.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
+
+        // This is very sensitive to when things are scrolled.
+        let g = self.grid.clone();
+        glib::idle_add_local_once(move || {
+            g.activate_action("list.scroll-to-item", Some(&index.to_variant()));
+        });
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
-    pub(super) fn get_first_visible(&self) -> Option<EntryObject> {
+    pub(super) fn get_last_visible(&self) -> Option<EntryObject> {
         let model = self.grid.model().unwrap();
         if model.n_items() == 0 {
             return None;
         }
 
-        get_first_visible_child(self.grid.upcast_ref::<gtk::Widget>())
-            .and_then(|w| w.first_child())
+
+        get_last_visible_child(self.grid.upcast_ref::<gtk::Widget>())
+            .and_then(|c| c.first_child())
             .and_downcast::<IconTile>()
-            .and_then(|it: IconTile| it.bound_object())
+            .and_then(|c| c.bound_object())
     }
 }

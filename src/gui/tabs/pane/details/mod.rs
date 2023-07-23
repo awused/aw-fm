@@ -17,12 +17,13 @@ use gtk::{
 
 use self::icon_cell::IconCell;
 use self::string_cell::{EntryString, StringCell};
-use super::get_first_visible_child;
+use super::get_last_visible_child;
 use crate::com::{
     DirSettings, DisplayMode, Entry, EntryKind, EntryObject, SignalHolder, SortDir, SortMode,
     SortSettings,
 };
 use crate::gui::tabs::id::TabId;
+use crate::gui::tabs::ScrollPosition;
 use crate::gui::{applications, tabs_run, GUI};
 
 const NAME: &str = "Name";
@@ -119,14 +120,32 @@ impl DetailsView {
         set_sort(&self.column_view, sort);
     }
 
-    pub(super) fn scroll_to(&self, pos: u32) {
-        if self.selection.n_items() <= pos {
+    pub(super) fn scroll_to(&self, pos: Option<ScrollPosition>) {
+        let Some(pos) = pos else {
+            if self.selection.n_items() > 0 {
+                let w = self.column_view.first_child().and_then(|c| c.next_sibling());
+                if let Some(w) = w {
+                    glib::idle_add_local_once(move || {
+                        w.activate_action("list.scroll-to-item", Some(&0.to_variant()));
+                    });
+                };
+            }
+            return;
+        };
+
+
+        if self.selection.n_items() <= pos.index {
             return;
         }
+
+        // ColumnView scrolls based on the bottom
+        // TODO -- timeout and calculate an offset to make this the top item.
+        let target = pos.index;
+
         let w = self.column_view.first_child().and_then(|c| c.next_sibling());
         if let Some(w) = w {
             glib::idle_add_local_once(move || {
-                w.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
+                w.activate_action("list.scroll-to-item", Some(&target.to_variant()));
             });
         } else {
             error!("Couldn't find ListView to scroll in details view");
@@ -134,7 +153,7 @@ impl DetailsView {
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
-    pub(super) fn get_first_visible(&self) -> Option<EntryObject> {
+    pub(super) fn get_last_visible(&self) -> Option<EntryObject> {
         let model = self.column_view.model().unwrap();
         if model.n_items() == 0 {
             return None;
@@ -148,11 +167,11 @@ impl DetailsView {
             .first_child()
             .and_then(|c| c.next_sibling())
             .as_ref()
-            .and_then(get_first_visible_child)
+            .and_then(get_last_visible_child)
             .and_then(|c| c.first_child())
             .and_then(|c| c.first_child())
             .and_downcast::<IconCell>()
-            .and_then(|ic| ic.bound_object());
+            .and_then(|c| c.bound_object());
 
         if obj.is_none() && self.selection.n_items() != 0 {
             error!("Failed to find visible item in list with at least one item");
@@ -161,6 +180,7 @@ impl DetailsView {
         obj
     }
 }
+
 
 fn setup_columns(column_view: &ColumnView) {
     let dummy_sorter = CustomSorter::new(dummy_sort_fn);

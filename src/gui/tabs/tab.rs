@@ -127,7 +127,7 @@ impl Tab {
     }
 
     pub fn visible(&self) -> bool {
-        self.pane.get().is_some()
+        self.pane.get().map_or(false, PaneExt::visible)
     }
 
     pub fn matches_arc(&self, other: &Arc<Path>) -> bool {
@@ -552,8 +552,21 @@ impl Tab {
     }
 
     pub fn set_active(&mut self) {
-        self.pane.get_mut().expect("Called set_active on tab with no pane").set_active();
+        assert!(self.visible(), "Called set_active on a tab that isn't visible");
+        self.pane.get_mut().unwrap().set_active(true);
         self.element.set_active(true);
+    }
+
+    pub fn set_inactive(&mut self) {
+        if let Some(pane) = self.pane.get_mut() {
+            pane.set_active(false);
+        }
+        self.element.set_active(false);
+    }
+
+    pub fn focus(&mut self) {
+        // Must be called on a mapped tab
+        self.pane.get().unwrap().focus();
     }
 
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: &Path) {
@@ -605,7 +618,8 @@ impl Tab {
     }
 
     fn save_view_snapshot(&mut self) {
-        self.view_state = self.take_view_snapshot();
+        self.view_state = Some(self.pane.get().unwrap().get_view_state(&self.contents));
+        debug!("Saved state {:?} for {:?}", self.view_state, self.id());
     }
 
     fn finish_flat_load(&mut self) {
@@ -638,14 +652,8 @@ impl Tab {
         // glib::idle_add_local_once(finish);
     }
 
-    // Doesn't start loading yet.
-    fn replace_pane(&mut self, visible: &mut Self) {
-        visible.take_pane().unwrap();
-        todo!()
-    }
-
     pub fn new_pane(&mut self, parent: &gtk::Box) {
-        if let Some(pane) = self.pane.get_mut() {
+        if self.visible() {
             debug!("Pane already displayed");
             return;
         }
@@ -658,6 +666,35 @@ impl Tab {
             &self.contents.selection,
             parent,
         );
+        self.pane = CurrentPane::Flat(pane);
+
+        if matches!(&*self.dir.state(), DirState::Loaded(_)) {
+            self.apply_flat_view_state();
+        }
+    }
+
+    // Doesn't start loading
+    pub fn replace_pane(&mut self, other: &mut Self) {
+        trace!("Replacing pane for {:?} with pane from {:?}", other.id(), self.id());
+        if self.visible() {
+            debug!("Pane already displayed");
+            return;
+        }
+
+        let old = other.take_pane().unwrap();
+
+        if let Some(search) = self.pane.search() {
+            todo!()
+        }
+
+        let pane = Pane::replace_flat(
+            self.id(),
+            self.dir.path(),
+            self.settings,
+            &self.contents.selection,
+            old,
+        );
+
         self.pane = CurrentPane::Flat(pane);
 
         if matches!(&*self.dir.state(), DirState::Loaded(_)) {
@@ -681,7 +718,7 @@ impl Tab {
         // Take the pane,
         // TODO [search]
         if matches!(&*self.dir.state(), DirState::Loaded(_)) {
-            self.take_view_snapshot();
+            self.save_view_snapshot();
         }
 
         match std::mem::take(&mut self.pane) {
@@ -702,10 +739,11 @@ impl Tab {
             warn!("Pane was closed after we asked to apply view state");
             return;
         };
+
         let view_state = self.view_state.take().unwrap_or_default();
 
         // self.pane.apply_view_state
-        pane.apply_view_state(view_state);
+        pane.apply_view_state(view_state, &self.contents);
     }
 
     fn save_settings(&self) {

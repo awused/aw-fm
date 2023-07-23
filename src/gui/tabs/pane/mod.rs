@@ -8,7 +8,8 @@ use gtk::prelude::{Cast, ListModelExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{AdjustmentExt, BoxExt, EditableExt, EntryExt, SelectionModelExt, WidgetExt};
 use gtk::{
-    Bitset, ColumnView, GridView, ListView, MultiSelection, Orientation, ScrolledWindow, Widget,
+    Bitset, ColumnView, GridView, ListView, MultiSelection, Orientation, Paned, ScrolledWindow,
+    Widget,
 };
 
 use self::details::DetailsView;
@@ -47,31 +48,36 @@ impl View {
     }
 }
 
+fn get_last_visible_child(parent: &Widget) -> Option<Widget> {
+    let parent_allocation = parent.allocation();
 
-fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
-    let mut child = parent.first_child()?;
+    let mut child = parent.last_child()?;
     loop {
         if child.is_visible() && child.is_mapped() {
             let allocation = child.allocation();
-            // Assume we're dealing with a vertical list.
-            if allocation.y() + allocation.height() > 0 {
+            // Get the last fully visible item so at least it stays stable.
+            if allocation.y() + allocation.height() <= parent_allocation.height() {
                 break Some(child);
             }
         }
 
-        child = child.next_sibling()?;
+        child = child.prev_sibling()?;
     }
 }
 
 pub(super) trait PaneExt {
-    fn set_active(&mut self);
+    fn set_active(&mut self, active: bool);
+
+    fn focus(&self);
+
+    fn visible(&self) -> bool;
 
     // I don't like needing to pass list into this, but it needs to check that it's not stale.
     fn update_settings(&mut self, settings: DirSettings, list: &Contents);
 
     fn get_view_state(&self, list: &Contents) -> SavedViewState;
 
-    fn apply_view_state(&mut self, state: SavedViewState);
+    fn apply_view_state(&mut self, state: SavedViewState, list: &Contents);
 
     fn workaround_scroller(&self) -> &ScrolledWindow;
 
@@ -98,34 +104,37 @@ impl Drop for Pane {
         };
 
         if let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
+            info!("Promoting sibling pane of closed pane {:?}", self.tab);
+
             let start = paned.start_child().unwrap();
             let end = paned.end_child().unwrap();
-            paned.set_start_child(None::<&gtk::Widget>);
-            paned.set_end_child(None::<&gtk::Widget>);
+            paned.set_start_child(Widget::NONE);
+            paned.set_end_child(Widget::NONE);
 
-            let sibling = if start.downcast_ref::<PaneElement>().unwrap().imp().tab.get().unwrap()
-                == &self.tab
-            {
-                end
-            } else {
-                start
-            };
+            let start_tab = start.downcast_ref::<PaneElement>().unwrap().imp().tab.get().unwrap();
+            let sibling = if start_tab == &self.tab { end } else { start };
 
             // A split will always have a parent.
             let grandparent = paned.parent().unwrap();
             if let Some(grandpane) = grandparent.downcast_ref::<gtk::Paned>() {
-                if grandpane.start_child().unwrap().downcast_ref::<gtk::Paned>().unwrap().eq(paned)
-                {
+                let parent_is_start = grandpane
+                    .start_child()
+                    .unwrap()
+                    .downcast_ref::<gtk::Paned>()
+                    .map_or(false, |sc| sc.eq(paned));
+
+                if parent_is_start {
                     grandpane.set_start_child(Some(&sibling));
                 } else {
                     grandpane.set_end_child(Some(&sibling));
                 }
             } else {
-                // Single pane, just remove it.
+                let grandparent = grandparent.downcast_ref::<gtk::Box>().unwrap();
+                grandparent.remove(paned);
+                grandparent.append(&sibling);
             }
-            let parent = parent.downcast_ref::<gtk::Box>().unwrap();
-            parent.remove(&self.element);
         } else {
+            // Single pane, just remove it.
             let parent = parent.downcast_ref::<gtk::Box>().unwrap();
             parent.remove(&self.element);
         }
@@ -186,13 +195,16 @@ impl Pane {
         //
         imp.text_entry.connect_activate(move |e| {
             let path: PathBuf = e.text().into();
-            if !path.is_dir() {
+            if path.is_file() {
+                gui_run(|g| {
+                    g.warning(&format!("TODO -- jump to file: {}", path.to_string_lossy()))
+                });
+            } else if path.is_dir() {
+                tabs_run(|t| t.navigate(tab, &path));
+            } else {
                 // TODO -- jump to file instead if it is a file.
                 gui_run(|g| g.warning(&format!("No such directory: {}", path.to_string_lossy())));
-                return;
             }
-
-            tabs_run(|t| t.navigate(tab, &path));
         });
 
 
@@ -224,12 +236,23 @@ impl Pane {
         let pane = Self::create(tab, settings, selection).setup_flat(tab, path);
 
         let parent = other.element.parent().unwrap();
-        let parent = parent.downcast::<gtk::Box>().unwrap();
+        if let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
+            let old_is_start = paned
+                .start_child()
+                .unwrap()
+                .downcast_ref::<PaneElement>()
+                .map_or(false, |t| t.imp().tab.get().unwrap() == &other.tab);
 
-        parent.insert_child_after(&pane.element, Some(&other.element));
-        parent.remove(&other.element);
-
-        // TODO -- handle focus
+            if old_is_start {
+                paned.set_start_child(Some(&pane.element));
+            } else {
+                paned.set_end_child(Some(&pane.element));
+            }
+        } else {
+            let parent = parent.downcast::<gtk::Box>().unwrap();
+            parent.remove(&other.element);
+            parent.append(&pane.element);
+        }
 
         pane
     }
@@ -249,8 +272,22 @@ impl Pane {
 }
 
 impl PaneExt for Pane {
-    fn set_active(&mut self) {
-        self.element.add_css_class("active-pane");
+    fn set_active(&mut self, active: bool) {
+        if active {
+            self.element.add_css_class("active-pane");
+        } else {
+            self.element.remove_css_class("active-pane");
+        }
+    }
+
+    fn focus(&self) {
+        self.element.imp().text_entry.grab_focus();
+    }
+
+    fn visible(&self) -> bool {
+        // For now, if a flat pane exists it is always visible.
+        // The only exception is the very brief period in replace_pane before we drop it.
+        true
     }
 
     fn update_settings(&mut self, settings: DirSettings, list: &Contents) {
@@ -273,23 +310,29 @@ impl PaneExt for Pane {
             )),
         };
 
-        self.apply_view_state(vs);
+        self.apply_view_state(vs, list);
     }
 
     fn get_view_state(&self, list: &Contents) -> SavedViewState {
-        let eo = match &self.view {
-            View::Icons(ic) => ic.get_first_visible(),
-            View::Columns(cv) => cv.get_first_visible(),
-        };
+        let scroll_pos = if self.element.imp().scroller.vadjustment().value() > 0.0 {
+            let eo = match &self.view {
+                View::Icons(ic) => ic.get_last_visible(),
+                View::Columns(cv) => cv.get_last_visible(),
+            };
 
-        let scroll_pos =
-            eo.and_then(|obj| list.position_by_sorted_entry(&obj.get())).unwrap_or_default();
+            eo.map(|child| super::ScrollPosition {
+                path: child.get().abs_path.clone(),
+                index: list.position_by_sorted_entry(&child.get()).unwrap_or_default(),
+            })
+        } else {
+            None
+        };
 
 
         SavedViewState { scroll_pos, search: None }
     }
 
-    fn apply_view_state(&mut self, state: SavedViewState) {
+    fn apply_view_state(&mut self, state: SavedViewState, list: &Contents) {
         match &self.view {
             View::Icons(icons) => icons.scroll_to(state.scroll_pos),
             View::Columns(details) => details.scroll_to(state.scroll_pos),

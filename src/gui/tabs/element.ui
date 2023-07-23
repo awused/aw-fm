@@ -4,7 +4,9 @@
     <property name="orientation">horizontal</property>
     <property name="spacing">0</property>
     <property name="hexpand">true</property>
-    <property name="margin-end">5</property>
+    <style>
+      <class name="tab"/>
+    </style>
 
     <child>
       <object class="GtkSpinner" id="spinner">

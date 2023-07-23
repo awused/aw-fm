@@ -35,7 +35,15 @@ impl SearchPane {
 }
 
 impl PaneExt for SearchPane {
-    fn set_active(&mut self) {
+    fn set_active(&mut self, active: bool) {
+        todo!()
+    }
+
+    fn focus(&self) {
+        todo!()
+    }
+
+    fn visible(&self) -> bool {
         todo!()
     }
 
@@ -43,11 +51,11 @@ impl PaneExt for SearchPane {
         todo!()
     }
 
-    fn get_view_state(&self, _list: &super::Contents) -> super::SavedViewState {
+    fn get_view_state(&self, _ignored: &super::Contents) -> super::SavedViewState {
         todo!()
     }
 
-    fn apply_view_state(&mut self, state: super::SavedViewState) {
+    fn apply_view_state(&mut self, state: super::SavedViewState, _ignored: &super::Contents) {
         match self.state {
             State::Loading(..) => {
                 self.pending_view_state = Some(state);

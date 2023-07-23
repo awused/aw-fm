@@ -76,13 +76,19 @@ struct HistoryEntry {
     scroll_pos: Option<(Arc<Path>, u32)>,
 }
 
+#[derive(Debug, Clone)]
+struct ScrollPosition {
+    path: Arc<Path>,
+    // Used as a backup if path has been removed.
+    index: u32,
+}
+
 // Not kept up to date, maybe an enum?
 #[derive(Debug, Clone, Default)]
 struct SavedViewState {
     // First visible element.
     // If the directory has updated we just don't care, it'll be wrong.
-    // pub scroll_pos: Option<(Arc<Path>, u32)>,
-    pub scroll_pos: u32,
+    pub scroll_pos: Option<ScrollPosition>,
     // Selected items?
     pub search: Option<String>,
 }

@@ -37,18 +37,42 @@ child:selected {
 
 child:selected image {
   filter: invert(30%);
-  /* opacity: 0.1; */
+}
+
+.panes child:hover {
+  filter: invert(20%);
 }
 
 gridview child box {
   border-spacing: 0;
 }
 
-gridview .name {
-  padding-bottom: 4px;
+gridview>* {
+  outline-offset: 0;
+  padding: 0;
+  /* For no drag and drop selection */
+  margin-left: 3px;
+  margin-right: 3px;
 }
 
-.active-tab {
+listview.tabs-list>* {
+  padding: 0;
+}
+
+/* gridview .name { */
+/*   padding-bottom: 4px; */
+/* } */
+
+.tab {
+  padding: 5px;
+}
+
+.tab:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.active-tab,
+.active-tab:hover {
   background: rgba(1, 120, 255, 0.5);
 }
 

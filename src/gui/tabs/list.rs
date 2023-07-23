@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use gtk::gdk::RGBA;
 use gtk::gio::ListStore;
-use gtk::prelude::{Cast, ListModelExt, StaticType};
+use gtk::prelude::{Cast, CastNone, ListModelExt, StaticType};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{BoxExt, WidgetExt};
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
@@ -19,6 +19,7 @@ use crate::com::{DirSnapshot, DisplayMode, EntryObjectSnapshot, SortSettings, Up
 use crate::config::OPTIONS;
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
+use crate::gui::tabs_run;
 
 
 // This is tightly coupled the Tab implementation, right now.
@@ -60,8 +61,10 @@ impl TabsList {
         tabs_container.set_single_click_activate(true);
         tabs_container.connect_activate(|c, a| {
             let model = c.model().unwrap();
-            let element = model.item(a);
-            println!("TODO -- switch tabs activate {c:?} {a:?}");
+            let element = model.item(a).and_downcast::<TabElement>().unwrap();
+
+            let id = *element.imp().tab.get().unwrap();
+            tabs_run(|ts| ts.switch_tab(id));
         });
 
         Self {
@@ -90,10 +93,12 @@ impl TabsList {
             path = abs.clean();
         }
 
-        // for _ in 0..10 {
-        //     let (tab, element) = Tab::new(next_id(), path.clone(), &self.tabs);
+        // let mut p_path = &*path;
+        // while let Some(parent) = p_path.parent() {
+        //     let (tab, element) = Tab::new(next_id(), parent.to_path_buf(), &self.tabs);
         //     self.tab_elements.append(&element);
         //     self.tabs.push(tab);
+        //     p_path = parent;
         // }
         // let (tab, element) = Tab::new(next_id(), path, &self.tabs);
         let (tab, element) = Tab::new(next_id(), path, &[]);
@@ -118,7 +123,8 @@ impl TabsList {
         let index = self.position(id).unwrap();
 
         if let Some(old) = self.active {
-            error!("TODO -- set_inactive");
+            let old_index = self.position(old).unwrap();
+            self.tabs[old_index].set_inactive();
         }
 
         self.active = Some(id);
@@ -202,6 +208,47 @@ impl TabsList {
         let (left, tab, right) = self.split_around_mut(index);
 
         tab.navigate(left, right, target)
+    }
+
+    fn switch_tab(&mut self, id: TabId) {
+        if Some(id) == self.active {
+            return;
+        }
+
+        let index = self.position(id).unwrap();
+
+        let (left, tab, right) = self.split_around_mut(index);
+
+        if tab.visible() {
+            debug!("Switching to visible tab {id:?}");
+            tab.focus();
+            self.set_active(id);
+            return;
+        }
+
+        tab.load(left, right);
+
+        let Some(active) = self.active else {
+            // TODO: should this even be possible?
+            warn!("Opening new tab on switch");
+            self.tabs[index].new_pane(&self.pane_container);
+            self.set_active(id);
+            return;
+        };
+
+        debug!("Switching to non-visible tab {id:?} from {:?}", active);
+        let active_index = self.position(active).unwrap();
+
+        assert_ne!(index, active_index);
+        if index < active_index {
+            let (left, right) = self.tabs.split_at_mut(active_index);
+            left[index].replace_pane(&mut right[0]);
+        } else {
+            let (left, right) = self.tabs.split_at_mut(index);
+            right[0].replace_pane(&mut left[active_index]);
+        }
+
+        self.set_active(id);
     }
 
     fn clone_tab(&mut self, index: usize) {
