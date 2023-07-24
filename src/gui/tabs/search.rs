@@ -7,7 +7,7 @@ use gtk::{Orientation, Widget};
 use super::contents::Contents;
 use super::id::TabId;
 use super::pane::{Pane, PaneExt};
-use super::SavedViewState;
+use super::SavedPaneState;
 use crate::com::DirSettings;
 
 // Search is handled as, effectively, an overlay on top of a flat tab.
@@ -28,7 +28,7 @@ pub(super) struct SearchPane {
     // This contains everything in tab.contents plus items from subdirectories.
     contents: Contents,
     // This is used to store a view state until search is done loading.
-    pending_view_state: Option<SavedViewState>,
+    pending_view_state: Option<SavedPaneState>,
 }
 
 impl SearchPane {
@@ -56,11 +56,11 @@ impl PaneExt for SearchPane {
         todo!()
     }
 
-    fn get_view_state(&self, _ignored: &super::Contents) -> super::SavedViewState {
+    fn get_state(&self, _ignored: &super::Contents) -> super::SavedPaneState {
         todo!()
     }
 
-    fn apply_view_state(&mut self, state: super::SavedViewState, _ignored: &super::Contents) {
+    fn apply_state(&mut self, state: super::SavedPaneState, _ignored: &super::Contents) {
         match self.state {
             State::Loading(..) => {
                 self.pending_view_state = Some(state);

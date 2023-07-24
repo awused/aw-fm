@@ -16,7 +16,7 @@ use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
 use super::id::TabId;
-use super::{Contents, SavedViewState};
+use super::{Contents, SavedPaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder, SortSettings};
 use crate::gui::{applications, gui_run, tabs_run};
 
@@ -77,9 +77,9 @@ pub(super) trait PaneExt {
     // I don't like needing to pass list into this, but it needs to check that it's not stale.
     fn update_settings(&mut self, settings: DirSettings, list: &Contents);
 
-    fn get_view_state(&self, list: &Contents) -> SavedViewState;
+    fn get_state(&self, list: &Contents) -> SavedPaneState;
 
-    fn apply_view_state(&mut self, state: SavedViewState, list: &Contents);
+    fn apply_state(&mut self, state: SavedPaneState, list: &Contents);
 
     fn workaround_scroller(&self) -> &ScrolledWindow;
 
@@ -243,6 +243,8 @@ impl Pane {
         let location = path.to_string_lossy().to_string();
         self.element.imp().text_entry.set_text(&location);
         self.element.imp().original_text.replace(location);
+        self.element.imp().seek.set_text("");
+        self.element.imp().stack.set_visible_child_name("count");
     }
 
     pub(super) fn workaround_scroller(&self) -> &ScrolledWindow {
@@ -273,7 +275,7 @@ impl PaneExt for Pane {
             return;
         }
 
-        let vs = self.get_view_state(list);
+        let vs = self.get_state(list);
 
         self.view = match settings.display_mode {
             DisplayMode::Icons => {
@@ -287,10 +289,10 @@ impl PaneExt for Pane {
             )),
         };
 
-        self.apply_view_state(vs, list);
+        self.apply_state(vs, list);
     }
 
-    fn get_view_state(&self, list: &Contents) -> SavedViewState {
+    fn get_state(&self, list: &Contents) -> SavedPaneState {
         let scroll_pos = if self.element.imp().scroller.vadjustment().value() > 0.0 {
             let eo = match &self.view {
                 View::Icons(ic) => ic.get_last_visible(),
@@ -306,10 +308,10 @@ impl PaneExt for Pane {
         };
 
 
-        SavedViewState { scroll_pos, search: None }
+        SavedPaneState { scroll_pos, search: None }
     }
 
-    fn apply_view_state(&mut self, state: SavedViewState, list: &Contents) {
+    fn apply_state(&mut self, state: SavedPaneState, list: &Contents) {
         let pos = state
             .scroll_pos
             .and_then(|sp| {

@@ -36,15 +36,42 @@
         </style>
 
         <child>
-          <object class="GtkLabel" id="count">
+          <object class="GtkStack" id="stack">
+
+            <child>
+              <object class="GtkStackPage">
+                <property name="name">count</property>
+                <property name="child">
+                  <object class="GtkLabel" id="count">
+                  </object>
+                </property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkStackPage">
+                <property name="name">selection</property>
+                <property name="child">
+                  <object class="GtkLabel" id="selection">
+                    <property name="ellipsize">PANGO_ELLIPSIZE_MIDDLE</property>
+                  </object>
+                </property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkStackPage">
+                <property name="name">seek</property>
+                <property name="child">
+                  <object class="GtkLabel" id="seek">
+                  </object>
+                </property>
+              </object>
+            </child>
+
           </object>
         </child>
-        <child>
-          <object class="GtkLabel" id="selection">
-            <property name="visible">false</property>
-            <property name="ellipsize">PANGO_ELLIPSIZE_MIDDLE</property>
-          </object>
-        </child>
+
       </object>
     </child>
   </template>

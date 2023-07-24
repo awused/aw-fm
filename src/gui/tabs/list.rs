@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dirs::home_dir;
-use gtk::gdk::RGBA;
 use gtk::gio::ListStore;
 use gtk::prelude::{Cast, CastNone, ListModelExt, StaticType};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -84,7 +83,7 @@ impl TabsList {
         }
     }
 
-    pub fn setup(&mut self) {
+    pub fn open_initial_tab(&mut self) {
         assert!(self.tabs.is_empty());
 
 
@@ -105,9 +104,7 @@ impl TabsList {
         self.tabs.push(tab);
         self.tab_elements.append(&element);
         // let (left, tab, right) = self.split_around_mut(0);
-        // tab.load(&[], right);
-        self.tabs[0].load(&[], &[]);
-        self.tabs[0].attach_pane(|w| self.pane_container.append(w));
+        self.tabs[0].attach_pane(&[], &[], |w| self.pane_container.append(w));
         self.set_active(self.tabs[0].id());
     }
 
@@ -275,19 +272,17 @@ impl TabsList {
 
         let index = self.position(id).unwrap();
 
-        let (left, tab, right) = self.split_around_mut(index);
-
-        if tab.visible() {
+        if self.tabs[index].visible() {
             debug!("Switching to visible tab {id:?}");
             self.set_active(id);
             return;
         }
 
-        tab.load(left, right);
-
         let Some(active) = self.active else {
-            info!("Opening new tab on switch");
-            self.tabs[index].attach_pane(|w| self.pane_container.append(w));
+            info!("Opening new pane on switch");
+            let pane_container = self.pane_container.clone();
+            let (left, tab, right) = self.split_around_mut(index);
+            tab.attach_pane(left, right, |w| pane_container.append(w));
             self.set_active(id);
             return;
         };
@@ -363,7 +358,7 @@ impl TabsList {
 
     // For now, tabs always open after the active tab
     // !activate -> background tab
-    pub fn open_tab(&mut self, path: &Path, activate: bool) {
+    pub fn open_tab<P: AsRef<Path>>(&mut self, path: P, activate: bool) {
         let Some(target) = NavTarget::open_or_jump(path, self) else {
             return;
         };
@@ -391,7 +386,41 @@ impl TabsList {
         self.create_tab(target, activate);
     }
 
-    pub fn split(&mut self, orient: Orientation) {
+    // Splits based on index in self.tabs.
+    // Used as an implementation detail for session loading
+    // returns false if it fails, and session loading should stop if it happens.
+    fn split_existing(&mut self, first: usize, second: usize, orient: Orientation) -> bool {
+        if first >= self.tabs.len()
+            || second >= self.tabs.len()
+            || first == second
+            || !self.tabs[first].visible()
+            || self.tabs[second].visible()
+        {
+            error!(
+                "Invalid or corrupt saved session. Split {first}:{} / {second}:{} is not valid. \
+                 {} total tabs.",
+                self.tabs.get(first).map(Tab::visible).unwrap_or_default(),
+                self.tabs.get(second).map(Tab::visible).unwrap_or_default(),
+                self.tabs.len()
+            );
+            gui_run(|g| g.error("Invalid or corrupt saved session. Check the logs"));
+            return false;
+        }
+
+        let Some(paned) = self.tabs[first].split(orient) else {
+            warn!("Called split {orient} but pane was too small to split");
+            gui_run(|g| g.warning("Could not restore session: window was too small"));
+            return false;
+        };
+
+        let (new_id, new_index) = self.clone_active().unwrap();
+        let (left, tab, right) = self.split_around_mut(new_index);
+        tab.attach_pane(left, right, |w| paned.set_end_child(Some(w)));
+
+        true
+    }
+
+    pub fn active_split(&mut self, orient: Orientation) {
         let Some(active) = self.active else {
             warn!("Called split {orient} with no panes to split, opening new tab instead");
             gui_run(|g| g.warning("Split called with no panes to split"));
@@ -408,7 +437,8 @@ impl TabsList {
         };
 
         let (new_id, new_index) = self.clone_active().unwrap();
-        self.tabs[new_index].attach_pane(|w| paned.set_end_child(Some(w)));
+        let (left, tab, right) = self.split_around_mut(new_index);
+        tab.attach_pane(left, right, |w| paned.set_end_child(Some(w)));
 
         self.set_active(new_id);
     }
@@ -496,7 +526,7 @@ impl TabsList {
     }
 
     pub fn active_back(&mut self) {
-        self.try_active(Tab::backward);
+        self.try_active(Tab::back);
     }
 
     pub fn active_parent(&mut self) {

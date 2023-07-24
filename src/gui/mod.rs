@@ -227,7 +227,7 @@ impl Gui {
     }
 
     fn setup(self: &Rc<Self>) {
-        self.tabs.borrow_mut().setup();
+        self.tabs.borrow_mut().open_initial_tab();
         self.setup_interaction();
 
         // let g = self.clone();

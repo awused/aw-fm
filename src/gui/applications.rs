@@ -13,6 +13,7 @@ use super::tabs_run;
 use crate::com::EntryObject;
 use crate::gui::gui_run;
 
+static DIR_OPEN_LIMIT: usize = 10;
 
 thread_local! {
     // Avoid repeat lookups, even if nothing was found.
@@ -98,6 +99,11 @@ pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
         return;
     }
 
+    if directories.len() > DIR_OPEN_LIMIT {
+        gui_run(|g| g.warning("Can't load more than {DIR_OPEN_LIMIT} directories at once"));
+        return;
+    }
+
     // Can be called while the TabsList lock is held.
     // This is less than perfectly efficient but it doesn't matter.
     glib::idle_add_local_once(move || {
@@ -107,9 +113,11 @@ pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
                 return;
             }
 
-            // Open tabs in this order so they're
-            directories.reverse();
-            error!("todo open tabs");
+            // Open tabs in reverse order.
+            // directories.reverse();
+            for d in directories.into_iter().rev() {
+                t.open_tab(&d, false);
+            }
         })
     });
 }

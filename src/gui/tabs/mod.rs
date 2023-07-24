@@ -70,7 +70,7 @@ impl PartiallyAppliedUpdate {
 #[derive(Debug, Clone)]
 struct HistoryEntry {
     location: Arc<Path>,
-    state: SavedViewState,
+    state: SavedPaneState,
 }
 
 #[derive(Debug, Clone)]
@@ -83,14 +83,14 @@ struct ScrollPosition {
 
 // Not kept up to date, maybe an enum?
 #[derive(Debug, Clone, Default)]
-struct SavedViewState {
+struct SavedPaneState {
     // If the directory has updated we just don't care, it'll be wrong.
     pub scroll_pos: Option<ScrollPosition>,
     // Selected items?
     pub search: Option<String>,
 }
 
-impl SavedViewState {
+impl SavedPaneState {
     fn for_jump(jump: Option<Arc<Path>>) -> Self {
         Self {
             scroll_pos: jump.map(|path| ScrollPosition { path, index: 0 }),
@@ -111,11 +111,11 @@ impl NavTarget {
         let p = path.as_ref();
         let target = Self::cleaned_abs(p, list)?;
 
-        Some(if !target.exists() {
+        if !target.exists() {
             gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
-            return None;
+            None
         } else if target.is_dir() {
-            Self { dir: target.into(), scroll: None }
+            Some(Self { dir: target.into(), scroll: None })
         } else if let Some(parent) = target.parent() {
             if !parent.is_dir() {
                 gui_run(|g| g.warning(&format!("Could not open {p:?}")));
@@ -125,20 +125,20 @@ impl NavTarget {
             let dir: Arc<Path> = parent.into();
             let scroll = if target.exists() { Some(target.into()) } else { None };
 
-            Self { dir, scroll }
+            Some(Self { dir, scroll })
         } else {
             gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
-            return None;
-        })
+            None
+        }
     }
 
     fn jump<P: AsRef<Path>>(path: P, list: &TabsList) -> Option<Self> {
         let p = path.as_ref();
         let target = Self::cleaned_abs(p, list)?;
 
-        Some(if !target.exists() {
+        if !target.exists() {
             gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
-            return None;
+            None
         } else if let Some(parent) = target.parent() {
             if !parent.is_dir() {
                 gui_run(|g| g.warning(&format!("Could not open {p:?}")));
@@ -148,16 +148,16 @@ impl NavTarget {
             let dir: Arc<Path> = parent.into();
             let scroll = if target.exists() { Some(target.into()) } else { None };
 
-            Self { dir, scroll }
+            Some(Self { dir, scroll })
         } else {
             gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
-            return None;
-        })
+            None
+        }
     }
 
     // Will cause an error later if this isn't a directory.
-    fn assume_dir<P: AsRef<Path>>(path: P) -> Self {
-        Self { dir: path.as_ref().into(), scroll: None }
+    fn assume_dir<P: AsRef<Path> + Into<Arc<Path>>>(path: P) -> Self {
+        Self { dir: path.into(), scroll: None }
     }
 
     fn initial(list: &TabsList) -> Option<Self> {

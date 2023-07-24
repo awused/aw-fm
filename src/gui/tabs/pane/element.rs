@@ -2,6 +2,7 @@ use std::fmt::Write;
 use std::time::Instant;
 
 use gtk::gio::ListStore;
+use gtk::glib::GString;
 use gtk::prelude::{Cast, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
@@ -20,6 +21,8 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Box;
 }
 
+// Contains signals attached to something else.
+// Any signal handlers connected to this entity should use weak references.
 #[derive(Debug)]
 pub(super) struct PaneSignals(SignalHolder<MultiSelection>, SignalHolder<MultiSelection>);
 
@@ -61,17 +64,20 @@ impl PaneElement {
     fn setup_signals(&self, tab_id: TabId, selection: &MultiSelection) -> PaneSignals {
         let count_label = &*self.imp().count;
         let selection_label = &*self.imp().selection;
+        let stack = &*self.imp().stack;
 
         let count = count_label.clone();
         let selected = selection_label.clone();
 
         count.set_text(&format!("{} items", selection.n_items()));
+        let stk = stack.clone();
         let count_signal = selection.connect_items_changed(move |list, _p, _a, _r| {
             // There is no selection_changed event on item removal
             // selection().size() is comparatively expensive but unavoidable.
-            if !count.get_visible() && (list.n_items() == 0 || list.selection().size() == 0) {
-                selected.set_visible(false);
-                count.set_visible(true);
+            if stk.visible_child_name().map_or(false, |n| n == "selection")
+                && (list.n_items() == 0 || list.selection().size() == 0)
+            {
+                stk.set_visible_child_name("count");
             }
             count.set_text(&format!("{} items", list.n_items()));
         });
@@ -79,16 +85,14 @@ impl PaneElement {
 
         let count = count_label.clone();
         let selected = selection_label.clone();
+        let stk = stack.clone();
         let update_selected = move |selection: &MultiSelection, _p: u32, _n: u32| {
             let set = selection.selection();
             let len = set.size();
-            if len == 0 {
-                selected.set_visible(false);
-                count.set_visible(true);
+            if len == 0 && stk.visible_child_name().map_or(false, |n| n == "selection") {
+                stk.set_visible_child_name("count");
                 return;
             }
-            selected.set_visible(true);
-            count.set_visible(false);
 
 
             if len == 1 {
@@ -106,6 +110,10 @@ impl PaneElement {
 
             // Costly, but not unbearably slow at <20ms for 100k items.
             selected.set_text(&selected_string(selection, &set));
+
+            if stk.visible_child_name().map_or(false, |n| n != "count") {
+                stk.set_visible_child_name("selection");
+            }
         };
 
         update_selected(selection, 0, 0);
@@ -141,10 +149,16 @@ mod imp {
         pub scroller: TemplateChild<gtk::ScrolledWindow>,
 
         #[template_child]
+        pub stack: TemplateChild<gtk::Stack>,
+
+        #[template_child]
         pub count: TemplateChild<gtk::Label>,
 
         #[template_child]
         pub selection: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub seek: TemplateChild<gtk::Label>,
 
         pub active: Cell<bool>,
         pub original_text: RefCell<String>,

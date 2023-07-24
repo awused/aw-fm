@@ -50,6 +50,9 @@ impl Update {
     }
 }
 
+pub type Responder = Option<oneshot::Sender<serde_json::Value>>;
+pub type MAResponse = (ManagerAction, Responder);
+
 
 #[derive(Debug)]
 pub enum ManagerAction {

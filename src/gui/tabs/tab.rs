@@ -27,7 +27,7 @@ use super::element::TabElement;
 use super::id::{TabId, TabUid};
 use super::pane::{Pane, PaneExt};
 use super::search::SearchPane;
-use super::{HistoryEntry, NavTarget, SavedViewState, ScrollPosition};
+use super::{HistoryEntry, NavTarget, SavedPaneState, ScrollPosition};
 use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, Entry, EntryObject, EntryObjectSnapshot, FileTime,
     GuiAction, ManagerAction, SnapshotId, SnapshotKind, SortMode, SortSettings,
@@ -84,6 +84,11 @@ impl CurrentPane {
             Self::Search(p) => Some(p),
         }
     }
+
+    fn clone_search(&self) -> Self {
+        // TODO [search]
+        CurrentPane::Nothing
+    }
 }
 
 // Current limitations:
@@ -105,7 +110,7 @@ pub(super) struct Tab {
     settings: DirSettings,
     contents: Contents,
     // TODO -- this should only store snapshots and be sporadically updated/absent
-    view_state: Option<SavedViewState>,
+    pane_state: Option<SavedPaneState>,
     past: Vec<HistoryEntry>,
     future: Vec<HistoryEntry>,
     element: TabElement,
@@ -148,7 +153,7 @@ impl Tab {
         let element = TabElement::new(id.copy(), &target.dir);
         let dir = FlatDir::new(target.dir);
         let contents = Contents::new(settings.sort);
-        let view_state = Some(SavedViewState::for_jump(target.scroll));
+        let view_state = Some(SavedPaneState::for_jump(target.scroll));
 
 
         let mut t = Self {
@@ -156,7 +161,7 @@ impl Tab {
             dir,
             settings,
             contents,
-            view_state,
+            pane_state: view_state,
             past: Vec::new(),
             future: Vec::new(),
             element: element.clone(),
@@ -170,12 +175,14 @@ impl Tab {
 
     pub fn cloned(id: TabUid, source: &Self) -> (Self, TabElement) {
         // Assumes inactive tabs cannot be cloned.
-        let view_state = source.take_view_snapshot();
+        let view_state = source.pane_snapshot();
         let mut contents = Contents::new(source.settings.sort);
         let element = TabElement::new(id.copy(), Path::new(""));
 
         contents.clone_from(&source.contents, source.settings.sort);
         element.clone_from(&source.element);
+
+        // TODO [search]: Create search pane if necessary
 
         (
             Self {
@@ -183,18 +190,17 @@ impl Tab {
                 dir: source.dir.clone(),
                 settings: source.settings,
                 contents,
-                view_state,
+                pane_state: view_state,
                 past: source.past.clone(),
                 future: source.future.clone(),
                 element: element.clone(),
-                pane: CurrentPane::default(),
+                pane: source.pane.clone_search(),
             },
             element,
         )
     }
 
     fn copy_from_donor(&mut self, left: &[Self], right: &[Self]) -> bool {
-        // TODO -- clone tab_element state from donor, like spinner
         for t in left.iter().chain(right) {
             // Check for value equality, not reference equality
             if **self.dir.path() == **t.dir.path() {
@@ -208,7 +214,7 @@ impl Tab {
                         pane.workaround_scroller()
                             .set_vscrollbar_policy(gtk::PolicyType::Automatic);
 
-                        self.apply_view_state();
+                        self.apply_pane_state();
                     }
                 }
 
@@ -223,13 +229,15 @@ impl Tab {
     }
 
     // Only make this take &mut [Self] if truly necessary
-    pub fn load(&mut self, left: &[Self], right: &[Self]) {
+    fn load(&mut self, left: &[Self], right: &[Self]) {
+        if let Some(search) = self.pane.search() {
+            todo!()
+        }
+
         if !self.dir.start_load() {
             return;
         }
-        // TODO [search]
 
-        // TODO -- spinners
         self.element.imp().spinner.start();
         self.element.imp().spinner.set_visible(true);
         for t in self.matching(left).chain(self.matching(right)) {
@@ -261,7 +269,7 @@ impl Tab {
         if let Some(search) = self.pane.search() {
             todo!()
             // TODO [search]
-            // self.search.apply_tab_snapshot(snap, self.settings.sort);
+            // search.apply_tab_snapshot(snap, self.settings.sort);
         }
     }
 
@@ -519,27 +527,28 @@ impl Tab {
 
     // Changes location without managing history or view states.
     // Returns the navigation target if nothing happens
+    // Will end a search.
     fn change_location(
         &mut self,
         left: &[Self],
         right: &[Self],
         target: NavTarget,
     ) -> Option<NavTarget> {
+        if self.pane.search().is_some() {
+            // TODO [search]
+            // replace existing search pane with flat pane
+            // And make sure said flat pane is empty.
+            todo!("Replace search pane with flat pane")
+        }
+
         if **self.dir.path() == *target.dir {
             return Some(target);
         }
 
         self.element.flat_title(&target.dir);
 
-        self.view_state = None;
-        if self.pane.search().is_some() {
-            // TODO [search]
-            // replace existing search pane with flat pane
-            // And make sure said flat pane is empty.
-            todo!()
-        }
+        self.pane_state = None;
 
-        // It is important we always create a new Arc here.
         self.dir = FlatDir::new(target.dir);
 
         if !self.copy_from_donor(left, right) {
@@ -547,7 +556,7 @@ impl Tab {
 
             let old_settings = self.settings;
             self.settings = gui_run(|g| g.database.get(self.dir.path()));
-            self.view_state = Some(SavedViewState::for_jump(target.scroll));
+            self.pane_state = Some(SavedPaneState::for_jump(target.scroll));
 
             // Deliberately do not clear or update self.contents here, not yet.
             // This allows us to keep something visible just a tiny bit longer.
@@ -561,8 +570,8 @@ impl Tab {
 
         if let Some(pane) = self.pane.flat() {
             pane.update_location(self.dir.path(), self.settings, &self.contents);
-            self.load(left, right);
         }
+        self.load(left, right);
         None
     }
 
@@ -582,7 +591,7 @@ impl Tab {
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: NavTarget) {
         info!("Navigating {:?} from {:?} to {:?}", self.id, self.dir.path(), target);
 
-        let state = self.take_view_snapshot().unwrap_or_default();
+        let state = self.pane_snapshot().unwrap_or_default();
         let history = HistoryEntry { location: self.dir(), state };
 
         let Some(target) = self.change_location(left, right, target) else {
@@ -595,15 +604,14 @@ impl Tab {
             return;
         };
 
+        // Location didn't change, treat this as a jump
         let mut current_state =
-            self.view_state.take().or_else(|| self.take_view_snapshot()).unwrap_or_default();
+            self.pane_state.take().or_else(|| self.pane_snapshot()).unwrap_or_default();
 
         current_state.scroll_pos = Some(ScrollPosition { path, index: 0 });
-        self.view_state = Some(current_state);
+        self.pane_state = Some(current_state);
 
-        if matches!(&*self.dir.state(), DirState::Loaded(_)) {
-            self.apply_view_state();
-        }
+        self.apply_pane_state();
     }
 
     pub fn parent(&mut self, left: &[Self], right: &[Self]) {
@@ -617,10 +625,14 @@ impl Tab {
     }
 
     pub fn forward(&mut self, left: &[Self], right: &[Self]) {
+        let Some(next) = self.future.pop() else {
+            warn!("No future for {:?} to go forward to", self.id);
+            return;
+        };
         todo!()
     }
 
-    pub(super) fn backward(&mut self, left: &[Self], right: &[Self]) {
+    pub(super) fn back(&mut self, left: &[Self], right: &[Self]) {
         todo!()
     }
 
@@ -637,13 +649,13 @@ impl Tab {
     }
 
     #[must_use]
-    fn take_view_snapshot(&self) -> Option<SavedViewState> {
-        self.pane.get().map(|p| p.get_view_state(&self.contents))
+    fn pane_snapshot(&self) -> Option<SavedPaneState> {
+        self.pane.get().map(|p| p.get_state(&self.contents))
     }
 
-    fn save_view_snapshot(&mut self) {
-        self.view_state = self.take_view_snapshot();
-        debug!("Saved state {:?} for {:?}", self.view_state, self.id());
+    fn save_pane_state(&mut self) {
+        self.pane_state = self.pane_snapshot();
+        debug!("Saved state {:?} for {:?}", self.pane_state, self.id());
     }
 
     fn finish_flat_load(&mut self) {
@@ -655,39 +667,54 @@ impl Tab {
             e.spinner.set_visible(false);
         }
 
-        self.apply_view_state();
+        self.apply_pane_state();
     }
 
-    fn apply_view_state(&mut self) {
+    // This can start a search from a history entry.
+    fn apply_pane_state(&mut self) {
         let Some(pane) = self.pane.get_mut() else {
             trace!("Ignoring start_apply_view_state on tab {:?} with no pane", self.id);
             return;
         };
 
+        if let Some(SavedPaneState { search: Some(_query), .. }) = &self.pane_state {
+            if self.pane.search().is_none() {
+                info!("Restarting search for {:?} from saved state", self.id);
+                // TODO [search]
+                //self.start_search(search)
+            }
+        }
+
+        if let Some(search) = self.pane.search() {
+            // TODO [search]
+            search.apply_state(self.pane_state.take().unwrap_or_default(), &self.contents);
+            // search.mark_flat_dir_state(&*self.dir.state());
+            return;
+        }
+
+        if !matches!(&*self.dir.state(), DirState::Loaded(_)) {
+            trace!("Deferring applying pane state to flat pane until loading is done.");
+            return;
+        }
+
         if self.settings.display_mode == DisplayMode::Icons {
             error!("Unsetting GTK crash workaround");
         }
         // Unconditionally unset it in case mode was swapped.
-        pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
+        self.pane
+            .get_mut()
+            .unwrap()
+            .workaround_scroller()
+            .set_vscrollbar_policy(gtk::PolicyType::Automatic);
 
-        if let Some(search) = self.pane.search() {
-            // TODO [search]
-            // It might be possible to switch to search through a &mut dyn Pane
-            return;
-        }
 
-        let Some(pane) = self.pane.flat() else {
-            warn!("Pane was closed after we asked to apply view state");
-            return;
-        };
-
-        let view_state = self.view_state.take().unwrap_or_default();
+        let state = self.pane_state.take().unwrap_or_default();
 
         // self.pane.apply_view_state
-        pane.apply_view_state(view_state, &self.contents);
+        self.pane.get_mut().unwrap().apply_state(state, &self.contents);
     }
 
-    pub fn attach_pane<F: FnOnce(&Widget)>(&mut self, attach: F) {
+    pub fn attach_pane<F: FnOnce(&Widget)>(&mut self, left: &[Self], right: &[Self], attach: F) {
         if self.visible() {
             debug!("Pane already displayed");
             return;
@@ -708,9 +735,8 @@ impl Tab {
 
         self.element.set_pane_visible(true);
 
-        if matches!(&*self.dir.state(), DirState::Loaded(_)) {
-            self.apply_view_state();
-        }
+        self.load(left, right);
+        self.apply_pane_state();
     }
 
     // Doesn't start loading
@@ -740,7 +766,7 @@ impl Tab {
 
 
         if matches!(&*self.dir.state(), DirState::Loaded(_)) {
-            self.apply_view_state();
+            self.apply_pane_state();
         }
     }
 
@@ -765,7 +791,7 @@ impl Tab {
         // Take the pane,
         // TODO [search]
         if matches!(&*self.dir.state(), DirState::Loaded(_)) {
-            self.save_view_snapshot();
+            self.save_pane_state();
         }
         self.element.set_pane_visible(false);
 

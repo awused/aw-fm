@@ -12,6 +12,7 @@ use gtk::prelude::{Cast, CastNone, StaticType};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt};
 use gtk::Orientation;
+use serde_json::Value;
 
 use super::Gui;
 use crate::closing;
@@ -255,7 +256,8 @@ impl Gui {
     }
 
     pub(super) fn run_command(self: &Rc<Self>, cmd: &str) {
-        let cmd = cmd.trim();
+        // Do not trim the end of cmd because files and directories can end in spaces
+        let cmd = cmd.trim_start();
 
         debug!("Running command {}", cmd);
 
@@ -279,8 +281,12 @@ impl Gui {
                 }
 
                 "Split" => match arg {
-                    "horizontal" => return self.tabs.borrow_mut().split(Orientation::Horizontal),
-                    "vertical" => return self.tabs.borrow_mut().split(Orientation::Vertical),
+                    "horizontal" => {
+                        return self.tabs.borrow_mut().active_split(Orientation::Horizontal);
+                    }
+                    "vertical" => {
+                        return self.tabs.borrow_mut().active_split(Orientation::Vertical);
+                    }
                     _ => true,
                 },
 
