@@ -353,7 +353,7 @@ impl Gui {
         toast.set_visible(true);
 
         let g = self.clone();
-        let timeout = glib::timeout_add_local_once(Duration::from_secs(5), move || {
+        let timeout = glib::timeout_add_local_once(Duration::from_secs(10), move || {
             g.window.imp().toast.set_visible(false);
             g.warning_timeout.set(None);
         });

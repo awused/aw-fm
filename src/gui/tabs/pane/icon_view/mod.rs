@@ -56,6 +56,7 @@ impl IconView {
         // We want this to grow as necessary, but setting this too high (>32) absolutely tanks
         // performance. 16 is enough for a big 4K monitor and doesn't seem to ruin performance.
         grid.set_max_columns(16);
+        grid.set_min_columns(1);
         grid.set_enable_rubberband(true);
         grid.set_vexpand(true);
 
@@ -85,21 +86,15 @@ impl IconView {
         }
     }
 
-    pub(super) fn scroll_to(&self, pos: Option<ScrollPosition>) {
-        let index = match pos {
-            Some(pos) => pos.index,
-            None => 0,
-        };
-
-        if self.selection.n_items() <= index {
-            println!("nonono");
+    pub(super) fn scroll_to(&self, pos: u32) {
+        if self.selection.n_items() <= pos {
             return;
         }
 
         // This is very sensitive to when things are scrolled.
         let g = self.grid.clone();
         glib::idle_add_local_once(move || {
-            g.activate_action("list.scroll-to-item", Some(&index.to_variant()));
+            g.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
         });
     }
 

@@ -64,6 +64,13 @@
 #
 # multiple=true
 #
+## How to handle sorting actions.
+## This can be any integer (32 bit) and lower numbers appear earlier in the list.
+## The default priority is 0.
+## Priorities below 0 will appear above context menu items defined in aw-fm.toml.
+#
+# priority=0
+#
 #**aw-fm-settings-end**
 
 
@@ -109,5 +116,6 @@
 ## The path to the current directory.
 ## If searching is happening, not all files may be inside this.
 #
-# AWFM_CURRENT_DIR=
-#
+echo $AWFM_CURRENT_DIR
+# echo $AWFM_SELECTION
+

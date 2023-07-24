@@ -243,6 +243,7 @@ mod tests {
         lt("0a1f935e99.jpg", "01_2.jpg");
         lt("0a1f935e99.jpg", "bmidtl.jpg");
         lt("abcd", "abcd01");
+        lt("m2a.png", "ma.png");
     }
 
     #[test]
@@ -261,7 +262,7 @@ mod tests {
 
     #[test]
     fn sort_no_number_before_number() {
-        lt("m.png", "m2.png")
+        lt("m.png", "m2.png");
     }
 
     #[test]

@@ -120,32 +120,15 @@ impl DetailsView {
         set_sort(&self.column_view, sort);
     }
 
-    pub(super) fn scroll_to(&self, pos: Option<ScrollPosition>) {
-        let Some(pos) = pos else {
-            if self.selection.n_items() > 0 {
-                let w = self.column_view.first_child().and_then(|c| c.next_sibling());
-                if let Some(w) = w {
-                    glib::idle_add_local_once(move || {
-                        w.activate_action("list.scroll-to-item", Some(&0.to_variant()));
-                    });
-                };
-            }
-            return;
-        };
-
-
-        if self.selection.n_items() <= pos.index {
+    pub(super) fn scroll_to(&self, pos: u32) {
+        if self.selection.n_items() <= pos {
             return;
         }
-
-        // ColumnView scrolls based on the bottom
-        // TODO -- timeout and calculate an offset to make this the top item.
-        let target = pos.index;
 
         let w = self.column_view.first_child().and_then(|c| c.next_sibling());
         if let Some(w) = w {
             glib::idle_add_local_once(move || {
-                w.activate_action("list.scroll-to-item", Some(&target.to_variant()));
+                w.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
             });
         } else {
             error!("Couldn't find ListView to scroll in details view");

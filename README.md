@@ -7,20 +7,16 @@ It is a simple file manager designed to be fast and efficient at doing what I ac
 # Features
 
 * Fast
-    * The priorities are quality, then latency, then vram usage, then memory usage, then CPU usage.
-    * Animated gifs are moderately memory-inefficient.
+  * 
 * Correct gamma and alpha handling during scaling and presentation.
 * Wide support for many archive and image formats.
-* Proper natural sorting of chapters even with decimal chapter numbers.
-    * Works well with [manga-syncer](https://github.com/awused/manga-syncer), but generally matches expected sorting order.
-* Configurable shortcuts to run external scripts and a basic IPC interface.
-* Support for custom external upscalers. See [aw-upscale](https://github.com/awused/aw-upscale).
-* Good support for manga layouts including side-by-side pages and long strips.
+* Proper natural sorting.
+* Configurable shortcuts to run external scripts. <!--and a basic IPC interface.-->
 * Not much more, anything I don't personally use doesn't get implemented.
 
 # Installation
 
-`cargo install --git https://github.com/awused/aw-man --locked`
+`cargo install --git https://github.com/awused/aw-fm --locked`
 
 Install and run with aw-man. Optionally edit the defaults in [aw-fm.toml.sample](aw-fm.toml.sample)
 and copy it to `~/.config/aw-fm/aw-fm.toml` or `~/.aw-fm.toml`.
@@ -40,23 +36,44 @@ On fedora all required dependencies can be installed with `dnf install gtk4-deve
 
 # Shortcuts
 
+## Defaults
+
+The defaults should make some level of sense. Hit `?` for a popup containing all customizable keybinds.
+
 ## Customization
 
-Keyboard shortcuts and context menu entries can be customized in [aw-man.toml](aw-man.toml.sample). See the comments in the config file for how to specify them.
+Keyboard shortcuts and context menu entries can be customized in [aw-fm.toml](aw-fm.toml.sample). See the comments in the config file for how to specify them.
 
 Recognized commands:
 
-* Help
+* `Help`
   * List current keybinds.
-* Quit
+* `Quit`
 
-Navigation
-* Parent
-  * Navigates to the parent of the current directory
+### Navigation
+* `Navigate directory/file`
+  * Navigates the current tab to a directory or jumps to a file in that directory.
+  * Opens a new tab if one isn't active.
+* `JumpTo path`
+  * Jumps to the parent directory of `path` and scrolls so that `path` is visible.
+  * Opens a new tab if one isn't active.
+* `Parent`
+  * Navigates to the parent of the current directory.
 
-Settings
-* Mode icons|columns
-  * Changes the mode of the current directory
+
+### Tabs
+* `NewTab [directory/file]` and `NewBackgroundTab [directory/file]`
+  * Opens a new tab in the foreground or background.
+  * If directory or file is set, it will behave like `Navigate`.
+  * By default it will clone the current tab or the user's home directory.
+* `CloseTab`, `ClosePane`, `CloseActive`
+  * Close the active tab, pane, or both, respectively.
+* `Split horizontal|vertical`
+  * Splits the current tab in two
+
+### Settings
+* `Mode icons|columns`
+  * Changes the mode of the current directory.
 
 TODO ---------------------------------
 
@@ -107,22 +124,11 @@ The executables from `Execute`, `Script`, and custom actions will be called with
 Environment Variable | Explanation
 -------------------- | ----------
 AWFM_CURRENT_DIR | The directory of the current selected tab. May be empty.
-AWFM_SELECTION | A newline-separated set of selected files.
-AWMAN_ARCHIVE | The path to the current archive or directory that is open.
-AWMAN_ARCHIVE_TYPE | The type of the archive, one of `archive`, `directory`, `fileset`, or `unknown`.
-AWMAN_BACKGROUND | The current background colour in `rgb(int, int, int)` or `rgba(int, int, int, float)` form.
-AWMAN_CURRENT_FILE | The path to the extracted file or, in the case of directories, the original file. It should not be modified or deleted.
-AWMAN_DISPLAY_MODE | The current display mode, either `single` or `verticalstrip`.
-AWMAN_FIT_MODE | The current fit mode, one of `container`, `height`, `width`, or `verticalstrip`.
-AWMAN_FULLSCREEN | Wether or not the window is currently fullscreen.
-AWMAN_MANGA_MODE | Whether manga mode is enabled or not.
-AWMAN_PAGE_NUMBER | The page number of the currently open file.
-AWMAN_PID | The PID of the aw-man process.
-AWMAN_RELATIVE_FILE_PATH | The path of the current file relative to the root of the archive or directory.
-AWMAN_SOCKET | The socket used for IPC, if enabled.
-AWMAN_UI_VISIBLE | Whether the UI (bottom bar) is currently visible.
-AWMAN_UPSCALING_ENABLED | Whether upscaling is enabled or not.
-AWMAN_WINDOW | The window ID for the primary window. Currently only on X11.
+AWFM_SELECTION | A newline-separated set of selected files. May be empty.
+<!-- AWFM_PID | The PID of the aw-fm process. -->
+<!-- AWFM_FULLSCREEN | Wether or not the window is currently fullscreen. -->
+<!-- AWFM_SOCKET | The socket used for IPC, if enabled. -->
+<!-- AWFM_WINDOW | The window ID for the primary window. Currently only on X11. -->
 
 # Building on Windows
 

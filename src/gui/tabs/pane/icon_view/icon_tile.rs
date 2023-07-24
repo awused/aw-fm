@@ -4,6 +4,7 @@ use gtk::prelude::{Cast, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{AccessibleExt, EventControllerExt, GestureExt, WidgetExt};
 use gtk::{glib, EventController, GestureClick};
+use log::{max_level, LevelFilter};
 
 use crate::com::{EntryObject, SignalHolder};
 
@@ -69,7 +70,9 @@ impl IconTile {
         let id = eo.connect_local("update", false, move |entry| {
             let obj: EntryObject = entry[0].get().unwrap();
             self_ref.imp().update_contents(&obj);
-            trace!("Update for visible entry {:?} in icon view", &*obj.get().name);
+            if self_ref.is_mapped() {
+                trace!("Update for visible entry {:?} in icon view", &*obj.get().name);
+            }
             None
         });
 

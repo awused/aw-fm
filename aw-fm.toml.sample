@@ -41,21 +41,34 @@ shortcuts = [
   {key = "X", modifiers = "Control", action = "Cut"},
   {key = "V", modifiers = "Control", action = "Paste"},
 
-  # {key = "H", modifiers = "Control", action = "Navigate /home/" },
-  # {key = "H", modifiers = "Alt", action = "Script /path/to/rofi-jump-home.sh"},
+  # {key = "P", modifiers = "Control", action = "Navigate /home/" },
+  # {key = "P", modifiers = "Alt", action = "Script /path/to/rofi-jump-home.sh"},
 
-  {key = "F", modifiers = "Control", action = "Search"},
+  {key = "T", modifiers = "Control", action = "NewTab"},
+  {key = "T", modifiers = "Alt", action = "NewBackgroundTab"},
 
-  {key = "R", modifiers = "Control", action = "Rename"},
+  {key = "W", modifiers = "Control", action = "CloseTab"},
+  {key = "W", modifiers = "Control, Shift", action = "ClosePane"},
+  {key = "W", modifiers = "Control, Alt", action = "CloseActive"},
+
+  {key = "V", modifiers = "Alt", action = "Split vertical"},
+  {key = "H", modifiers = "Alt", action = "Split horizontal"},
+
+  # {key = "F", modifiers = "Control", action = "Search"},
+
+  # {key = "R", modifiers = "Control", action = "Rename"},
 
   {key = "Up", modifiers = "Alt", action = "Parent"},
   {key = "Down", modifiers = "Alt", action = "Child"},
+  {key = "Right", modifiers = "Alt", action = "Forward"},
+  {key = "Left", modifiers = "Alt", action = "Back"},
 
   {key = "1", modifiers = "Control", action = "Mode icons"},
   {key = "2", modifiers = "Control", action = "Mode columns"},
 
-  {key = "F5", action = "Refresh"},
-  {key = "F5", modifiers="Control", action = "Refresh all"},
+  # {key = "F5", action = "Refresh"},
+  # NOT IMPLEMENTED -- Refresh is all right now
+  # {key = "F5", modifiers="Control", action = "Refresh all"},
 ]
 
 # Context Menu

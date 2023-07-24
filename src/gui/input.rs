@@ -1,6 +1,7 @@
 use std::cell::Ref;
 use std::collections::hash_map;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
+use std::path::Path;
 use std::rc::Rc;
 use std::str::FromStr;
 
@@ -10,6 +11,7 @@ use gtk::glib::BoxedAnyObject;
 use gtk::prelude::{Cast, CastNone, StaticType};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt};
+use gtk::Orientation;
 
 use super::Gui;
 use crate::closing;
@@ -203,11 +205,6 @@ impl Gui {
             gtk::Inhibit(false)
         });
 
-        // let g = self.clone();
-        // dialog.connect_destroy(move |_| {
-        //     // Nested hacks to avoid dropping two scroll events in a row.
-        //     g.drop_next_scroll.set(false);
-        // });
 
         dialog.set_visible(true);
 
@@ -274,6 +271,19 @@ impl Gui {
                     Ok(m) => return self.tabs.borrow_mut().active_display_mode(m),
                     Err(e) => true,
                 },
+                "Navigate" => return self.tabs.borrow_mut().active_navigate(Path::new(arg)),
+                "JumpTo" => return self.tabs.borrow_mut().active_jump(Path::new(arg)),
+                "NewTab" => return self.tabs.borrow_mut().open_tab(Path::new(arg), true),
+                "NewBackgroundTab" => {
+                    return self.tabs.borrow_mut().open_tab(Path::new(arg), false);
+                }
+
+                "Split" => match arg {
+                    "horizontal" => return self.tabs.borrow_mut().split(Orientation::Horizontal),
+                    "vertical" => return self.tabs.borrow_mut().split(Orientation::Vertical),
+                    _ => true,
+                },
+
                 "Execute" => {
                     return self
                         .send_manager(ManagerAction::Execute(arg.to_string(), self.get_env()));
@@ -300,6 +310,15 @@ impl Gui {
                 return self.window.close();
             }
             "Help" => return self.help_dialog(),
+            "NewTab" => return self.tabs.borrow_mut().new_tab(true),
+            "NewBackgroundTab" => return self.tabs.borrow_mut().new_tab(false),
+
+            "CloseTab" => return self.tabs.borrow_mut().active_close_tab(),
+            "ClosePane" => return self.tabs.borrow_mut().active_close_pane(),
+            "CloseActive" => return self.tabs.borrow_mut().active_close_both(),
+
+            #[cfg(feature = "debug-run")]
+            "Run" => return self.run_dialog(),
 
             "Parent" => return self.tabs.borrow_mut().active_parent(),
             //"Child" => return self.tabs.borrow_mut().active_child(),

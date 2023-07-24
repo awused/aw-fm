@@ -1,6 +1,8 @@
 use std::fmt::Write;
+use std::path::{Path, PathBuf};
 
 use gtk::gio::ListStore;
+use gtk::glib::GString;
 use gtk::prelude::{Cast, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{EditableExt, EntryExt, GestureSingleExt, SelectionModelExt, WidgetExt};
@@ -18,14 +20,13 @@ glib::wrapper! {
 }
 
 impl TabElement {
-    pub(super) fn new(tab: TabId, title: &str) -> Self {
+    pub(super) fn new(tab: TabId, path: &Path) -> Self {
         let s: Self = glib::Object::new();
 
         let imp = s.imp();
 
         imp.tab.set(tab).unwrap();
-        imp.title.set_text(title);
-        imp.title.set_tooltip_text(Some(title));
+        s.flat_title(path);
 
         s
     }
@@ -34,21 +35,35 @@ impl TabElement {
         let imp = self.imp();
         let other_imp = other.imp();
 
-        let text = other_imp.title.text();
-        imp.title.set_text(&text);
-        imp.title.set_tooltip_text(Some(&text));
+        imp.title.set_text(&other_imp.title.text());
+        let tooltip = other_imp.title.tooltip_text();
+        imp.title.set_tooltip_text(tooltip.as_ref().map(GString::as_str));
 
         imp.spinner.set_spinning(other_imp.spinner.is_spinning());
         imp.spinner.set_visible(other_imp.spinner.is_visible());
     }
 
-    pub fn set_title(&self, title: &str) {
+    pub fn flat_title(&self, path: &Path) {
         let imp = self.imp();
-        imp.title.set_text(title);
-        imp.title.set_tooltip_text(Some(title));
+
+        // let mut last_two_dirs = PathBuf::new();
+        // match (path.parent().and_then(Path::file_name), path.file_name()) {
+        //     (Some(parent), Some(dir)) => {
+        //         let mut two_segments = PathBuf::from(parent);
+        //         two_segments.push(dir);
+        //         imp.title.set_text(&two_segments.to_string_lossy())
+        //     }
+        //     _ => {
+        //         imp.title.set_text(&path.to_string_lossy());
+        //     }
+        // }
+
+        imp.title
+            .set_text(&path.file_name().unwrap_or(path.as_os_str()).to_string_lossy());
+        imp.title.set_tooltip_text(Some(&path.to_string_lossy()));
     }
 
-    pub fn set_tab_visible(&self, visible: bool) {
+    pub fn set_pane_visible(&self, visible: bool) {
         if visible {
             self.add_css_class("visible-tab");
         } else {

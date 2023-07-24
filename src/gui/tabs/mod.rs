@@ -20,12 +20,14 @@ use gtk::{glib, Box, MultiSelection, Orientation, ScrolledWindow};
 use path_clean::PathClean;
 
 use self::contents::Contents;
+use self::list::TabsList;
 use self::pane::{Pane, PaneExt};
 use self::search::SearchPane;
 use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, Entry, EntryObject, EntryObjectSnapshot, FileTime,
     GuiAction, ManagerAction, SnapshotId, SnapshotKind, SortMode, SortSettings,
 };
+use crate::config::OPTIONS;
 use crate::gui::Update;
 use crate::natsort::ParsedString;
 
@@ -67,17 +69,13 @@ impl PartiallyAppliedUpdate {
 
 #[derive(Debug, Clone)]
 struct HistoryEntry {
-    // This is intentionally not the same Arc<Path> we use for active tabs.
-    // If there is a matching tab when we activate this history entry, steal that Arc and state.
-    // If there is none, we need a new, fresh Arc<> that definitely has no pending snapshots.
-    location: Rc<Path>,
-    // Use the Path as the target if we can find it, otherwise whatever the position was as a
-    // fallback.
-    scroll_pos: Option<(Arc<Path>, u32)>,
+    location: Arc<Path>,
+    state: SavedViewState,
 }
 
 #[derive(Debug, Clone)]
 struct ScrollPosition {
+    // Usually just cloned from an existing Entry.
     path: Arc<Path>,
     // Used as a backup if path has been removed.
     index: u32,
@@ -86,13 +84,110 @@ struct ScrollPosition {
 // Not kept up to date, maybe an enum?
 #[derive(Debug, Clone, Default)]
 struct SavedViewState {
-    // First visible element.
     // If the directory has updated we just don't care, it'll be wrong.
     pub scroll_pos: Option<ScrollPosition>,
     // Selected items?
     pub search: Option<String>,
 }
 
+impl SavedViewState {
+    fn for_jump(jump: Option<Arc<Path>>) -> Self {
+        Self {
+            scroll_pos: jump.map(|path| ScrollPosition { path, index: 0 }),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug)]
+struct NavTarget {
+    // A clean and absolute but not canonical path.
+    dir: Arc<Path>,
+    scroll: Option<Arc<Path>>,
+}
+
+impl NavTarget {
+    fn open_or_jump<P: AsRef<Path>>(path: P, list: &TabsList) -> Option<Self> {
+        let p = path.as_ref();
+        let target = Self::cleaned_abs(p, list)?;
+
+        Some(if !target.exists() {
+            gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
+            return None;
+        } else if target.is_dir() {
+            Self { dir: target.into(), scroll: None }
+        } else if let Some(parent) = target.parent() {
+            if !parent.is_dir() {
+                gui_run(|g| g.warning(&format!("Could not open {p:?}")));
+                return None;
+            }
+
+            let dir: Arc<Path> = parent.into();
+            let scroll = if target.exists() { Some(target.into()) } else { None };
+
+            Self { dir, scroll }
+        } else {
+            gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
+            return None;
+        })
+    }
+
+    fn jump<P: AsRef<Path>>(path: P, list: &TabsList) -> Option<Self> {
+        let p = path.as_ref();
+        let target = Self::cleaned_abs(p, list)?;
+
+        Some(if !target.exists() {
+            gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
+            return None;
+        } else if let Some(parent) = target.parent() {
+            if !parent.is_dir() {
+                gui_run(|g| g.warning(&format!("Could not open {p:?}")));
+                return None;
+            }
+
+            let dir: Arc<Path> = parent.into();
+            let scroll = if target.exists() { Some(target.into()) } else { None };
+
+            Self { dir, scroll }
+        } else {
+            gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
+            return None;
+        })
+    }
+
+    // Will cause an error later if this isn't a directory.
+    fn assume_dir<P: AsRef<Path>>(path: P) -> Self {
+        Self { dir: path.as_ref().into(), scroll: None }
+    }
+
+    fn initial(list: &TabsList) -> Option<Self> {
+        let mut path = OPTIONS
+            .file_name
+            .clone()
+            .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()));
+
+        Self::open_or_jump(path, list)
+    }
+
+    fn cleaned_abs(p: &Path, list: &TabsList) -> Option<PathBuf> {
+        Some(if p.has_root() {
+            p.clean()
+        } else if let Some(cur) = list.get_active_dir() {
+            warn!("Got relative path {p:?}, trying inside current active directory");
+            let mut current = cur.to_path_buf();
+            current.push(p);
+            current.clean()
+        } else if let Ok(mut cur) = current_dir() {
+            warn!("Got relative path {p:?}, trying inside current working directory");
+            cur.push(p);
+            cur.clean()
+        } else {
+            error!("Could not make {p:?} absolute");
+            gui_run(|g| g.warning("Could not open {p:?}"));
+            return None;
+        })
+    }
+}
 
 pub mod id {
     use std::cell::Cell;

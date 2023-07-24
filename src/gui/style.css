@@ -1,5 +1,6 @@
 .bottom-bar {
   padding: 0px 8px;
+  border-top: 1px solid black;
 }
 
 /* This is an unfortunate hack due to https://gitlab.gnome.org/GNOME/gtk/-/issues/4184 */
@@ -40,7 +41,7 @@ child:selected image {
 }
 
 .panes child:hover {
-  filter: invert(20%);
+  filter: invert(15%);
 }
 
 gridview child box {
@@ -55,25 +56,39 @@ gridview>* {
   margin-right: 3px;
 }
 
+gridview .name {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+
+
+.left-bar {
+  border-right: 1px solid black;
+}
+
 listview.tabs-list>* {
   padding: 0;
 }
 
-/* gridview .name { */
-/*   padding-bottom: 4px; */
-/* } */
-
 .tab {
-  padding: 5px;
+  padding-left: 3px;
+  padding-top: 8px;
+  padding-bottom: 10px;
 }
 
 .tab:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
+.visible-tab:not(.active-tab),
+.visible-tab:not(.active-tab):hover {
+  background: rgba(1, 120, 255, 0.3);
+}
+
 .active-tab,
 .active-tab:hover {
-  background: rgba(1, 120, 255, 0.5);
+  background: rgba(1, 120, 255, 0.6);
 }
 
 .pane-contents {

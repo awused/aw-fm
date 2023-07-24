@@ -44,9 +44,7 @@ impl StringCell {
         let self_ref = self.clone();
         let id = obj.connect_local("update", false, move |entry| {
             let obj: EntryObject = entry[0].get().unwrap();
-            if self_ref.imp().update_contents(&obj.get()) {
-                trace!("Update for visible entry {:?} in column view", &*obj.get().name);
-            }
+            self_ref.imp().update_contents(&obj.get());
             None
         });
 

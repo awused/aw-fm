@@ -3,7 +3,9 @@ use std::num::NonZeroU64;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
+use dirs::home_dir;
 use gtk::gdk::RGBA;
 use gtk::gio::ListStore;
 use gtk::prelude::{Cast, CastNone, ListModelExt, StaticType};
@@ -19,12 +21,17 @@ use crate::com::{DirSnapshot, DisplayMode, EntryObjectSnapshot, SortSettings, Up
 use crate::config::OPTIONS;
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
-use crate::gui::tabs_run;
+use crate::gui::tabs::{element, NavTarget};
+use crate::gui::{self, gui_run, tabs_run};
 
 
 // This is tightly coupled the Tab implementation, right now.
 #[derive(Debug)]
 pub struct TabsList {
+    // Assume the number of tabs is small enough and sane.
+    // We iterate over all tabs a lot, and we assume a linear scan is going to be fast enough.
+    // If that stops being the case it's annoying but not infeasible to use a map.
+    // TODO -- limit number of tabs to 255 or so?
     tabs: Vec<Tab>,
 
     // There is always one active tab or no visible tabs.
@@ -64,7 +71,7 @@ impl TabsList {
             let element = model.item(a).and_downcast::<TabElement>().unwrap();
 
             let id = *element.imp().tab.get().unwrap();
-            tabs_run(|ts| ts.switch_tab(id));
+            tabs_run(|ts| ts.switch_active_tab(id));
         });
 
         Self {
@@ -80,36 +87,38 @@ impl TabsList {
     pub fn setup(&mut self) {
         assert!(self.tabs.is_empty());
 
-        let mut path = OPTIONS
-            .file_name
-            .clone()
-            .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()))
-            .clean();
 
-        if path.is_relative() {
-            // prepending "/" is likely to be wrong, but eh.
-            let mut abs = current_dir().unwrap_or_else(|_| "/".into());
-            abs.push(path);
-            path = abs.clean();
-        }
+        let Some(target) = NavTarget::initial(self) else {
+            return;
+        };
 
-        // let mut p_path = &*path;
-        // while let Some(parent) = p_path.parent() {
-        //     let (tab, element) = Tab::new(next_id(), parent.to_path_buf(), &self.tabs);
+        // for _ in 0..20 {
+        //     let (tab, element) = Tab::new(next_id(), NavTarget::initial(self).unwrap(),
+        // &self.tabs);
+        //
         //     self.tab_elements.append(&element);
         //     self.tabs.push(tab);
-        //     p_path = parent;
         // }
-        // let (tab, element) = Tab::new(next_id(), path, &self.tabs);
-        let (tab, element) = Tab::new(next_id(), path, &[]);
+        // let (tab, element) = Tab::new(next_id(), target, &self.tabs);
+        let (tab, element) = Tab::new(next_id(), target, &[]);
 
         self.tabs.push(tab);
         self.tab_elements.append(&element);
         // let (left, tab, right) = self.split_around_mut(0);
-        // tab.load(&[], &right);
+        // tab.load(&[], right);
         self.tabs[0].load(&[], &[]);
-        self.tabs[0].new_pane(&self.pane_container);
+        self.tabs[0].attach_pane(|w| self.pane_container.append(w));
         self.set_active(self.tabs[0].id());
+    }
+
+    fn find_mut(&mut self, id: TabId) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|t| t.id() == id)
+    }
+
+    fn update_display_mode(&mut self, id: TabId, mode: DisplayMode) {
+        // Assume we can't update a tab that doesn't exist -- this should always be called
+        // synchronously
+        self.find_mut(id).unwrap().update_display_mode(mode);
     }
 
     pub fn update_sort(&mut self, id: TabId, settings: SortSettings) {
@@ -131,18 +140,29 @@ impl TabsList {
         self.tabs[index].set_active();
     }
 
-    fn find_mut(&mut self, id: TabId) -> Option<&mut Tab> {
-        self.tabs.iter_mut().find(|t| t.id() == id)
-    }
-
     fn position(&self, id: TabId) -> Option<usize> {
         self.tabs.iter().position(|t| t.id() == id)
     }
 
-    fn update_display_mode(&mut self, id: TabId, mode: DisplayMode) {
-        // Assume we can't update a tab that doesn't exist -- this should always be called
-        // synchronously
-        self.find_mut(id).unwrap().update_display_mode(mode);
+    fn element_position(&self, id: TabId) -> Option<u32> {
+        (&self.tab_elements)
+            .into_iter()
+            .position(|e| {
+                let t = e.unwrap().downcast::<TabElement>().unwrap();
+                t.imp().tab.get().unwrap() == &id
+            })
+            .map(|u| u as u32)
+    }
+
+    fn active_element(&self) -> Option<u32> {
+        let id = self.active?;
+
+        // Assert it exists.
+        Some(self.element_position(id).unwrap())
+    }
+
+    fn element(&self, i: u32) -> TabElement {
+        self.tab_elements.item(i).and_downcast().unwrap()
     }
 
     fn split_around_mut(&mut self, index: usize) -> (&mut [Tab], &mut Tab, &mut [Tab]) {
@@ -172,7 +192,18 @@ impl TabsList {
             {
                 i += j;
                 let (left, tab, right) = self.split_around_mut(i);
-                tab.handle_directory_deleted(left, right);
+                if !tab.handle_directory_deleted(left, right) {
+                    error!("Loading {path:?} and all parent directories failed.");
+                    gui_run(|g| {
+                        g.error(&format!(
+                            "Unexpected failure loading {path:?} and all parent directories"
+                        ))
+                    });
+                    let id = tab.id();
+                    self.close_tab(id);
+                    continue;
+                }
+                i += 1
             }
         }
 
@@ -199,18 +230,45 @@ impl TabsList {
         while let Some(j) = self.tabs.iter().skip(i).position(|t| t.matches_arc(&path)) {
             i += j;
             let (left, tab, right) = self.split_around_mut(i);
-            tab.handle_directory_deleted(left, right);
+            if !tab.handle_directory_deleted(left, right) {
+                error!("Loading {path:?} and all parent directories failed.");
+                gui_run(|g| {
+                    g.error(&format!(
+                        "Unexpected failure loading {path:?} and all parent directories"
+                    ))
+                });
+                let id = tab.id();
+                self.close_tab(id);
+                continue;
+            }
+            i += 1
         }
     }
 
-    pub fn navigate(&mut self, id: TabId, target: &Path) {
-        let index = self.position(id).unwrap();
+    pub fn navigate(&mut self, id: TabId, path: &Path) {
+        let Some(index) = self.position(id) else {
+            return;
+        };
+
+        let Some(target) = NavTarget::open_or_jump(path, self) else {
+            return;
+        };
+
         let (left, tab, right) = self.split_around_mut(index);
 
         tab.navigate(left, right, target)
     }
 
-    fn switch_tab(&mut self, id: TabId) {
+    pub fn get_active_dir(&self) -> Option<Arc<Path>> {
+        let Some(active) = self.active else {
+            return None;
+        };
+
+        let pos = self.position(active).unwrap();
+        Some(self.tabs[pos].dir())
+    }
+
+    fn switch_active_tab(&mut self, id: TabId) {
         if Some(id) == self.active {
             return;
         }
@@ -221,7 +279,6 @@ impl TabsList {
 
         if tab.visible() {
             debug!("Switching to visible tab {id:?}");
-            tab.focus();
             self.set_active(id);
             return;
         }
@@ -229,9 +286,8 @@ impl TabsList {
         tab.load(left, right);
 
         let Some(active) = self.active else {
-            // TODO: should this even be possible?
-            warn!("Opening new tab on switch");
-            self.tabs[index].new_pane(&self.pane_container);
+            info!("Opening new tab on switch");
+            self.tabs[index].attach_pane(|w| self.pane_container.append(w));
             self.set_active(id);
             return;
         };
@@ -251,74 +307,204 @@ impl TabsList {
         self.set_active(id);
     }
 
-    fn clone_tab(&mut self, index: usize) {
-        // let mut new_tab = Tab::cloned(next_id(), &self.tabs[index], ());
+    fn swap_panes(&mut self, visible: TabId, inactive: TabId) {
+        debug_assert!(self.tabs[self.position(visible).unwrap()].visible());
+        debug_assert!(!self.tabs[self.position(inactive).unwrap()].visible());
 
-        // self.tabs.insert(index + 1, new_tab);
+        if Some(visible) == self.active {
+            self.switch_active_tab(inactive);
+            return;
+        }
+
+        info!("Swapping pane from {visible:?} to {inactive:?}");
+        error!("TODO -- haven't tested this");
+        let old_index = self.position(visible).unwrap();
+        let new_index = self.position(inactive).unwrap();
+
+        if new_index < old_index {
+            let (left, right) = self.tabs.split_at_mut(old_index);
+            left[new_index].replace_pane(&mut right[0]);
+        } else {
+            let (left, right) = self.tabs.split_at_mut(new_index);
+            right[0].replace_pane(&mut left[old_index]);
+        }
     }
 
-    // For now, tabs always open right of the active tab
-    fn open_tab(&mut self, path: PathBuf) {
-        let (mut new_tab, element) = Tab::new(next_id(), path, &self.tabs);
+    fn clone_active(&mut self) -> Option<(TabId, usize)> {
+        let index = self.position(self.active?).unwrap();
+        let element_index = self.active_element().unwrap();
 
-        // TODO
-        // self.tabs.insert(self.position(active_tab).unwrap() + 1, new_tab);
+        let (new_tab, element) = Tab::cloned(next_id(), &self.tabs[index]);
+        let id = new_tab.id();
+
+        self.tabs.push(new_tab);
+        self.tab_elements.insert(element_index + 1, &element);
+
+        Some((id, self.tabs.len() - 1))
+    }
+
+    fn create_tab(&mut self, target: NavTarget, activate: bool) -> TabId {
+        let (mut new_tab, element) = Tab::new(next_id(), target, &self.tabs);
+
+        let id = new_tab.id();
+        self.tabs.push(new_tab);
+
+        if let Some(active_index) = self.active_element() {
+            self.tab_elements.insert(active_index + 1, &element);
+        } else {
+            self.tab_elements.append(&element);
+        }
+
+        if activate {
+            self.switch_active_tab(id)
+        }
+        id
+    }
+
+    // For now, tabs always open after the active tab
+    // !activate -> background tab
+    pub fn open_tab(&mut self, path: &Path, activate: bool) {
+        let Some(target) = NavTarget::open_or_jump(path, self) else {
+            return;
+        };
+
+        self.create_tab(target, activate);
+    }
+
+    // Clones the active tab or opens a new tab to the user's home directory.
+    pub fn new_tab(&mut self, activate: bool) {
+        if let Some((id, _)) = self.clone_active() {
+            if activate {
+                self.switch_active_tab(id)
+            }
+            return;
+        }
+
+        let Some(home) = home_dir() else {
+            return;
+        };
+
+        let Some(target) = NavTarget::open_or_jump(home, self) else {
+            return;
+        };
+
+        self.create_tab(target, activate);
+    }
+
+    pub fn split(&mut self, orient: Orientation) {
+        let Some(active) = self.active else {
+            warn!("Called split {orient} with no panes to split, opening new tab instead");
+            gui_run(|g| g.warning("Split called with no panes to split"));
+            self.new_tab(true);
+            return;
+        };
+
+        let active_pos = self.position(active).unwrap();
+
+        let Some(paned) = self.tabs[active_pos].split(orient) else {
+            warn!("Called split {orient} but pane was too small to split");
+            gui_run(|g| g.warning("Pane is too small to split"));
+            return;
+        };
+
+        let (new_id, new_index) = self.clone_active().unwrap();
+        self.tabs[new_index].attach_pane(|w| paned.set_end_child(Some(w)));
+
+        self.set_active(new_id);
     }
 
     fn close_tab(&mut self, id: TabId) {
         let index = self.position(id).unwrap();
-        // TODO -- If all tabs are active
+        let eindex = self.element_position(id).unwrap();
+
 
         let tab = &self.tabs[index];
         if tab.visible() {
             // If there's another tab that isn't visible, use it.
             // We want to prioritize the first tab to the left/above in the visible list.
             // If there is no tab at all, we'll also be closing the pane.
-            // let next_tab =
+            //
+            // The number of visible tabs is bounded to a small number by practicality.
+            let visible_tabs: Vec<_> =
+                self.tabs.iter().filter(|t| t.visible()).map(Tab::id).collect();
+            let prioritized = (0..eindex).rev().chain(eindex + 1..self.tab_elements.n_items());
+
+            for e in prioritized {
+                let other_id = *self.element(e).imp().tab.get().unwrap();
+                if !visible_tabs.contains(&other_id) {
+                    self.swap_panes(id, other_id);
+                    break;
+                }
+            }
         }
 
-        // let active = self.tabs[index].is_active()
+        // swap_panes will have changed self.active if there was another inactive tab to swap in.
+        if Some(id) == self.active {
+            if let Some(next) = self.tabs[index].next_of_kin_by_pane() {
+                self.set_active(next);
+            } else {
+                self.active = None;
+            }
+        }
 
-        // Order doesn't matter.
-        let removed = self.tabs.swap_remove(index);
-
-        todo!("remove element")
+        self.tabs.swap_remove(index);
+        self.tab_elements.remove(eindex);
     }
 
     // Helper function for common cases.
-    fn run_tab<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(&mut self, id: TabId, f: F) {
+    fn must_run_tab<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(&mut self, id: TabId, f: F) -> T {
         let Some(index) = self.position(id) else {
-            error!("Couldn't find tab for {id:?}");
-            return;
+            unreachable!("Couldn't find tab for {id:?}");
         };
 
         let (left, tab, right) = self.split_around_mut(index);
-        f(tab, left, right);
+        f(tab, left, right)
     }
 
-    // Don't want to expose the Tab methods to Gui
-    pub fn active_forward(&mut self) {
+    // Tries to run f() against the active tab, if one exists
+    fn try_active<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(&mut self, f: F) -> Option<T> {
+        self.active.map(|active| self.must_run_tab(active, f))
+    }
+
+    // Don't want to expose the Tab methods to Gui, so annoying wrapper functions.
+    pub fn active_navigate(&mut self, path: &Path) {
         if let Some(active) = self.active {
-            self.run_tab(active, Tab::forward)
+            self.navigate(active, path);
+            return;
         }
+
+        self.open_tab(path, true);
+    }
+
+    pub fn active_jump(&mut self, path: &Path) {
+        let Some(jump) = NavTarget::jump(path, self) else {
+            return;
+        };
+
+        if let Some(active) = self.active {
+            self.must_run_tab(active, |t, l, r| {
+                t.navigate(l, r, jump);
+            });
+            return;
+        }
+
+        self.create_tab(jump, true);
+    }
+
+    pub fn active_forward(&mut self) {
+        self.try_active(Tab::forward);
     }
 
     pub fn active_back(&mut self) {
-        if let Some(active) = self.active {
-            self.run_tab(active, Tab::backward)
-        }
+        self.try_active(Tab::backward);
     }
 
     pub fn active_parent(&mut self) {
-        if let Some(active) = self.active {
-            self.run_tab(active, Tab::parent)
-        }
+        self.try_active(Tab::parent);
     }
 
     pub fn active_child(&mut self) {
-        if let Some(active) = self.active {
-            self.run_tab(active, Tab::child)
-        }
+        self.try_active(Tab::child);
     }
 
     pub fn active_close_tab(&mut self) {
@@ -330,36 +516,39 @@ impl TabsList {
         self.close_tab(active);
     }
 
+    // This is explicitly closing the active pane
+    // Doesn't open a new pane to replace it, but does find the next sibling to promote to being
+    // active.
     pub fn active_close_pane(&mut self) {
         let Some(active) = self.active else {
             warn!("ClosePane called with no open panes");
             return;
         };
 
-        // TODO -- maybe allow for empty views.
-        // if self.tabs.len() == 1 {
-        //     warn!("ClosePane called with only one tab");
-        //     return;
-        // }
-
-        // TODO -- find parent ex-sibling pane, if any,
-        // if let Some(sibling) = self.find_sibling_tab(active) {
-        //     self.active = Some(sibling);
-        //     // Move focus to that pane.
-        //     self.move_focus_into(sibling);
-        // } else {
-        //     self.active = None;
-        // }
-
         let index = self.position(active).unwrap();
+
+        if let Some(kin) = self.tabs[index].next_of_kin_by_pane() {
+            self.set_active(kin);
+        } else {
+            self.active = None;
+        }
+
         self.tabs[index].close_pane();
     }
 
     pub fn active_close_both(&mut self) {
-        let Some(active) = self.active else {
-            warn!("ClosePaneAndTab called with no open panes");
+        let Some(old_active) = self.active else {
+            warn!("CloseActive called with no open panes");
             return;
         };
+
+        self.active_close_pane();
+
+        let index = self.position(old_active).unwrap();
+        let eindex = self.element_position(old_active).unwrap();
+
+        self.tabs.swap_remove(index);
+        self.tab_elements.remove(eindex);
     }
 
     pub fn active_display_mode(&mut self, mode: DisplayMode) {

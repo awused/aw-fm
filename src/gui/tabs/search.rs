@@ -2,7 +2,10 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use gtk::{Orientation, Widget};
+
 use super::contents::Contents;
+use super::id::TabId;
 use super::pane::{Pane, PaneExt};
 use super::SavedViewState;
 use crate::com::DirSettings;
@@ -21,10 +24,10 @@ enum State {
 #[derive(Debug)]
 pub(super) struct SearchPane {
     state: State,
-    pane: Pane,
+    pane: Option<Pane>,
     // This contains everything in tab.contents plus items from subdirectories.
     contents: Contents,
-    // This is used to store a view state until search is done.
+    // This is used to store a view state until search is done loading.
     pending_view_state: Option<SavedViewState>,
 }
 
@@ -36,15 +39,17 @@ impl SearchPane {
 
 impl PaneExt for SearchPane {
     fn set_active(&mut self, active: bool) {
-        todo!()
-    }
-
-    fn focus(&self) {
-        todo!()
+        assert!(
+            !active || self.pane.is_some(),
+            "Called set_active on a pane that wasn't visible"
+        );
+        if let Some(pane) = &mut self.pane {
+            pane.set_active(active);
+        }
     }
 
     fn visible(&self) -> bool {
-        todo!()
+        self.pane.as_ref().map_or(false, PaneExt::visible)
     }
 
     fn update_settings(&mut self, settings: DirSettings, _ignored: &Contents) {
@@ -70,6 +75,14 @@ impl PaneExt for SearchPane {
     }
 
     fn activate(&self) {
+        todo!()
+    }
+
+    fn split(&self, orient: Orientation) -> Option<gtk::Paned> {
+        self.pane.as_ref().unwrap().split(orient)
+    }
+
+    fn next_of_kin(&self) -> Option<TabId> {
         todo!()
     }
 }
