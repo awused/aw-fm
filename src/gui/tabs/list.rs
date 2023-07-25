@@ -290,6 +290,9 @@ impl TabsList {
             right[0].replace_pane(&mut left[active_index]);
         }
 
+        let (left, tab, right) = self.split_around_mut(index);
+        tab.load_after_replacement(left, right);
+
         self.set_active(id);
     }
 
@@ -314,6 +317,9 @@ impl TabsList {
             let (left, right) = self.tabs.split_at_mut(new_index);
             right[0].replace_pane(&mut left[old_index]);
         }
+
+        let (left, tab, right) = self.split_around_mut(new_index);
+        tab.load_after_replacement(left, right);
     }
 
     fn clone_active(&mut self) -> Option<(TabId, usize)> {

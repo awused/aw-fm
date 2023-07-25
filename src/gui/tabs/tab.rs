@@ -726,7 +726,7 @@ impl Tab {
 
     // Doesn't start loading
     pub fn replace_pane(&mut self, other: &mut Self) {
-        trace!("Replacing pane for {:?} with pane from {:?}", other.id(), self.id());
+        info!("Replacing pane for {:?} with pane from {:?}", other.id(), self.id());
         if self.visible() {
             debug!("Pane already displayed");
             return;
@@ -753,6 +753,10 @@ impl Tab {
         if self.dir.state().loaded() {
             self.apply_pane_state();
         }
+    }
+
+    pub fn load_after_replacement(&mut self, left: &[Self], right: &[Self]) {
+        self.load(left, right);
     }
 
     pub fn close_pane(&mut self) {
