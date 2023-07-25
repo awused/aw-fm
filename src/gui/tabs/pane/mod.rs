@@ -200,7 +200,8 @@ impl Pane {
         let weak = self.element.downgrade();
         key.connect_key_pressed(move |c, k, _b, m| {
             if !m.is_empty() {
-                return ControlFlow::Continue;
+                // https://github.com/gtk-rs/gtk4-rs/issues/1435
+                return ControlFlow::Break;
             }
 
             if Key::Escape == k {
@@ -208,7 +209,8 @@ impl Pane {
                 w.set_text(&weak.upgrade().unwrap().imp().original_text.borrow());
             }
 
-            ControlFlow::Continue
+            // https://github.com/gtk-rs/gtk4-rs/issues/1435
+            ControlFlow::Break
         });
         imp.text_entry.add_controller(key);
 

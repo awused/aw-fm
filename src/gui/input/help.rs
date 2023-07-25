@@ -111,7 +111,8 @@ impl Gui {
         dialog.connect_close_request(move |d| {
             g.open_dialogs.borrow_mut().help.take();
             d.destroy();
-            ControlFlow::Continue
+            // https://github.com/gtk-rs/gtk4-rs/issues/1435
+            ControlFlow::Break
         });
 
 

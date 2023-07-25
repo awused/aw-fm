@@ -44,7 +44,9 @@ impl Gui {
             if let Some(s) = g.shortcut_from_key(a, c) {
                 g.run_command(s);
             }
-            ControlFlow::Continue
+            // Inhibit(false) -> ControlFlow::Break
+            // https://github.com/gtk-rs/gtk4-rs/issues/1435
+            ControlFlow::Break
         });
 
         self.window.add_controller(key);
@@ -63,7 +65,8 @@ impl Gui {
                 }
                 _ => (),
             }
-            ControlFlow::Continue
+            // https://github.com/gtk-rs/gtk4-rs/issues/1435
+            ControlFlow::Break
         });
 
         w.add_controller(key);
