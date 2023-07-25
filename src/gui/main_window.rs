@@ -1,9 +1,5 @@
 use gtk::glib::Object;
-use gtk::prelude::ObjectExt;
-use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{glib, Application};
-
-use crate::com::{EntryObject, SignalHolder};
 
 
 glib::wrapper! {
@@ -37,15 +33,9 @@ impl MainWindow {
 }
 
 mod imp {
-    use std::cell::{Cell, RefCell};
-
-    use gtk::gdk::Texture;
-    use gtk::glib::SignalHandlerId;
-    use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
-    use crate::com::{EntryObject, SignalHolder, Thumbnail};
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "main_window.ui")]
@@ -58,8 +48,6 @@ mod imp {
 
         #[template_child]
         pub toast: TemplateChild<gtk::Label>,
-        // #[template_child]
-        // pub error_message: TemplateChild<gtk::Label>,
     }
 
     #[glib::object_subclass]

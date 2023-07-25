@@ -1,5 +1,5 @@
 #![cfg_attr(not(feature = "windows-console"), windows_subsystem = "windows")]
-// TEMPORARY
+// TEMPORARY until search is ready.
 #![allow(dead_code)]
 #![allow(unused)]
 
@@ -7,27 +7,15 @@
 extern crate log;
 
 // The tikv fork may not be easily buildable for Windows
-// #[cfg(not(target_env = "msvc"))]
-// #[global_allocator]
-// static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use std::any::Any;
-use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::Path;
-use std::pin::Pin;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
 
-use gtk::gio::{
-    Cancellable, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_STANDARD_ICON,
-    FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON,
-};
-use gtk::glib::GStr;
-use gtk::prelude::{FileExt, IconExt};
-use gtk::{gio, glib, IconLookupFlags, IconTheme, Settings};
-use once_cell::sync::Lazy;
-use rayon::prelude::{ParallelBridge, ParallelIterator};
+use gtk::{glib, Settings};
 
 mod elapsedlogger;
 

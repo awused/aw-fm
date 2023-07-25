@@ -1,24 +1,21 @@
 mod icon_tile;
 
-use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
-use gtk::subclass::prelude::*;
-use gtk::{gio, glib, GridView, ListView, MultiSelection, ScrolledWindow};
+use gtk::{glib, GridView, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
 use super::get_last_visible_child;
-use crate::com::{DisplayMode, EntryObject, SignalHolder};
+use crate::com::{EntryObject, SignalHolder};
+use crate::gui::applications;
 use crate::gui::tabs::id::TabId;
-use crate::gui::tabs::ScrollPosition;
-use crate::gui::{applications, GUI};
 
 #[derive(Debug)]
 pub(super) struct IconView {
     grid: GridView,
     selection: MultiSelection,
 
-    workaround_rubberband: SignalHolder<MultiSelection>,
+    _workaround_rubber: SignalHolder<MultiSelection>,
 }
 
 impl IconView {
@@ -64,7 +61,7 @@ impl IconView {
         scroller.set_child(Some(&grid));
 
 
-        grid.connect_activate(move |gv, a| {
+        grid.connect_activate(move |gv, _a| {
             let display = gv.display();
             let model = gv.model().and_downcast::<MultiSelection>().unwrap();
 
@@ -82,7 +79,7 @@ impl IconView {
         Self {
             grid,
             selection: selection.clone(),
-            workaround_rubberband,
+            _workaround_rubber: workaround_rubberband,
         }
     }
 
@@ -94,7 +91,7 @@ impl IconView {
         // This is very sensitive to when things are scrolled.
         let g = self.grid.clone();
         glib::idle_add_local_once(move || {
-            g.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
+            drop(g.activate_action("list.scroll-to-item", Some(&pos.to_variant())));
         });
     }
 

@@ -1,35 +1,14 @@
-use std::cell::{Cell, OnceCell, Ref, RefCell};
-use std::cmp::Ordering;
-use std::collections::VecDeque;
 use std::env::current_dir;
-use std::ffi::{OsStr, OsString};
-use std::fmt;
-use std::num::NonZeroU64;
-use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use gtk::gio::ListStore;
-use gtk::glib::Object;
-use gtk::prelude::{Cast, ListModelExt, ListModelExtManual, StaticType};
-use gtk::subclass::prelude::{ObjectSubclassExt, ObjectSubclassIsExt};
-use gtk::traits::{AdjustmentExt, BoxExt, SelectionModelExt, WidgetExt};
-use gtk::{glib, Box, MultiSelection, Orientation, ScrolledWindow};
 use path_clean::PathClean;
 
 use self::contents::Contents;
 use self::list::TabsList;
-use self::pane::{Pane, PaneExt};
-use self::search::SearchPane;
-use crate::com::{
-    DirSettings, DirSnapshot, DisplayMode, Entry, EntryObject, EntryObjectSnapshot, FileTime,
-    GuiAction, ManagerAction, SnapshotId, SnapshotKind, SortMode, SortSettings,
-};
+use crate::com::{Entry, EntryObject};
 use crate::config::OPTIONS;
-use crate::gui::Update;
-use crate::natsort::ParsedString;
+
 
 mod contents;
 mod element;
@@ -38,9 +17,8 @@ mod pane;
 mod search;
 mod tab;
 
-use id::TabUid;
 
-use super::{gui_run, tabs_run};
+use super::gui_run;
 
 
 #[derive(Debug)]
@@ -161,7 +139,7 @@ impl NavTarget {
     }
 
     fn initial(list: &TabsList) -> Option<Self> {
-        let mut path = OPTIONS
+        let path = OPTIONS
             .file_name
             .clone()
             .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()));

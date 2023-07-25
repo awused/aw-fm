@@ -1,3 +1,6 @@
+// Unlikely to ever work in aw-fm unless I go for a full custom thumbnailer implementation. Will
+// probably remove.
+
 use std::cell::Cell;
 use std::cmp::max;
 use std::rc::Rc;

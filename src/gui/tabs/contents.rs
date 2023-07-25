@@ -2,13 +2,13 @@ use std::cmp::Ordering;
 use std::time::Instant;
 
 use gtk::gio::ListStore;
-use gtk::glib::Object;
+use gtk::glib::{self, Object};
 use gtk::prelude::{Cast, ListModelExt, ListModelExtManual, StaticType};
 use gtk::traits::SelectionModelExt;
 use gtk::MultiSelection;
 
 use super::PartiallyAppliedUpdate;
-use crate::com::{DirSettings, Entry, EntryObject, EntryObjectSnapshot, SortSettings};
+use crate::com::{Entry, EntryObject, EntryObjectSnapshot, SortSettings};
 
 pub struct Contents {
     list: ListStore,
@@ -135,7 +135,7 @@ impl Contents {
         }
     }
 
-    pub fn insert(&mut self, new: &EntryObject, sort: SortSettings) {
+    pub fn insert(&mut self, new: &EntryObject) {
         assert!(!self.stale);
         debug_assert!(self.position_by_sorted_entry(&new.get()).is_none());
         self.list.insert_sorted(new, self.sort.comparator());
@@ -177,7 +177,25 @@ impl Contents {
 
     pub fn clear(&mut self, sort: SortSettings) {
         self.stale = false;
-        self.list.remove_all();
+        let new_list = ListStore::new(EntryObject::static_type());
+        self.selection.set_model(Some(&new_list));
+        let old_list = std::mem::replace(&mut self.list, new_list);
+
+        // Dropping in one go can be glacially slow due to callbacks and notifications.
+        // Especially if we're cleaning up the final references to a lot of items with thumbnails.
+        // 130ms for ~40k items
+        // 160ms for 50k
+        // More with thumbnails
+        let start = Instant::now();
+        glib::idle_add_local(move || {
+            if old_list.n_items() <= 1000 {
+                trace!("Finished dropping items in {:?}", start.elapsed());
+                return glib::Continue(false);
+            }
+            old_list.splice(0, 1000, &[] as &[EntryObject]);
+            glib::Continue(true)
+        });
+
         self.sort = sort;
     }
 

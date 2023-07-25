@@ -1,23 +1,23 @@
-use std::cell::Ref;
 use std::collections::hash_map;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::path::Path;
 use std::rc::Rc;
 use std::str::FromStr;
 
 use ahash::AHashMap;
+use dirs::home_dir;
 use gtk::gdk::{Key, ModifierType};
-use gtk::glib::BoxedAnyObject;
-use gtk::prelude::{Cast, CastNone, StaticType};
+use gtk::prelude::Cast;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt};
+use gtk::traits::{EventControllerExt, GtkWindowExt, WidgetExt};
 use gtk::Orientation;
-use serde_json::Value;
 
 use super::Gui;
 use crate::closing;
-use crate::com::{DisplayMode, ManagerAction, Toggle};
-use crate::config::{Shortcut, CONFIG};
+use crate::com::{DisplayMode, ManagerAction};
+use crate::config::CONFIG;
+
+mod help;
 
 #[derive(Debug, Default)]
 pub(super) struct OpenDialogs {
@@ -34,6 +34,8 @@ impl Gui {
 
         self.window.imp().toast.add_controller(dismiss_toast);
 
+        // Attach this to the Window so it is always available.
+        // Keyboard focus should rarely ever leave a tab.
         let key = gtk::EventControllerKey::new();
 
         let g = self.clone();
@@ -45,42 +47,6 @@ impl Gui {
         });
 
         self.window.add_controller(key);
-
-        let click = gtk::GestureClick::new();
-
-        let g = self.clone();
-        click.connect_released(move |c, n, _x, _y| {
-            if n == 2 {
-                if g.window.is_maximized() {
-                    g.window.unmaximize()
-                } else {
-                    g.window.maximize()
-                }
-            }
-        });
-
-        self.window.add_controller(click);
-
-        //     let drop_target = gtk::DropTarget::new(FileList::static_type(), DragAction::COPY);
-        //
-        //     let g = self.clone();
-        //     drop_target.connect_drop(move |_dt, v, _x, _y| {
-        //         let files = match v.get::<FileList>() {
-        //             Ok(files) => files.files(),
-        //             Err(e) => {
-        //                 error!("Error reading files from drop event: {e}");
-        //                 return true;
-        //             }
-        //         };
-        //         let paths: Vec<_> = files.into_iter().filter_map(|f| f.path()).collect();
-        //
-        //         g.send_manager((ManagerAction::Open(paths), ScrollMotionTarget::Start.into(),
-        // None));
-        //
-        //         true
-        //     });
-        //
-        //     self.window.add_controller(drop_target);
     }
 
     fn close_on_quit<T: WidgetExt>(self: &Rc<Self>, w: &T) {
@@ -100,116 +66,6 @@ impl Gui {
         });
 
         w.add_controller(key);
-    }
-
-    fn help_dialog(self: &Rc<Self>) {
-        if let Some(d) = &self.open_dialogs.borrow().help {
-            info!("Help dialog already open");
-            d.present();
-            return;
-        }
-
-        let dialog = gtk::Window::builder().title("Help").transient_for(&self.window).build();
-
-        self.close_on_quit(&dialog);
-
-        // default size might want to scale based on dpi
-        dialog.set_default_width(800);
-        dialog.set_default_height(600);
-
-        // It's enough, for now, to just set this at dialog spawn time.
-        #[cfg(windows)]
-        dialog.add_css_class(self.win32.dpi_class());
-
-        let store = gtk::gio::ListStore::new(BoxedAnyObject::static_type());
-
-        for s in &CONFIG.shortcuts {
-            store.append(&BoxedAnyObject::new(s));
-        }
-
-        let modifier_factory = gtk::SignalListItemFactory::new();
-        modifier_factory.connect_setup(move |_fact, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let label = gtk::Label::new(None);
-            label.set_halign(gtk::Align::Start);
-            item.set_child(Some(&label))
-        });
-        modifier_factory.connect_bind(move |_fact, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let child = item.child().and_downcast::<gtk::Label>().unwrap();
-            let entry = item.item().and_downcast::<BoxedAnyObject>().unwrap();
-            let s: Ref<&Shortcut> = entry.borrow();
-            child.set_text(s.modifiers.as_deref().unwrap_or(""));
-        });
-
-        let key_factory = gtk::SignalListItemFactory::new();
-        key_factory.connect_setup(move |_fact, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let label = gtk::Label::new(None);
-            label.set_halign(gtk::Align::Start);
-            item.set_child(Some(&label))
-        });
-        key_factory.connect_bind(move |_fact, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let child = item.child().and_downcast::<gtk::Label>().unwrap();
-            let entry = item.item().and_downcast::<BoxedAnyObject>().unwrap();
-            let s: Ref<&Shortcut> = entry.borrow();
-
-            match Key::from_name(&s.key).unwrap().to_unicode() {
-                // This should avoid most unprintable/weird characters but still translate
-                // question, bracketright, etc into characters.
-                Some(c) if !c.is_whitespace() && !c.is_control() => {
-                    child.set_text(&c.to_string());
-                }
-                _ => {
-                    child.set_text(&s.key);
-                }
-            }
-        });
-
-        let action_factory = gtk::SignalListItemFactory::new();
-        action_factory.connect_setup(move |_fact, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let label = gtk::Label::new(None);
-            label.set_halign(gtk::Align::Start);
-            item.set_child(Some(&label))
-        });
-        action_factory.connect_bind(move |_fact, item| {
-            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let child = item.child().and_downcast::<gtk::Label>().unwrap();
-            let entry = item.item().and_downcast::<BoxedAnyObject>().unwrap();
-            let s: Ref<&Shortcut> = entry.borrow();
-            child.set_text(&s.action);
-        });
-
-        let modifier_column = gtk::ColumnViewColumn::new(Some("Modifiers"), Some(modifier_factory));
-        let key_column = gtk::ColumnViewColumn::new(Some("Key"), Some(key_factory));
-        let action_column = gtk::ColumnViewColumn::new(Some("Action"), Some(action_factory));
-        action_column.set_expand(true);
-
-        let view = gtk::ColumnView::new(Some(gtk::NoSelection::new(Some(store))));
-        view.append_column(&modifier_column);
-        view.append_column(&key_column);
-        view.append_column(&action_column);
-
-        let scrolled =
-            gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).build();
-
-        scrolled.set_child(Some(&view));
-
-        dialog.set_child(Some(&scrolled));
-
-        let g = self.clone();
-        dialog.connect_close_request(move |d| {
-            g.open_dialogs.borrow_mut().help.take();
-            d.destroy();
-            gtk::Inhibit(false)
-        });
-
-
-        dialog.set_visible(true);
-
-        self.open_dialogs.borrow_mut().help = Some(dialog);
     }
 
     fn shortcut_from_key<'a>(self: &'a Rc<Self>, k: Key, mods: ModifierType) -> Option<&'a String> {
@@ -271,7 +127,7 @@ impl Gui {
             let _ = match cmd {
                 "Mode" => match DisplayMode::from_str(arg) {
                     Ok(m) => return self.tabs.borrow_mut().active_display_mode(m),
-                    Err(e) => true,
+                    Err(_e) => true,
                 },
                 "Navigate" => return self.tabs.borrow_mut().active_navigate(Path::new(arg)),
                 "JumpTo" => return self.tabs.borrow_mut().active_jump(Path::new(arg)),
@@ -303,12 +159,14 @@ impl Gui {
             };
 
             // For now only toggles work here. Some of the regexes could be eliminated instead.
-            if let Ok(arg) = Toggle::try_from(arg) {
-                let _ = match cmd {
-                    _ => true,
-                };
-            }
+            // if let Ok(arg) = Toggle::try_from(arg) {
+            //     let _ = match cmd {
+            //         _ => true,
+            //     };
+            // }
         }
+
+        let mut tabs = self.tabs.borrow_mut();
 
         let _ = match cmd {
             "Quit" => {
@@ -316,18 +174,20 @@ impl Gui {
                 return self.window.close();
             }
             "Help" => return self.help_dialog(),
-            "NewTab" => return self.tabs.borrow_mut().new_tab(true),
-            "NewBackgroundTab" => return self.tabs.borrow_mut().new_tab(false),
+            "Home" => {
+                return tabs.active_navigate(&home_dir().unwrap_or_default());
+            }
+            "NewTab" => return tabs.new_tab(true),
+            "NewBackgroundTab" => return tabs.new_tab(false),
 
-            "CloseTab" => return self.tabs.borrow_mut().active_close_tab(),
-            "ClosePane" => return self.tabs.borrow_mut().active_close_pane(),
-            "CloseActive" => return self.tabs.borrow_mut().active_close_both(),
+            "CloseTab" => return tabs.active_close_tab(),
+            "ClosePane" => return tabs.active_close_pane(),
+            "CloseActive" => return tabs.active_close_both(),
 
-            #[cfg(feature = "debug-run")]
-            "Run" => return self.run_dialog(),
-
-            "Parent" => return self.tabs.borrow_mut().active_parent(),
-            //"Child" => return self.tabs.borrow_mut().active_child(),
+            "Forward" => return tabs.active_forward(),
+            "Back" => return tabs.active_back(),
+            "Parent" => return tabs.active_parent(),
+            "Child" => return tabs.active_child(),
             _ => true,
         };
 
@@ -337,6 +197,7 @@ impl Gui {
     }
 
     fn get_env(&self) -> Vec<(String, OsString)> {
-        vec![todo!()]
+        // vec![]
+        todo!()
     }
 }

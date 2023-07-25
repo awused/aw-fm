@@ -3,46 +3,30 @@ mod menu;
 mod windows;
 
 use std::cell::{Cell, OnceCell, RefCell};
-use std::collections::VecDeque;
-use std::env::current_dir;
-use std::fmt;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ahash::AHashMap;
-use gnome_desktop::traits::DesktopThumbnailFactoryExt;
-use gnome_desktop::DesktopThumbnailFactory;
 use gtk::gdk::ModifierType;
-use gtk::gio::ffi::GListStore;
-use gtk::gio::{Cancellable, FileQueryInfoFlags, FILE_ATTRIBUTE_THUMBNAIL_PATH};
-use gtk::glib::{Object, SourceId, WeakRef};
+use gtk::glib::{SourceId, WeakRef};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::Orientation::Horizontal;
-use gtk::{
-    gdk, gio, glib, Align, EventControllerScroll, EventControllerScrollFlags, GridView,
-    MultiSelection, ScrolledWindow,
-};
-use path_clean::PathClean;
+use gtk::{gdk, gio, glib};
 use tokio::sync::mpsc::UnboundedSender;
 
 use self::main_window::MainWindow;
 use self::tabs::list::TabsList;
 use self::thumbnailer::Thumbnailer;
 use super::com::*;
-use crate::config::{CONFIG, OPTIONS};
+use crate::closing;
+use crate::config::CONFIG;
 use crate::database::DBCon;
-use crate::{closing, config};
 
 mod applications;
 mod input;
 mod main_window;
 mod tabs;
 mod thumbnailer;
-
-pub static WINDOW_ID: OnceLock<String> = OnceLock::new();
 
 // The Rc<> ends up more ergonomic in most cases but it's too much of a pain to pass things into
 // GObjects.
@@ -65,7 +49,7 @@ struct WindowState {
     maximized: bool,
     fullscreen: bool,
     // This stores the size of the window when it isn't fullscreen or maximized.
-    memorized_size: crate::com::Res,
+    memorized_size: (u32, u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +70,6 @@ pub fn queue_thumb(weak: WeakRef<EntryObject>, p: ThumbPriority) {
 struct Gui {
     window: MainWindow,
     win_state: Cell<WindowState>,
-    overlay: gtk::Overlay,
     menu: OnceCell<menu::GuiMenu>,
 
     // Tabs can recursively look for each other.
@@ -129,7 +112,7 @@ pub fn run(
     application.connect_command_line(|a, _| {
         GUI.with(|g| match g.get() {
             None => a.activate(),
-            Some(g) => println!("Handling command line from another process"),
+            Some(_g) => todo!("TODO -- Handling command line from another process"),
         });
         0
     });
@@ -174,7 +157,6 @@ impl Gui {
         let rc = Rc::new(Self {
             window,
             win_state: Cell::default(),
-            overlay: gtk::Overlay::new(),
             menu: OnceCell::default(),
 
             tabs: tabs.into(),
@@ -279,7 +261,8 @@ impl Gui {
 
         // These callbacks run after the state has changed.
         if !s.maximized && !s.fullscreen {
-            s.memorized_size = (self.window.width(), self.window.height()).into();
+            s.memorized_size =
+                (self.window.width().unsigned_abs(), self.window.height().unsigned_abs());
         }
 
         s.maximized = maximized;
@@ -294,11 +277,6 @@ impl Gui {
             Snapshot(snap) => {
                 let g = self.clone();
                 g.tabs.borrow_mut().apply_snapshot(snap);
-
-                // glib::timeout_add_local_once(Duration::from_secs(20), move || {
-                //     g.tabs.borrow_mut().close_tab(0);
-                // });
-                // // g.tabs.borrow_mut().apply_snapshot(snap);
             }
             Update(update) => {
                 self.tabs.borrow_mut().update(update);
@@ -307,7 +285,7 @@ impl Gui {
                 // This is a special case where we failed to open a directory or read it at all.
                 // Treat it as if it were closed.
                 self.error(&error);
-                error!("Treating {path:?} as closed");
+                error!("Treating {path:?} as closed due to: {error}");
                 self.tabs.borrow_mut().directory_failure(path);
             }
             DirectoryError(_, error) | EntryReadError(_, _, error) | ConveyError(error) => {

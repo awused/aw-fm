@@ -1,0 +1,13 @@
+# Put in ~/.local/share/applications/
+[Desktop Entry]
+Name=Aw-Fm
+GenericName=File Manager
+Comment=A basic file manager with a focus on efficiency.
+Exec=aw-fm %F
+NoDisplay=true
+# Copy the image to ~/.local/share/icons/
+# Icon=aw-man
+Terminal=false
+Type=Application
+StartupNotify=true
+MimeType=inode/directory;

@@ -1,27 +1,27 @@
-use std::env::current_dir;
-use std::num::NonZeroU64;
-use std::ops::{Deref, DerefMut};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
 
 use dirs::home_dir;
 use gtk::gio::ListStore;
 use gtk::prelude::{Cast, CastNone, ListModelExt, StaticType};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{BoxExt, WidgetExt};
+use gtk::traits::BoxExt;
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
-use path_clean::PathClean;
 
 use super::element::TabElement;
 use super::id::TabId;
 use super::tab::Tab;
-use crate::com::{DirSnapshot, DisplayMode, EntryObjectSnapshot, SortSettings, Update};
-use crate::config::OPTIONS;
+use crate::com::{DirSnapshot, DisplayMode, SortSettings, Update};
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
-use crate::gui::tabs::{element, NavTarget};
-use crate::gui::{self, gui_run, tabs_run};
+use crate::gui::tabs::NavTarget;
+use crate::gui::{gui_run, tabs_run};
+
+// For event handlers which cannot be run with the tabs lock being held.
+// Assumes the tab still exists since GTK notifies are run synchronously.
+pub(super) fn event_run_tab<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(id: TabId, f: F) -> T {
+    tabs_run(|t| t.must_run_tab(id, f))
+}
 
 
 // This is tightly coupled the Tab implementation, right now.
@@ -38,7 +38,7 @@ pub struct TabsList {
     active: Option<TabId>,
 
     tab_elements: ListStore,
-    tabs_container: gtk::ListView,
+    _tabs_container: gtk::ListView,
     pane_container: gtk::Box,
 }
 
@@ -78,7 +78,7 @@ impl TabsList {
             active: None,
 
             tab_elements,
-            tabs_container,
+            _tabs_container: tabs_container,
             pane_container: window.imp().panes.clone(),
         }
     }
@@ -91,19 +91,10 @@ impl TabsList {
             return;
         };
 
-        // for _ in 0..20 {
-        //     let (tab, element) = Tab::new(next_id(), NavTarget::initial(self).unwrap(),
-        // &self.tabs);
-        //
-        //     self.tab_elements.append(&element);
-        //     self.tabs.push(tab);
-        // }
-        // let (tab, element) = Tab::new(next_id(), target, &self.tabs);
         let (tab, element) = Tab::new(next_id(), target, &[]);
 
         self.tabs.push(tab);
         self.tab_elements.append(&element);
-        // let (left, tab, right) = self.split_around_mut(0);
         self.tabs[0].attach_pane(&[], &[], |w| self.pane_container.append(w));
         self.set_active(self.tabs[0].id());
     }
@@ -113,15 +104,15 @@ impl TabsList {
     }
 
     fn update_display_mode(&mut self, id: TabId, mode: DisplayMode) {
-        // Assume we can't update a tab that doesn't exist -- this should always be called
-        // synchronously
-        self.find_mut(id).unwrap().update_display_mode(mode);
+        if let Some(t) = self.find_mut(id) {
+            t.update_display_mode(mode)
+        }
     }
 
     pub fn update_sort(&mut self, id: TabId, settings: SortSettings) {
-        // Assume we can't update a tab that doesn't exist -- this should always be called
-        // synchronously
-        self.find_mut(id).unwrap().update_sort(settings);
+        if let Some(t) = self.find_mut(id) {
+            t.update_sort(settings)
+        }
     }
 
     pub fn set_active(&mut self, id: TabId) {
@@ -339,7 +330,7 @@ impl TabsList {
     }
 
     fn create_tab(&mut self, target: NavTarget, activate: bool) -> TabId {
-        let (mut new_tab, element) = Tab::new(next_id(), target, &self.tabs);
+        let (new_tab, element) = Tab::new(next_id(), target, &self.tabs);
 
         let id = new_tab.id();
         self.tabs.push(new_tab);
@@ -413,8 +404,7 @@ impl TabsList {
             return false;
         };
 
-        let (new_id, new_index) = self.clone_active().unwrap();
-        let (left, tab, right) = self.split_around_mut(new_index);
+        let (left, tab, right) = self.split_around_mut(second);
         tab.attach_pane(left, right, |w| paned.set_end_child(Some(w)));
 
         true
@@ -443,7 +433,7 @@ impl TabsList {
         self.set_active(new_id);
     }
 
-    fn close_tab(&mut self, id: TabId) {
+    pub(super) fn close_tab(&mut self, id: TabId) {
         let index = self.position(id).unwrap();
         let eindex = self.element_position(id).unwrap();
 

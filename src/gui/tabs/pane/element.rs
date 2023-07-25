@@ -1,18 +1,15 @@
 use std::fmt::Write;
-use std::time::Instant;
 
-use gtk::gio::ListStore;
-use gtk::glib::GString;
 use gtk::prelude::{Cast, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
-    EditableExt, EntryExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
+    EditableExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
 };
-use gtk::{glib, Bitset, EventControllerFocus, GestureClick, MultiSelection, Widget};
+use gtk::{glib, Bitset, EventControllerFocus, GestureClick, MultiSelection};
 
 use crate::com::{EntryObject, SignalHolder};
-use crate::gui::tabs::contents::Contents;
 use crate::gui::tabs::id::TabId;
+use crate::gui::tabs::list::event_run_tab;
 use crate::gui::tabs::tab::Tab;
 use crate::gui::tabs_run;
 
@@ -21,15 +18,14 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Box;
 }
 
-// Contains signals attached to something else.
-// Any signal handlers connected to this entity should use weak references.
+// Contains signals attached to something else, not tied to the lifecycle of this Pane.
 #[derive(Debug)]
 pub(super) struct PaneSignals(SignalHolder<MultiSelection>, SignalHolder<MultiSelection>);
 
 impl PaneElement {
     pub(super) fn new(tab: TabId, selection: &MultiSelection) -> (Self, PaneSignals) {
         let s: Self = glib::Object::new();
-        let signals = s.setup_signals(tab, selection);
+        let signals = s.setup_signals(selection);
 
         let focus = EventControllerFocus::new();
         focus.connect_enter(move |focus| {
@@ -46,10 +42,13 @@ impl PaneElement {
         // Maps forward/back on a mouse to Forward/Backward
         let forward_back_mouse = GestureClick::new();
         forward_back_mouse.set_button(0);
-        forward_back_mouse.connect_pressed(move |c, n, _x, _y| match c.current_button() {
-            8 => error!("TODO backwards for mouse pane {tab:?}"),
-            9 => error!("TODO forwards for mouse pane {tab:?}"),
-            _ => {}
+        forward_back_mouse.connect_pressed(move |c, _n, _x, _y| {
+            trace!("Mouse button {} in pane {:?}", c.current_button(), tab);
+            match c.current_button() {
+                8 => event_run_tab(tab, Tab::back),
+                9 => event_run_tab(tab, Tab::forward),
+                _ => {}
+            }
         });
         s.add_controller(forward_back_mouse);
 
@@ -58,16 +57,16 @@ impl PaneElement {
         imp.tab.set(tab).unwrap();
         imp.text_entry.set_enable_undo(true);
 
+        s.connect_destroy(move |_| trace!("Pane for {tab:?} destroyed"));
         (s, signals)
     }
 
-    fn setup_signals(&self, tab_id: TabId, selection: &MultiSelection) -> PaneSignals {
+    fn setup_signals(&self, selection: &MultiSelection) -> PaneSignals {
         let count_label = &*self.imp().count;
         let selection_label = &*self.imp().selection;
         let stack = &*self.imp().stack;
 
         let count = count_label.clone();
-        let selected = selection_label.clone();
 
         count.set_text(&format!("{} items", selection.n_items()));
         let stk = stack.clone();
@@ -83,7 +82,6 @@ impl PaneElement {
         });
         let count_signal = SignalHolder::new(selection, count_signal);
 
-        let count = count_label.clone();
         let selected = selection_label.clone();
         let stk = stack.clone();
         let update_selected = move |selection: &MultiSelection, _p: u32, _n: u32| {
@@ -105,13 +103,12 @@ impl PaneElement {
                     if entry.dir() { "containing " } else { "" },
                     entry.long_size_string()
                 ));
-                return;
+            } else {
+                // Costly, but not unbearably slow at <20ms for 100k items.
+                selected.set_text(&selected_string(selection, &set));
             }
 
-            // Costly, but not unbearably slow at <20ms for 100k items.
-            selected.set_text(&selected_string(selection, &set));
-
-            if stk.visible_child_name().map_or(false, |n| n != "count") {
+            if stk.visible_child_name().map_or(false, |n| n == "count") {
                 stk.set_visible_child_name("selection");
             }
         };
@@ -129,14 +126,10 @@ impl PaneElement {
 mod imp {
     use std::cell::{Cell, RefCell};
 
-    use gtk::gdk::Texture;
-    use gtk::glib::SignalHandlerId;
-    use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
     use once_cell::unsync::OnceCell;
 
-    use crate::com::{EntryObject, SignalHolder, Thumbnail};
     use crate::gui::tabs::id::TabId;
 
     #[derive(Default, CompositeTemplate)]
@@ -217,18 +210,18 @@ fn selected_string(selection: &MultiSelection, set: &Bitset) -> String {
 
     let mut label = String::new();
     if dirs > 0 {
-        write!(
+        let _r = write!(
             &mut label,
             "{dirs} folder{} selected (containing {contents} items)",
             if dirs > 1 { "s" } else { "" }
         );
         if dirs < len {
-            write!(&mut label, ", ");
+            let _r = write!(&mut label, ", ");
         }
     }
 
     if dirs < len {
-        write!(
+        let _r = write!(
             &mut label,
             "{} file{} selected ({})",
             len - dirs,

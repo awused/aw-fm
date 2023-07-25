@@ -1,27 +1,13 @@
-use std::cell::{Cell, OnceCell, Ref, RefCell};
-use std::cmp::Ordering;
-use std::collections::VecDeque;
-use std::env::current_dir;
-use std::ffi::{OsStr, OsString};
-use std::fmt;
-use std::num::NonZeroU64;
-use std::ops::{Deref, DerefMut, Index, IndexMut};
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::Relaxed;
+use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use gtk::gio::ListStore;
-use gtk::glib::Object;
-use gtk::prelude::{Cast, ListModelExt, ListModelExtManual, StaticType};
-use gtk::subclass::prelude::{ObjectSubclassExt, ObjectSubclassIsExt};
-use gtk::traits::{AdjustmentExt, BoxExt, SelectionModelExt, WidgetExt};
-use gtk::{glib, Box, MultiSelection, Orientation, ScrolledWindow, Widget};
-use path_clean::PathClean;
+use gtk::prelude::{CastNone, ListModelExt};
+use gtk::subclass::prelude::ObjectSubclassIsExt;
+use gtk::traits::WidgetExt;
+use gtk::{Orientation, Widget};
 
-use self::flat_dir::{DirState, FlatDir};
+use self::flat_dir::FlatDir;
 use super::contents::Contents;
 use super::element::TabElement;
 use super::id::{TabId, TabUid};
@@ -29,12 +15,12 @@ use super::pane::{Pane, PaneExt};
 use super::search::SearchPane;
 use super::{HistoryEntry, NavTarget, SavedPaneState, ScrollPosition};
 use crate::com::{
-    DirSettings, DirSnapshot, DisplayMode, Entry, EntryObject, EntryObjectSnapshot, FileTime,
-    GuiAction, ManagerAction, SnapshotId, SnapshotKind, SortMode, SortSettings,
+    DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, SnapshotId,
+    SortSettings,
 };
 use crate::gui::tabs::PartiallyAppliedUpdate;
 use crate::gui::{gui_run, Update};
-use crate::natsort::ParsedString;
+
 
 /* This efficiently supports multiple tabs being open to the same directory with different
  * settings.
@@ -209,14 +195,14 @@ impl Tab {
                 self.element.clone_from(&t.element);
 
                 if let Some(pane) = self.pane.get() {
-                    if matches!(*self.dir.state(), DirState::Loaded(_)) {
+                    if self.dir.state().loaded() {
                         error!("Unsetting GTK crash workaround");
                         pane.workaround_scroller()
                             .set_vscrollbar_policy(gtk::PolicyType::Automatic);
-
-                        self.apply_pane_state();
                     }
                 }
+
+                self.apply_pane_state();
 
                 return true;
             }
@@ -325,113 +311,11 @@ impl Tab {
 
     pub fn matches_flat_update(&self, ev: &Update) -> bool {
         // Not watching anything -> cannot match an update
-        let Some(watch) = self.dir.state().watched() else {
+        let Some(_watch) = self.dir.state().watched() else {
             return false;
         };
 
         Some(&**self.dir.path()) == ev.path().parent()
-    }
-
-    pub fn matched_flat_update(&mut self, left: &mut [Self], right: &mut [Self], up: Update) {
-        assert!(self.matches_flat_update(&up));
-
-        let Some(up) = self.dir.consume(up) else {
-            return;
-        };
-
-        // If it exists in any tab (search or flat)
-        let existing_global = EntryObject::lookup(up.path());
-        // If it exists in flat tabs (which all share the same state).
-        let local_position = existing_global
-            .clone()
-            .and_then(|eg| self.contents.position_by_sorted_entry(&eg.get()));
-
-
-        // If something exists globally but not locally, it might need special handling.
-        let mut search_mutate = None;
-
-        let partial = match (up, local_position, existing_global) {
-            // It simply can't exist locally but not globally
-            (_, Some(_), None) => unreachable!(),
-            (Update::Entry(entry), Some(pos), Some(obj)) => {
-                let Some(old) = obj.update(entry) else {
-                    // An unimportant update.
-                    // No need to check other tabs.
-                    return;
-                };
-
-                self.contents.reinsert_updated(pos, &obj);
-
-                trace!("Updated {:?} from event", old.abs_path);
-                PartiallyAppliedUpdate::Mutate(old, obj)
-            }
-            (Update::Entry(entry), None, Some(obj)) => {
-                // This means the element already existed in a search tab, somewhere else, and
-                // we're updating it.
-                //
-                // It does not exist within this search tab.
-                if let Some(old) = obj.update(entry) {
-                    // It's an update for (some) search tabs, but an insertion for flat tabs.
-                    //
-                    // This means that a different search tab happened to read a newly created file
-                    // before it was inserted into this tab.
-                    warn!(
-                        "Search tab read item {:?} before it was inserted into a flat tab. This \
-                         should be uncommon.",
-                        old.abs_path
-                    );
-                    search_mutate = Some(PartiallyAppliedUpdate::Mutate(old, obj.clone()));
-                }
-
-
-                self.contents.insert(&obj, self.settings.sort);
-                trace!("Inserted existing {:?} from event", obj.get().abs_path);
-                PartiallyAppliedUpdate::Insert(obj)
-            }
-            (Update::Entry(entry), None, None) => {
-                let new = EntryObject::new(entry);
-
-                self.contents.insert(&new, self.settings.sort);
-                trace!("Inserted new {:?} from event", new.get().abs_path);
-                PartiallyAppliedUpdate::Insert(new)
-            }
-            (Update::Removed(path), Some(i), Some(obj)) => {
-                self.contents.remove(i);
-                trace!("Removed {:?} from event", path);
-                PartiallyAppliedUpdate::Delete(obj)
-            }
-            (Update::Removed(path), None, Some(obj)) => {
-                // So rare it's not worth optimizing
-                warn!("Removed search-only {:?} from event. This should be uncommon.", path);
-                PartiallyAppliedUpdate::Delete(obj)
-            }
-            (Update::Removed(path), None, None) => {
-                // Unusual case, probably shouldn't happen often.
-                // Maybe if something is removed while loading the directory before we read it.
-                warn!("Got removal for {path:?} which wasn't present");
-                // It's possible this entry is living in a yet-to-be applied search snapshot, but
-                // that's not important since it will be skipped over by apply_search_snapshot.
-                return;
-            }
-        };
-
-
-        // None of the tabs in `left` are an exact match.
-        for t in self.matching_mut(right) {
-            t.contents.finish_update(&partial);
-        }
-
-
-        // An insert in this tab is also an insert in this sort.
-        // Very often this will be the only sort.
-        self.finish_search_update(&partial);
-
-
-        // Apply to any matching search tabs, even to the left.
-        let other_tab_search_update = search_mutate.unwrap_or(partial);
-        for t in left.iter_mut().chain(right.iter_mut()) {
-            t.finish_search_update(&other_tab_search_update)
-        }
     }
 
     fn search_sort_after_snapshot(&mut self) {
@@ -501,7 +385,8 @@ impl Tab {
         }
 
         if path.exists() {
-            self.change_location(left, right, NavTarget::assume_dir(path));
+            // Honestly should just close the tab, but this means something is seriously broken.
+            drop(self.change_location_flat(left, right, NavTarget::assume_dir(path)));
             true
         } else {
             false
@@ -528,7 +413,7 @@ impl Tab {
     // Changes location without managing history or view states.
     // Returns the navigation target if nothing happens
     // Will end a search.
-    fn change_location(
+    fn change_location_flat(
         &mut self,
         left: &[Self],
         right: &[Self],
@@ -547,8 +432,7 @@ impl Tab {
 
         self.element.flat_title(&target.dir);
 
-        self.pane_state = None;
-
+        self.pane_state = Some(SavedPaneState::for_jump(target.scroll));
         self.dir = FlatDir::new(target.dir);
 
         if !self.copy_from_donor(left, right) {
@@ -556,7 +440,6 @@ impl Tab {
 
             let old_settings = self.settings;
             self.settings = gui_run(|g| g.database.get(self.dir.path()));
-            self.pane_state = Some(SavedPaneState::for_jump(target.scroll));
 
             // Deliberately do not clear or update self.contents here, not yet.
             // This allows us to keep something visible just a tiny bit longer.
@@ -591,16 +474,15 @@ impl Tab {
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: NavTarget) {
         info!("Navigating {:?} from {:?} to {:?}", self.id, self.dir.path(), target);
 
-        let state = self.pane_snapshot().unwrap_or_default();
-        let history = HistoryEntry { location: self.dir(), state };
+        let history = self.current_history();
 
-        let Some(target) = self.change_location(left, right, target) else {
+        let Some(unconsumed) = self.change_location_flat(left, right, target) else {
             self.past.push(history);
             self.future.clear();
             return;
         };
 
-        let Some(path) = target.scroll else {
+        let Some(path) = unconsumed.scroll else {
             return;
         };
 
@@ -629,28 +511,131 @@ impl Tab {
             warn!("No future for {:?} to go forward to", self.id);
             return;
         };
-        todo!()
+
+        info!("Forwards in tab {:?} to {next:?}", self.id);
+        let history = self.current_history();
+
+        self.past.push(history);
+        self.pane_state = Some(next.state);
+
+        // Shouldn't be a jump, could be a search starting/ending.
+        if next.location == *self.dir.path() {
+            self.apply_pane_state();
+            return;
+        }
+
+        let target = NavTarget::assume_dir(next.location);
+
+        if let Some(unconsumed) = self.change_location_flat(left, right, target) {
+            error!(
+                "Failed to change location {unconsumed:?} after already checking it was a change."
+            );
+            self.apply_pane_state();
+            return;
+        }
+
+        self.apply_pane_state()
     }
 
     pub(super) fn back(&mut self, left: &[Self], right: &[Self]) {
-        todo!()
+        let Some(prev) = self.past.pop() else {
+            warn!("No history for {:?} to go back to", self.id);
+            return;
+        };
+
+        info!("Back in tab {:?} to {prev:?}", self.id);
+        let history = self.current_history();
+
+        self.future.push(history);
+        self.pane_state = Some(prev.state);
+
+        // Shouldn't be a jump, could be a search starting/ending.
+        if prev.location == *self.dir.path() {
+            self.apply_pane_state();
+            return;
+        }
+
+        let target = NavTarget::assume_dir(prev.location);
+
+        if let Some(unconsumed) = self.change_location_flat(left, right, target) {
+            error!(
+                "Failed to change location {unconsumed:?} after already checking it was a change."
+            );
+            self.apply_pane_state();
+            return;
+        }
+
+        self.apply_pane_state()
     }
 
     // Goes to the child directory if one was previous open or if there's only one.
     pub(super) fn child(&mut self, left: &[Self], right: &[Self]) {
-        todo!()
-    }
+        if self.pane.search().is_some() {
+            warn!("Can't move to child in search tab {:?}", self.id);
+            return;
+        }
 
-    pub(super) fn unload_if_not_matching(&mut self) {
-        // Transition tab to an Inactive state only if Opened
-        // Clear out all items
-        //
-        todo!()
+        // Try the past and future first.
+        if Some(&**self.dir.path()) == self.past.last().and_then(|h| h.location.parent()) {
+            info!("Found past entry for child dir while handling Child in {:?}", self.id);
+            return self.back(left, right);
+        }
+        if Some(&**self.dir.path()) == self.future.last().and_then(|h| h.location.parent()) {
+            info!("Found future entry for child dir while handling Child in {:?}", self.id);
+            return self.forward(left, right);
+        }
+
+        if self.contents.selection.n_items() == 0 {
+            warn!("No children in {:?} to navigate to.", self.id);
+            return;
+        }
+
+        let first = self.contents.selection.item(0).and_downcast::<EntryObject>().unwrap();
+        if !first.get().dir() {
+            warn!("No subdirectories in {:?} to navigate to.", self.id);
+            return;
+        }
+
+        if self.contents.selection.n_items() >= 2 {
+            let second = self.contents.selection.item(0).and_downcast::<EntryObject>().unwrap();
+            if second.get().dir() {
+                warn!("More than one subdirectory found in {:?}, cannot use Child", self.id);
+                return;
+            }
+        }
+
+        let target = NavTarget::assume_dir(first.get().abs_path.clone());
+        info!(
+            "Navigating {:?} from {:?} to sole child directory {:?}",
+            self.id,
+            self.dir.path(),
+            target
+        );
+
+        let history = self.current_history();
+
+        self.past.push(history);
+        self.pane_state = None;
+
+        if let Some(unconsumed) = self.change_location_flat(left, right, target) {
+            error!(
+                "Failed to change location {unconsumed:?} after already checking it was a change."
+            );
+            self.apply_pane_state();
+            return;
+        }
+
+        self.apply_pane_state()
     }
 
     #[must_use]
     fn pane_snapshot(&self) -> Option<SavedPaneState> {
         self.pane.get().map(|p| p.get_state(&self.contents))
+    }
+
+    fn current_history(&self) -> HistoryEntry {
+        let state = self.pane_state.clone().or_else(|| self.pane_snapshot()).unwrap_or_default();
+        HistoryEntry { location: self.dir(), state }
     }
 
     fn save_pane_state(&mut self) {
@@ -672,7 +657,7 @@ impl Tab {
 
     // This can start a search from a history entry.
     fn apply_pane_state(&mut self) {
-        let Some(pane) = self.pane.get_mut() else {
+        if self.pane.get().is_none() {
             trace!("Ignoring start_apply_view_state on tab {:?} with no pane", self.id);
             return;
         };
@@ -692,7 +677,7 @@ impl Tab {
             return;
         }
 
-        if !matches!(&*self.dir.state(), DirState::Loaded(_)) {
+        if !self.dir.state().loaded() {
             trace!("Deferring applying pane state to flat pane until loading is done.");
             return;
         }
@@ -765,7 +750,7 @@ impl Tab {
         self.element.set_pane_visible(true);
 
 
-        if matches!(&*self.dir.state(), DirState::Loaded(_)) {
+        if self.dir.state().loaded() {
             self.apply_pane_state();
         }
     }
@@ -790,7 +775,7 @@ impl Tab {
 
         // Take the pane,
         // TODO [search]
-        if matches!(&*self.dir.state(), DirState::Loaded(_)) {
+        if self.dir.state().loaded() {
             self.save_pane_state();
         }
         self.element.set_pane_visible(false);
@@ -806,6 +791,108 @@ impl Tab {
         gui_run(|g| {
             g.database.store(self.dir.path(), self.settings);
         });
+    }
+
+    pub fn matched_flat_update(&mut self, left: &mut [Self], right: &mut [Self], up: Update) {
+        assert!(self.matches_flat_update(&up));
+
+        let Some(up) = self.dir.consume(up) else {
+            return;
+        };
+
+        // If it exists in any tab (search or flat)
+        let existing_global = EntryObject::lookup(up.path());
+        // If it exists in flat tabs (which all share the same state).
+        let local_position = existing_global
+            .clone()
+            .and_then(|eg| self.contents.position_by_sorted_entry(&eg.get()));
+
+
+        // If something exists globally but not locally, it might need special handling.
+        let mut search_mutate = None;
+
+        let partial = match (up, local_position, existing_global) {
+            // It simply can't exist locally but not globally
+            (_, Some(_), None) => unreachable!(),
+            (Update::Entry(entry), Some(pos), Some(obj)) => {
+                let Some(old) = obj.update(entry) else {
+                    // An unimportant update.
+                    // No need to check other tabs.
+                    return;
+                };
+
+                self.contents.reinsert_updated(pos, &obj);
+
+                trace!("Updated {:?} from event", old.abs_path);
+                PartiallyAppliedUpdate::Mutate(old, obj)
+            }
+            (Update::Entry(entry), None, Some(obj)) => {
+                // This means the element already existed in a search tab, somewhere else, and
+                // we're updating it.
+                //
+                // It does not exist within this search tab.
+                if let Some(old) = obj.update(entry) {
+                    // It's an update for (some) search tabs, but an insertion for flat tabs.
+                    //
+                    // This means that a different search tab happened to read a newly created file
+                    // before it was inserted into this tab.
+                    warn!(
+                        "Search tab read item {:?} before it was inserted into a flat tab. This \
+                         should be uncommon.",
+                        old.abs_path
+                    );
+                    search_mutate = Some(PartiallyAppliedUpdate::Mutate(old, obj.clone()));
+                }
+
+
+                self.contents.insert(&obj);
+                trace!("Inserted existing {:?} from event", obj.get().abs_path);
+                PartiallyAppliedUpdate::Insert(obj)
+            }
+            (Update::Entry(entry), None, None) => {
+                let new = EntryObject::new(entry);
+
+                self.contents.insert(&new);
+                trace!("Inserted new {:?} from event", new.get().abs_path);
+                PartiallyAppliedUpdate::Insert(new)
+            }
+            (Update::Removed(path), Some(i), Some(obj)) => {
+                self.contents.remove(i);
+                trace!("Removed {:?} from event", path);
+                PartiallyAppliedUpdate::Delete(obj)
+            }
+            (Update::Removed(path), None, Some(obj)) => {
+                // So rare it's not worth optimizing
+                warn!("Removed search-only {:?} from event. This should be uncommon.", path);
+                PartiallyAppliedUpdate::Delete(obj)
+            }
+            (Update::Removed(path), None, None) => {
+                // Unusual case, probably shouldn't happen often.
+                // Maybe if something is removed while loading the directory before we read it.
+                warn!("Got removal for {path:?} which wasn't present");
+                // It's possible this entry is living in a yet-to-be applied search snapshot, but
+                // that's not important since it will be skipped over by apply_search_snapshot.
+                return;
+            }
+        };
+
+
+        // None of the tabs in `left` are an exact match.
+        for t in self.matching_mut(right) {
+            t.contents.finish_update(&partial);
+        }
+
+
+        // An insert in this tab is also an insert in this sort.
+        // Very often this will be the only sort.
+        self.finish_search_update(&partial);
+
+
+        // Apply to any matching search tabs, even to the left.
+        let other_tab_search_update = search_mutate.unwrap_or(partial);
+        for t in left.iter_mut().chain(right.iter_mut()) {
+            t.finish_search_update(&other_tab_search_update)
+        }
     }
 }
 

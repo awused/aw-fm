@@ -43,6 +43,7 @@
                 <property name="name">count</property>
                 <property name="child">
                   <object class="GtkLabel" id="count">
+                    <property name="xalign">0</property>
                   </object>
                 </property>
               </object>
@@ -53,6 +54,7 @@
                 <property name="name">selection</property>
                 <property name="child">
                   <object class="GtkLabel" id="selection">
+                    <property name="xalign">0</property>
                     <property name="ellipsize">PANGO_ELLIPSIZE_MIDDLE</property>
                   </object>
                 </property>
@@ -64,6 +66,7 @@
                 <property name="name">seek</property>
                 <property name="child">
                   <object class="GtkLabel" id="seek">
+                    <property name="xalign">0</property>
                   </object>
                 </property>
               </object>

@@ -1,30 +1,22 @@
 mod icon_cell;
 mod string_cell;
 
-use std::borrow::Cow;
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use gtk::glib::Object;
 use gtk::prelude::*;
-use gtk::subclass::prelude::*;
 use gtk::{
-    gio, glib, ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, GridView, ListItem,
-    ListView, MultiSelection, ScrolledWindow, SignalListItemFactory, Widget,
+    glib, ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, MultiSelection,
+    ScrolledWindow, SignalListItemFactory, Widget,
 };
 
 use self::icon_cell::IconCell;
 use self::string_cell::{EntryString, StringCell};
 use super::get_last_visible_child;
-use crate::com::{
-    DirSettings, DisplayMode, Entry, EntryKind, EntryObject, SignalHolder, SortDir, SortMode,
-    SortSettings,
-};
+use crate::com::{DirSettings, EntryObject, SignalHolder, SortDir, SortMode, SortSettings};
 use crate::gui::tabs::id::TabId;
-use crate::gui::tabs::ScrollPosition;
-use crate::gui::{applications, tabs_run, GUI};
+use crate::gui::{applications, tabs_run};
 
 const NAME: &str = "Name";
 const SIZE: &str = "Size";
@@ -37,7 +29,7 @@ pub(super) struct DetailsView {
     selection: MultiSelection,
     current_sort: Rc<Cell<SortSettings>>,
 
-    workaround_rubberband: SignalHolder<MultiSelection>,
+    _workaround_rubber: SignalHolder<MultiSelection>,
 }
 
 
@@ -58,7 +50,7 @@ impl DetailsView {
 
         let sorter = column_view.sorter().unwrap().downcast::<ColumnViewSorter>().unwrap();
         let cur_sort = current_sort.clone();
-        sorter.connect_changed(move |sorter, b| {
+        sorter.connect_changed(move |sorter, _b| {
             let (col, direction) = sorter.nth_sort_column(0);
             let Some(col) = col else {
                 return;
@@ -84,7 +76,7 @@ impl DetailsView {
 
         column_view.connect_destroy(|_| error!("TODO -- remove me: details confirmed destroyed"));
 
-        column_view.connect_activate(move |cv, a| {
+        column_view.connect_activate(move |cv, _a| {
             let display = cv.display();
             let model = cv.model().and_downcast::<MultiSelection>().unwrap();
 
@@ -106,7 +98,7 @@ impl DetailsView {
             current_sort,
             selection: selection.clone(),
 
-            workaround_rubberband,
+            _workaround_rubber: workaround_rubberband,
         }
     }
 
@@ -128,7 +120,7 @@ impl DetailsView {
         let w = self.column_view.first_child().and_then(|c| c.next_sibling());
         if let Some(w) = w {
             glib::idle_add_local_once(move || {
-                w.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
+                drop(w.activate_action("list.scroll-to-item", Some(&pos.to_variant())));
             });
         } else {
             error!("Couldn't find ListView to scroll in details view");
@@ -142,9 +134,7 @@ impl DetailsView {
             return None;
         }
 
-        let list_view = self.column_view.first_child();
-
-        // TODO -- is this robust? Will adding controllers break this?
+        // This is seems like it'll be fragile.
         let obj = self
             .column_view
             .first_child()
@@ -238,7 +228,7 @@ fn setup_columns(column_view: &ColumnView) {
 }
 
 // Does absolutely nothing, except exist
-const fn dummy_sort_fn(a: &Object, b: &Object) -> gtk::Ordering {
+const fn dummy_sort_fn(_a: &Object, _b: &Object) -> gtk::Ordering {
     gtk::Ordering::Equal
 }
 

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use ahash::AHashMap;
 use gtk::gdk::traits::AppLaunchContextExt;
-use gtk::gdk::{AppLaunchContext, Display};
+use gtk::gdk::Display;
 use gtk::gio::{AppInfo, File};
 use gtk::prelude::{AppInfoExt, Cast, DisplayExt, ListModelExt};
 use gtk::traits::SelectionModelExt;
@@ -45,12 +45,18 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
         let entry = entry.get();
 
         let Some(app) = cached_lookup(&entry.mime) else {
+            if !sent_error {
+                gui_run(|g| {
+                    g.warning(&format!("Couldn't find application for mimetype: {}", entry.mime))
+                });
+                sent_error = true;
+            }
             continue;
         };
 
         let file = File::for_path(&entry.abs_path);
 
-        if let Some((app, v)) = apps.iter_mut().find(|(a, _)| a == &app) {
+        if let Some((_app, v)) = apps.iter_mut().find(|(a, _)| a == &app) {
             v.push(file)
         } else {
             apps.push((app, vec![file]));
@@ -61,7 +67,10 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
     context.set_timestamp(gtk::gdk::CURRENT_TIME);
 
     for (app, files) in apps {
-        app.launch(&files, Some(&context));
+        if let Err(e) = app.launch(&files, Some(&context)) {
+            error!("Application launch error: {app:?} {e:?}");
+            gui_run(|g| g.error(&format!("Failed to launch application {:?} {e}", app.name())))
+        }
     }
 }
 
@@ -100,7 +109,9 @@ pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
     }
 
     if directories.len() > DIR_OPEN_LIMIT {
-        gui_run(|g| g.warning("Can't load more than {DIR_OPEN_LIMIT} directories at once"));
+        gui_run(|g| {
+            g.warning(&format!("Can't load more than {DIR_OPEN_LIMIT} directories at once"))
+        });
         return;
     }
 

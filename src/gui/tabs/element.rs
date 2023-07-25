@@ -1,18 +1,13 @@
-use std::fmt::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use gtk::gio::ListStore;
 use gtk::glib::GString;
-use gtk::prelude::{Cast, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{EditableExt, EntryExt, GestureSingleExt, SelectionModelExt, WidgetExt};
-use gtk::{glib, Bitset, EventControllerFocus, GestureClick, MultiSelection, Widget};
+use gtk::traits::{GestureSingleExt, WidgetExt};
+use gtk::{glib, GestureClick};
 
-use crate::com::{EntryObject, SignalHolder};
-use crate::gui::tabs::contents::Contents;
 use crate::gui::tabs::id::TabId;
-use crate::gui::tabs::tab::Tab;
 use crate::gui::tabs_run;
+
 
 glib::wrapper! {
     pub struct TabElement(ObjectSubclass<imp::AwFmTab>)
@@ -28,6 +23,17 @@ impl TabElement {
         imp.tab.set(tab).unwrap();
         s.flat_title(path);
 
+        let mouse = GestureClick::new();
+        mouse.set_button(2);
+        mouse.connect_pressed(move |_c, n, _x, _y| {
+            if n == 1 {
+                debug!("Closing {tab:?} from middle click");
+                tabs_run(|t| t.close_tab(tab));
+            }
+        });
+        s.add_controller(mouse);
+
+        s.connect_destroy(move |_| trace!("Tab for {tab:?} destroyed"));
         s
     }
 
@@ -81,16 +87,10 @@ impl TabElement {
 }
 
 mod imp {
-    use std::cell::{Cell, RefCell};
-
-    use gtk::gdk::Texture;
-    use gtk::glib::SignalHandlerId;
-    use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
     use once_cell::unsync::OnceCell;
 
-    use crate::com::{EntryObject, SignalHolder, Thumbnail};
     use crate::gui::tabs::id::TabId;
 
     #[derive(Default, CompositeTemplate)]

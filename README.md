@@ -2,68 +2,102 @@
 
 Awused's personal gui file manager.
 
-It is a simple file manager designed to be fast and efficient at doing what I actually do.
+It is a simple file manager designed to be fast and efficient at doing what I
+actually do.
 
-# Features
+As of writing this the project is less than two weeks old.
+It's probably completely unusable for anyone yet.
+Some documentation may not be in-date yet.
 
-* Fast
-  * Opening directories containing tens of thousands of images shouldn't take hours or lock up the UI.
-* Correct gamma and alpha handling during scaling and presentation.
-* Wide support for many archive and image formats.
-* Proper natural sorting.
-* Configurable shortcuts to run external scripts. <!--and a basic IPC interface.-->
+## Features
+
+* Fast and efficient
+  * Opening directories containing one or two hundred thousand images shouldn't take
+      tens of minutes (or hours), or lock up the UI.
+* Natural sorting, `abc` sorts before `XYZ` and `a2.png` sorts before `a10.png`.
+* Highly customizable, up to a point.
+  * A reasonably complete set of text commands to control the application.
+  * Define custom shortcuts, custom bookmarks, and custom context menu actions.
+* A UI charitably described as minimal.
 * Not much more, anything I don't personally use doesn't get implemented.
+  * Will not cover every use case, like mounting external drives.
+<!-- * Custom actions showing up in context menus. -->
+  <!-- * Just flat scripts, easy to write and back up. -->
 
-# Installation
+## Installation and Usage
 
-`cargo install --git https://github.com/awused/aw-fm --locked`
+Clone the repository and run `make install` to install aw-fm and the extra files
+in the [desktop](desktop) directory to their default locations. Alternately run
+`cargo install --git https://github.com/awused/aw-fm --locked` and install those
+extra files manually.
 
-Install and run with aw-man. Optionally edit the defaults in [aw-fm.toml.sample](aw-fm.toml.sample)
-and copy it to `~/.config/aw-fm/aw-fm.toml` or `~/.aw-fm.toml`.
+Run with `aw-fm` or your application launcher of choice.
 
-<!-- Recommended to install the desktop file in the [desktop](desktop) folder. -->
+Optionally edit the config in [aw-fm.toml.sample](aw-fm.toml.sample) and copy it
+to `~/.config/aw-fm/aw-fm.toml`.
 
-# Dependencies
+### Dependencies
 
 Required:
 
 * GTK - GTK4 libraries and development headers must be installed.
 * gnome-desktop utility libraries
 
-On fedora all required dependencies can be installed with `dnf install gtk4-devel gnome-desktop4-devel`.
+On fedora all required dependencies can be installed with
+`dnf install gtk4-devel gnome-desktop4-devel`.
 
-# Usage
+## Shortcuts
 
-# Shortcuts
+### Defaults
 
-## Defaults
+The defaults should make some level of sense. Hit `?` for a popup containing all
+customizable keybinds.
 
-The defaults should make some level of sense. Hit `?` for a popup containing all customizable
-keybinds.
+### Customization
 
-## Customization
+#### Custom Actions
 
-Keyboard shortcuts and context menu entries can be customized in
-[aw-fm.toml](aw-fm.toml.sample). See the comments in the config file for how to specify them.
+Custom actions are enabled by scripts in the custom-actions directory, default
+`$HOME/.config/aw-fm/custom-actions/`. Depending on how they are configured
+they do not always appear in the context menu.
 
-Recognized commands:
+They must be executable text files and options are read from within the file.
+See the [example script](examples/sample.sh) for an explanation of the
+options.
+
+Custom actions behave as if run by `Script`: any output will be treated as a
+newline-separated series of commands to run.
+
+#### Commands
+
+Keyboard shortcuts, bookmarks, and context menu entries can be customized in
+[aw-fm.toml](aw-fm.toml.sample). See the comments in the config file for how to
+specify them.
 
 * `Help`
   * List current keybinds.
 * `Quit`
 
-### Navigation
+##### Navigation Commands
 
 * `Navigate directory/file`
   * Navigates the current tab to a directory or jumps to a file in that directory.
-  * Opens a new tab if one isn't active.
+  * Opens a new tab if one isn't active.active
+* `Home`
+  * Navigates to the user's home directory.
 * `JumpTo path`
   * Jumps to the parent directory of `path` and scrolls so that `path` is visible.
   * Opens a new tab if one isn't active.
+* `Forward` and `Back`
+  * Navigates through the history of the active tab.
 * `Parent`
   * Navigates to the parent of the current directory.
+* `Child`
+  * Navigates into a child directory of the current directory if there is only
+  one or if you previously navigated from a subdirectory of the current directory.
+  * `Parent` followed by `Child` will return you to the same directory.
 
-### Tabs
+##### Tabs
 
 * `NewTab [directory/file]` and `NewBackgroundTab [directory/file]`
   * Opens a new tab in the foreground or background.
@@ -78,16 +112,12 @@ Recognized commands:
   * The new tab is on the right or bottom of the split.
   * If no tabs are visible, opens a new on.
 
-### Settings
+##### Settings
 
 * `Mode icons|columns`
   * Changes the mode of the current directory.
 
 TODO ---------------------------------
-
-* Child
-    * Navigates to the child of the current directory.
-    * If there is more than one child this will fail unless "Parent" was used earlier.
 
 * Activate
   * The same as hitting enter or using "Open" in the menu on selected files.
@@ -109,59 +139,48 @@ TODO ---------------------------------
 
 TODO ---------------------------------
 
-# Custom Actions
 
-Custom actions are enabled by scripts in the custom-actions directory, default `$HOME/.config/aw-fm/custom-actions/`. Depending on how they are configured they do not always appear in the context menu.
+# Everything below here is unimplemented
+### External Executable Environment
 
-They must be executable text files and options are read from within the file. See the [example script](examples/sample.sh) for an explanation of all the options and environment variables.
-
-## External Executable Environment
-
-The executables from `Execute`, `Script`, and custom actions will be called with no arguments and several environment variables set. [rofi-jump-home.sh](examples/rofi-jump-home.sh) is an example that opens rofi to navigate to a directory inside the user's home directory.
+The executables from `Execute`, `Script`, and custom actions will be called
+with no arguments and several environment variables set.
+[rofi-jump-home.sh](examples/rofi-jump-home.sh) is an example that opens rofi
+to navigate to a directory inside the user's home directory.
 
 Where relevant, tabs and panes are communicated as JSON:
+
+```json
 {
-  <!-- "id": number, -->
   "path": string,
   "search": undefined|string,
 }
+```
 
 Environment Variable | Explanation
 -------------------- | ----------
-AWFM_CURRENT_TAB | The currently selected tab, which is also the current pane, as JSON. May be empty.
-AWFM_SELECTION | A newline-separated set of selected files. May be empty. <!-- TODO -- how does it handle being huge -->
-<!-- AWFM_NEXT_TAB | The next tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be the first tab. May be empty. -->
-<!-- AWFM_PREV_TAB | The previous tab as visually seen in the tabs list on the left. May be empty. -->
-<!-- AWFM_NEXT_PANE | The tab open in the "next" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty. -->
-<!-- AWFM_PREV_PANE | The tab open in the "previous" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty. -->
+AWFM_CURRENT_TAB | The currently selected tab, which is also the current pane. May be empty.
+AWFM_SELECTION | A newline-separated set of selected files. May be empty.
+AWFM_NEXT_TAB | The next tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be the first tab. May be empty.
+AWFM_PREV_TAB | The previous tab as visually seen in the tabs list on the left. May be empty.
+AWFM_NEXT_PANE | The tab open in the "next" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty.
+AWFM_PREV_PANE | The tab open in the "previous" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty.
 <!-- AWFM_PID | The PID of the aw-fm process. -->
 <!-- AWFM_SOCKET | The socket used for IPC, if enabled. -->
 <!-- AWFM_WINDOW | The window ID for the primary window. Currently only on X11. -->
 
-## IPC Socket API
+## Building on Windows
 
-<!-- TODO -- socket print -->
-If configured, aw-fm will expose a limited API over a unix socket, one per process. See the documentation in [aw-fm.toml](aw-fm.toml.sample) and the [example script](examples/socket-print.sh).
+Not planned, good luck. Probably won't work.
 
-Request | Response
---------|---------------------------------------------------------------------------------------
-Status  | The same set of environment variables sent to shortcut executables.
-<!-- ListTabs  | List all the open tabs in visual order. Format is { "id": number, "path": string, "search": undefined|string } -->
-<!-- DumpSession  | Dumps the session as a series of commands that can be run in a script to load a session. See [save-session.sh](examples/save-session.sh) and [load-session.sh] (examples/save-session.sh)-->
-
-The API also accepts any valid action that you could specify in a shortcut, including external executables. Don't run this as root.
-
-# Building on Windows
-
-Not planned, good luck.
-
-# Development
+## Development
 
 * RUST_LOG=Trace for spam
 * GTK_DEBUG=Interactive
 * G_MESSAGES_DEBUG=GnomeDesktop for thumbnailer issues
 
-# Why
+## Why
 
-Gui file managers on Linux aren't in a good state. I can't solve that. I can write a file manager for myself, though.
+Gui file managers on Linux aren't in a good state looking at either performance or
+features. I can't solve that. I can only write a file manager for myself.
 

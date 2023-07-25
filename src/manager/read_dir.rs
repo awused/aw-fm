@@ -1,18 +1,12 @@
-use std::any::Any;
-use std::ffi::OsString;
-use std::fs::{DirEntry, Metadata};
 use std::future::ready;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
-use std::thread::{self};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use constants::*;
-use futures_util::StreamExt;
-use gtk::glib::{self, GStr};
-use gtk::prelude::FileExt;
+use gtk::glib;
 use once_cell::sync::Lazy;
 use rayon::prelude::{ParallelBridge, ParallelIterator};
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -23,8 +17,7 @@ use tokio::task::spawn_local;
 use tokio::time::{sleep, sleep_until, Instant};
 
 use super::Manager;
-use crate::com::{DirSnapshot, Entry, EntryObject, GuiAction, SnapshotKind};
-use crate::natsort::ParsedString;
+use crate::com::{DirSnapshot, Entry, GuiAction, SnapshotKind};
 use crate::{closing, handle_panic};
 
 #[cfg(not(feature = "debug-forced-slow"))]
@@ -79,12 +72,6 @@ enum ReadResult {
     DirError(std::io::Error),
     EntryError(Arc<Path>, gtk::glib::Error),
     Entry(Entry),
-}
-
-enum AsyncResult {
-    Done,
-    Failed,
-    Incomplete,
 }
 
 

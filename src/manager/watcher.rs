@@ -1,14 +1,15 @@
 use std::collections::hash_map;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use gtk::glib::Sender;
 use notify::event::{ModifyKind, RenameMode};
 use notify::RecursiveMode::NonRecursive;
-use notify::{Event, EventKind, Watcher};
+use notify::{Event, Watcher};
 use tokio::time::{Duration, Instant};
 
 use super::Manager;
+use crate::closing;
 use crate::com::{Entry, GuiAction, Update};
 
 // Use our own debouncer as the existing notify debouncers leave a lot to be desired.
@@ -43,7 +44,14 @@ impl Manager {
             // Treat like the directory was removed.
             // The tab only opened to this directory because it was a directory very recently.
             error!("Failed to open directory {path:?}: {e}");
-            self.gui_sender.send(GuiAction::DirectoryOpenError(path.clone(), e.to_string()));
+            if let Err(e) =
+                self.gui_sender.send(GuiAction::DirectoryOpenError(path.clone(), e.to_string()))
+            {
+                if !closing::closed() {
+                    error!("Gui channel unexpectedly closed: {e}");
+                }
+                closing::close();
+            }
             false
         } else {
             true
@@ -53,7 +61,7 @@ impl Manager {
     pub(super) fn unwatch_dir(&mut self, path: &Path) {
         trace!("Unwatching {path:?}");
         if let Err(e) = self.watcher.unwatch(path) {
-            warn!("Failed to unwatch {path:?}, removed or never started");
+            warn!("Failed to unwatch {path:?}, removed or never started: {e}");
         }
     }
 
@@ -61,7 +69,7 @@ impl Manager {
         match Entry::new(path) {
             Ok(entry) => Self::send_gui(gui_sender, GuiAction::Update(Update::Entry(entry))),
             Err((path, e)) => {
-                error!("Error handling file update {path:?}, assuming it was removed: {e:?}");
+                error!("Error handling file update {path:?}, assuming it was removed: {e}");
                 // For now, don't convey this error.
             }
         }
@@ -114,13 +122,12 @@ impl Manager {
             return;
         }
 
-        let now = Instant::now();
         let mut event = event;
         let path: Arc<Path> = event.paths.pop().unwrap().into();
 
         match self.recent_mutations.entry(path.clone()) {
             hash_map::Entry::Occupied(occupied) => {
-                let PendingUpdate(expiry, state) = occupied.into_mut();
+                let PendingUpdate(_expiry, state) = occupied.into_mut();
                 match state {
                     State::Deduping => {
                         trace!("Deduping event for {path:?}");

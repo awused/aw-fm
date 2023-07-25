@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use gtk::{Orientation, Widget};
+use gtk::Orientation;
 
 use super::contents::Contents;
 use super::id::TabId;
@@ -13,8 +13,6 @@ use crate::com::DirSettings;
 // Search is handled as, effectively, an overlay on top of a flat tab.
 //
 // It gets items in current_dir from the tab, but gets everything in subdirs on its own.
-
-
 #[derive(Debug)]
 enum State {
     Loading(Arc<Path>, SearchId),
@@ -31,11 +29,7 @@ pub(super) struct SearchPane {
     pending_view_state: Option<SavedPaneState>,
 }
 
-impl SearchPane {
-    fn contents(&mut self) -> &mut Contents {
-        &mut self.contents
-    }
-}
+impl SearchPane {}
 
 impl PaneExt for SearchPane {
     fn set_active(&mut self, active: bool) {

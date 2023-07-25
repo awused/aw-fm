@@ -1,10 +1,8 @@
-use gtk::pango::ffi::pango_attr_insert_hyphens_new;
+use gtk::glib;
 use gtk::pango::{AttrInt, AttrList};
-use gtk::prelude::{Cast, ObjectExt};
+use gtk::prelude::ObjectExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{AccessibleExt, EventControllerExt, GestureExt, WidgetExt};
-use gtk::{glib, EventController, GestureClick};
-use log::{max_level, LevelFilter};
+use gtk::traits::WidgetExt;
 
 use crate::com::{EntryObject, SignalHolder};
 
@@ -55,7 +53,7 @@ impl IconTile {
         // Name can never change, only set it once.
         {
             let entry = eo.get();
-            let disp_string = entry.name.to_string_lossy();
+            // let disp_string = entry.name.to_string_lossy();
             imp.name.set_text(Some(&entry.name.to_string_lossy()));
 
             // Seems to cause it to lock up completely in large directories with sorting?
@@ -96,13 +94,10 @@ impl IconTile {
 mod imp {
     use std::cell::{Cell, RefCell};
 
-    use gtk::gdk::Texture;
-    use gtk::glib::SignalHandlerId;
-    use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
-    use crate::com::{EntryObject, SignalHolder, Thumbnail};
+    use crate::com::{EntryObject, SignalHolder};
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "icon_tile.ui")]

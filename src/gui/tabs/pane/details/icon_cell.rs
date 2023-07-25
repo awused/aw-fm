@@ -1,6 +1,6 @@
+use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{glib, CompositeTemplate};
 
 use crate::com::{EntryObject, SignalHolder};
 
@@ -70,16 +70,12 @@ impl IconCell {
 
 
 mod imp {
-    use std::borrow::Cow;
     use std::cell::{Cell, RefCell};
 
-    use chrono::{Local, TimeZone};
-    use gtk::glib::SignalHandlerId;
-    use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
-    use crate::com::{Entry, EntryObject, SignalHolder};
+    use crate::com::{EntryObject, SignalHolder};
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "icon_cell.ui")]

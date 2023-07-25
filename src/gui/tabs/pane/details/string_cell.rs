@@ -1,6 +1,6 @@
+use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{glib, CompositeTemplate};
 
 use crate::com::{EntryObject, SignalHolder};
 
@@ -53,7 +53,7 @@ impl StringCell {
         assert!(imp.update_connection.replace(Some(d)).is_none())
     }
 
-    pub fn unbind(&self, obj: &EntryObject) {
+    pub fn unbind(&self, _obj: &EntryObject) {
         self.imp().update_connection.take();
     }
 }
@@ -61,11 +61,9 @@ impl StringCell {
 
 mod imp {
     use std::borrow::Cow;
-    use std::cell::{Cell, RefCell};
+    use std::cell::Cell;
 
     use chrono::{Local, TimeZone};
-    use gtk::glib::SignalHandlerId;
-    use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 

@@ -1,30 +1,24 @@
-use std::borrow::BorrowMut;
 use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
 use std::collections::hash_map;
 use std::fmt::{self, Formatter};
-use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use ahash::AHashMap;
 use gtk::gdk::Texture;
-use gtk::gdk_pixbuf::Pixbuf;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
-    self, Cancellable, FileInfo, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
-    FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE, FILE_ATTRIBUTE_STANDARD_ICON,
-    FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE, FILE_ATTRIBUTE_STANDARD_TYPE,
-    FILE_ATTRIBUTE_TIME_CREATED, FILE_ATTRIBUTE_TIME_CREATED_USEC, FILE_ATTRIBUTE_TIME_MODIFIED,
-    FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+    self, Cancellable, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+    FILE_ATTRIBUTE_STANDARD_ICON, FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
+    FILE_ATTRIBUTE_STANDARD_TYPE, FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
 };
-use gtk::glib::subclass::Signal;
 use gtk::glib::{self, GStr, Object, Variant, WeakRef};
 use gtk::prelude::{FileExt, IconExt, ObjectExt};
-use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassIsExt};
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use once_cell::sync::Lazy;
 
-use super::{DirSettings, SortDir, SortMode, SortSettings};
+use super::{SortDir, SortMode, SortSettings};
 use crate::gui::{queue_thumb, ThumbPriority};
 use crate::natsort::{self, ParsedString};
 
@@ -41,8 +35,6 @@ static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
         FILE_ATTRIBUTE_STANDARD_SIZE,
         FILE_ATTRIBUTE_TIME_MODIFIED,
         FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
-        // FILE_ATTRIBUTE_TIME_CREATED,
-        // FILE_ATTRIBUTE_TIME_CREATED_USEC,
     ]
     .map(GStr::as_str)
     .join(",")
@@ -243,13 +235,9 @@ pub enum Thumbnail {
 // All the ugly GTK wrapper code below this
 
 mod internal {
-    use std::cell::{OnceCell, Ref, RefCell};
-    use std::ops::Deref;
-    use std::time::Instant;
+    use std::cell::{Ref, RefCell};
 
     use gtk::gdk::Texture;
-    use gtk::gdk_pixbuf::Pixbuf;
-    use gtk::gio::Icon;
     use gtk::glib;
     use gtk::glib::subclass::Signal;
     use gtk::prelude::ObjectExt;
@@ -369,7 +357,7 @@ mod internal {
         // Marks the thumbnail as loading if it matches the given priority.
         pub fn mark_thumbnail_loading(&self, p: ThumbPriority) -> bool {
             let mut b = self.0.borrow_mut();
-            let mut inner = &mut b.as_mut().unwrap();
+            let inner = &mut b.as_mut().unwrap();
 
             if !matches!(inner.thumbnail, Thumbnail::Unloaded) {
                 return false;
@@ -404,14 +392,32 @@ mod internal {
             let thumb = &mut b.as_mut().unwrap().thumbnail;
 
             match thumb {
-                Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => return,
+                Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => {}
                 Thumbnail::Loading | Thumbnail::Loaded(_) => {
                     *thumb = Thumbnail::Loaded(tex);
+                    drop(b);
+                    self.obj().emit_by_name::<()>("update", &[]);
                 }
             }
-            drop(b);
-            let start = Instant::now();
-            self.obj().emit_by_name::<()>("update", &[]);
+        }
+
+        pub fn fail_thumbnail(&self) {
+            let mut b = self.0.borrow_mut();
+            let thumb = &mut b.as_mut().unwrap().thumbnail;
+
+            match thumb {
+                Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => (),
+                Thumbnail::Loading => {}
+                Thumbnail::Loaded(_) => {
+                    *thumb = Thumbnail::Failed;
+                    error!(
+                        "Marking loaded thumbnail as failed for: {:?}",
+                        b.as_ref().unwrap().entry.abs_path
+                    );
+                    drop(b);
+                    self.obj().emit_by_name::<()>("update", &[]);
+                }
+            }
         }
 
         pub fn thumbnail(&self) -> Option<Texture> {

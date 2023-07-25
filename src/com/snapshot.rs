@@ -15,15 +15,15 @@ pub enum SnapshotKind {
 impl SnapshotKind {
     pub const fn initial(self) -> bool {
         match self {
-            SnapshotKind::Complete | SnapshotKind::Start => true,
-            SnapshotKind::Middle | SnapshotKind::End => false,
+            Self::Complete | Self::Start => true,
+            Self::Middle | Self::End => false,
         }
     }
 
     pub const fn finished(self) -> bool {
         match self {
-            SnapshotKind::Complete | SnapshotKind::End => true,
-            SnapshotKind::Start | SnapshotKind::Middle => false,
+            Self::Complete | Self::End => true,
+            Self::Start | Self::Middle => false,
         }
     }
 }
@@ -55,7 +55,7 @@ impl DirSnapshot {
     }
 }
 
-// Separate from DirSnapshot so that, we only have one GObject per Entry.
+// Separate from DirSnapshot so that we only have one GObject per Entry.
 // EntryObject uses GObject refcounting for cloning, which is cheaper and avoids the need to update
 // each tab individually.
 #[derive(Debug, Clone)]

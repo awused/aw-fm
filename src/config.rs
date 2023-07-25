@@ -1,19 +1,14 @@
-use std::cmp::max;
 use std::convert::TryFrom;
-use std::env::current_dir;
 use std::fmt;
-use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::Parser;
-use dirs::{config_dir, data_dir};
 use gtk::gdk;
 use once_cell::sync::Lazy;
-use path_clean::PathClean;
 use serde::{de, Deserialize, Deserializer};
 
-use crate::com::Res;
 
 #[derive(Debug, Parser)]
 #[command(name = "aw-fm", about = "Awused's file manager.")]
@@ -32,20 +27,20 @@ pub struct Shortcut {
     pub modifiers: Option<String>,
 }
 
-// #[derive(Debug, Deserialize)]
-// #[serde(rename_all = "lowercase")]
-// pub enum ContextMenuGroup {
-//     Section(String),
-//     Submenu(String),
-// }
-//
-// #[derive(Debug, Deserialize)]
-// pub struct ContextMenuEntry {
-//     pub action: String,
-//     pub name: String,
-//     #[serde(default, flatten)]
-//     pub group: Option<ContextMenuGroup>,
-// }
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextMenuGroup {
+    Section(String),
+    Submenu(String),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ContextMenuEntry {
+    pub action: String,
+    pub name: String,
+    #[serde(default, flatten)]
+    pub group: Option<ContextMenuGroup>,
+}
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
@@ -58,8 +53,6 @@ pub struct Config {
     #[serde(default, deserialize_with = "empty_string_is_none")]
     pub background_colour: Option<gdk::RGBA>,
 
-    // #[serde(default = "three_hundred")]
-    // pub scroll_amount: NonZeroU32,
     #[serde(default, deserialize_with = "zero_is_none")]
     pub idle_timeout: Option<NonZeroU64>,
 
@@ -74,33 +67,13 @@ pub struct Config {
 
     #[serde(default)]
     pub skip_trash: bool,
-    // #[serde(default)]
-    // pub context_menu: Vec<ContextMenuEntry>,
-    // TODO --
+    #[serde(default)]
+    pub context_menu: Vec<ContextMenuEntry>,
+
     #[serde(default)]
     pub max_thumbnailers: u8,
     #[serde(default)]
     pub background_thumbnailers: u8,
-}
-
-fn one() -> NonZeroUsize {
-    NonZeroUsize::new(1).unwrap()
-}
-
-fn two() -> NonZeroUsize {
-    NonZeroUsize::new(2).unwrap()
-}
-
-fn three_hundred() -> NonZeroU32 {
-    NonZeroU32::new(300).unwrap()
-}
-
-fn half_threads() -> NonZeroUsize {
-    NonZeroUsize::new(max(num_cpus::get() / 2, 2)).unwrap()
-}
-
-fn half_threads_four() -> NonZeroUsize {
-    NonZeroUsize::new(max(num_cpus::get() / 2, 4)).unwrap()
 }
 
 // Serde seems broken with OsString for some reason

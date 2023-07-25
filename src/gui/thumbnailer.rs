@@ -1,23 +1,14 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::process::abort;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use ahash::AHashSet;
-use dirs::{data_dir, data_local_dir};
-use gnome_desktop::traits::DesktopThumbnailFactoryExt;
-use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailSize};
 use gtk::gdk::Texture;
-use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
-use gtk::gio::{Cancellable, ReadInputStream};
-use gtk::glib::ffi::{g_get_user_data_dir, g_main_context_default, g_thread_self, GThread};
-use gtk::glib::{Bytes, WeakRef};
-use gtk::prelude::{FileExt, IconExt, ObjectExt};
+use gtk::glib::WeakRef;
+use gtk::prelude::FileExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use rayon::{ThreadBuilder, ThreadPool, ThreadPoolBuilder};
+use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use self::send::SendFactory;
 use super::{gui_run, ThumbPriority};
@@ -61,7 +52,7 @@ impl Thumbnailer {
         let high = CONFIG.max_thumbnailers as u16;
         let low = CONFIG.background_thumbnailers as u16;
 
-        let mut pending = PendingThumbs {
+        let pending = PendingThumbs {
             factories: SendFactory::make(high),
             ..PendingThumbs::default()
         };
@@ -130,6 +121,8 @@ impl Thumbnailer {
             let Some(obj) = EntryObject::lookup(&path) else {
                 return;
             };
+
+            obj.imp().fail_thumbnail();
         });
     }
 
@@ -253,19 +246,14 @@ impl Thumbnailer {
 
 
 mod send {
-    use std::path::PathBuf;
-    use std::ptr;
-    use std::time::{Duration, Instant};
 
-    use futures_executor::block_on;
     use gnome_desktop::traits::DesktopThumbnailFactoryExt;
     use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailSize};
     use gtk::gdk::Texture;
-    use gtk::gdk_pixbuf::{Colorspace, Pixbuf};
     use gtk::gio::glib::GString;
-    use gtk::gio::{Cancellable, Cancelled};
-    use gtk::glib::ffi::{g_thread_self, GThread, G_SPAWN_ERROR_FAILED};
-    use gtk::glib::{Bytes, Quark};
+    use gtk::gio::Cancellable;
+    use gtk::glib::ffi::{g_thread_self, GThread};
+    use gtk::glib::Quark;
 
     use crate::closing;
 

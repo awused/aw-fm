@@ -1,24 +1,18 @@
-use std::fmt::Write;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
-use gtk::gio::ListStore;
-use gtk::glib::SignalHandlerId;
-use gtk::prelude::{Cast, CastNone, ListModelExt, ObjectExt};
+use gtk::gdk::Key;
+use gtk::prelude::{Cast, CastNone, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{AdjustmentExt, BoxExt, EditableExt, EntryExt, SelectionModelExt, WidgetExt};
-use gtk::{
-    Bitset, ColumnView, GridView, ListView, MultiSelection, Orientable, Orientation, Paned,
-    ScrolledWindow, Widget,
-};
+use gtk::traits::{AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, WidgetExt};
+use gtk::{EventControllerKey, MultiSelection, Orientation, ScrolledWindow, Widget};
 
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
 use super::id::TabId;
 use super::{Contents, SavedPaneState};
-use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder, SortSettings};
-use crate::gui::{applications, gui_run, tabs_run};
+use crate::com::{DirSettings, DisplayMode, EntryObject};
+use crate::gui::{applications, tabs_run};
 
 mod details;
 mod element;
@@ -93,9 +87,11 @@ pub(super) struct Pane {
     view: View,
 
     element: PaneElement,
-    contents_signals: PaneSignals,
     tab: TabId,
     selection: MultiSelection,
+
+    _signals: PaneSignals,
+    // _flat_sig: Option<SignalHolder<gtk::Entry>>,
 }
 
 impl Drop for Pane {
@@ -167,14 +163,16 @@ impl Pane {
             view,
 
             element,
-            contents_signals: signals,
 
             tab,
             selection: selection.clone(),
+
+            _signals: signals,
         }
     }
 
-    fn setup_flat(mut self, tab: TabId, path: &Path) -> Self {
+    fn setup_flat(self, path: &Path) -> Self {
+        let tab = self.tab;
         debug!("Creating new flat pane for {:?}: {:?}", tab, path);
 
         let location = path.to_string_lossy().to_string();
@@ -196,6 +194,22 @@ impl Pane {
             tabs_run(|t| t.navigate(tab, &path));
         });
 
+        // Reset on escape
+        let key = EventControllerKey::new();
+        let weak = self.element.downgrade();
+        key.connect_key_pressed(move |c, k, _b, m| {
+            if !m.is_empty() {
+                return gtk::Inhibit(false);
+            }
+
+            if Key::Escape == k {
+                let w = c.widget().downcast::<gtk::Entry>().unwrap();
+                w.set_text(&weak.upgrade().unwrap().imp().original_text.borrow());
+            }
+
+            gtk::Inhibit(false)
+        });
+        imp.text_entry.add_controller(key);
 
         self
     }
@@ -207,7 +221,7 @@ impl Pane {
         selection: &MultiSelection,
         attach: F,
     ) -> Self {
-        let pane = Self::create(tab, settings, selection).setup_flat(tab, path);
+        let pane = Self::create(tab, settings, selection).setup_flat(path);
 
         // Where panes are created is controlled in TabsList
         attach(pane.element.upcast_ref());
@@ -245,10 +259,6 @@ impl Pane {
         self.element.imp().original_text.replace(location);
         self.element.imp().seek.set_text("");
         self.element.imp().stack.set_visible_child_name("count");
-    }
-
-    pub(super) fn workaround_scroller(&self) -> &ScrolledWindow {
-        &self.element.imp().scroller
     }
 }
 
@@ -320,7 +330,7 @@ impl PaneExt for Pane {
                     debug!("Scrolling to position from element {pos:?}");
                     pos
                 } else {
-                    Some(0)
+                    Some(sp.index)
                 }
             })
             .unwrap_or(0);

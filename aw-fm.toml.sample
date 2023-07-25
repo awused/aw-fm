@@ -11,13 +11,14 @@
 # Transparency is allowed but depends on the display server for support.
 # When set will override all backgrounds.
 #
-# Leave empty to use your default theme.
-background_colour = '#000000be'
+# Leave empty to use your default GTK theme.
+# background_colour = '#000000be'
 
 # The timeout, in seconds, for detecting idleness.
 # When the application is idle for a long period of time then most preloaded images can be unloaded
 # to reduce wasted memory.
 # Comment out or set to 0 to disable.
+# UNIMPLEMENTED
 idle_timeout = 600
 
 # Shortcuts
@@ -44,6 +45,7 @@ shortcuts = [
   # {key = "P", modifiers = "Control", action = "Navigate /home/" },
   # {key = "P", modifiers = "Alt", action = "Script /path/to/rofi-jump-home.sh"},
 
+  {key = "H", modifiers = "Control", action = "Home" },
   {key = "T", modifiers = "Control", action = "NewTab"},
   {key = "T", modifiers = "Alt", action = "NewBackgroundTab"},
 
@@ -67,8 +69,18 @@ shortcuts = [
   {key = "2", modifiers = "Control", action = "Mode columns"},
 
   # {key = "F5", action = "Refresh"},
-  # NOT IMPLEMENTED -- Refresh is all right now
   # {key = "F5", modifiers="Control", action = "Refresh all"},
+]
+
+# Bookmarks
+# These show up on the left, as buttons above the list of tabs, and are always visible.
+#
+# Ask yourself if you really want these, or if a keyboard shortcut and a
+# rofi script wouldn't be a better option.
+# Defined as { name = "Name", action = "Command" },
+# UNIMPLEMENTED
+bookmarks = [
+  # { name = "Home", action = "Home" },
 ]
 
 # Context Menu
@@ -82,6 +94,7 @@ shortcuts = [
 # Example:
 # {name = "Save Page", action = "Execute /path/to/save-page.sh"},
 # {name = "Sample Script", action = "Script /path/to/sample-script.sh"},
+# UNIMPLEMENTED
 context_menu = [
 ]
 

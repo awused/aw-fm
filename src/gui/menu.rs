@@ -1,16 +1,11 @@
-use std::collections::hash_map::Entry;
+#![allow(unused)]
+#![allow(dead_code)]
 use std::rc::Rc;
 
-use ahash::AHashMap;
-use gtk::gdk::Rectangle;
-use gtk::gio::{Menu, MenuItem, SimpleActionGroup};
 use gtk::glib::{ToVariant, Variant};
-use gtk::traits::{EventControllerExt, GestureSingleExt, PopoverExt, RootExt, WidgetExt};
-use gtk::{GestureClick, PopoverMenu, PositionType};
 
 use super::Gui;
-// use crate::com::Toggle;
-use crate::config::CONFIG;
+
 
 #[derive(Debug)]
 pub(super) struct GuiMenu {

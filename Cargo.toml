@@ -45,7 +45,7 @@ toml = "0.7.6"
 
 # This is auto-generated, but pretty much left unmaintained and abandoned.
 # Local patched version to generate what I need and expose the "v42" feature.
-gnome-desktop = { path = "../../third_party/gnome-desktop-rs/gnome-desktop", features = [ "v42" ] }
+gnome-desktop = { git = "https://github.com/awused/gnome-desktop-rs", features = [ "v42" ] }
 
 
 [target.'cfg(unix)'.dependencies]

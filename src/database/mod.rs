@@ -1,13 +1,11 @@
 use std::cell::RefCell;
-use std::mem::ManuallyDrop;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
-use std::str::FromStr;
 use std::time::Instant;
 
 use dirs::data_dir;
 use rusqlite::types::{FromSql, FromSqlError};
-use rusqlite::{params, Connection, OpenFlags, ToSql};
+use rusqlite::{params, Connection, ToSql};
 
 use crate::com::{DirSettings, DisplayHidden, DisplayMode, SortDir, SortMode, SortSettings};
 use crate::config::CONFIG;
@@ -27,11 +25,6 @@ impl DBCon {
             .clone()
             .unwrap_or_else(|| data_dir().unwrap().join("aw-fm").join("settings.db"));
 
-        // For testing, destroy DB each time
-        if path.is_file() {
-            error!("Removing existing DB for testing purposes");
-            std::fs::remove_file(&path).unwrap();
-        }
 
         info!("Attempting to open database in {path:?}");
         if !path.exists() {
@@ -40,7 +33,7 @@ impl DBCon {
             assert!(!dir.exists() || dir.is_dir(), "{dir:?} exists and is not a directory");
 
             std::fs::create_dir_all(dir).unwrap_or_else(|e| {
-                &format!("Failed to create parent directory {dir:?} for database: {e}");
+                panic!("Failed to create parent directory {dir:?} for database: {e}");
             });
         } else if !path.is_file() {
             panic!("Database {path:?} exists but is not a file.");
