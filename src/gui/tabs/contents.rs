@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::time::Instant;
 
 use gtk::gio::ListStore;
-use gtk::glib::{self, Object};
+use gtk::glib::{self, ControlFlow, Object};
 use gtk::prelude::{Cast, ListModelExt, ListModelExtManual, StaticType};
 use gtk::traits::SelectionModelExt;
 use gtk::MultiSelection;
@@ -27,7 +27,7 @@ impl std::fmt::Debug for Contents {
 
 impl Contents {
     pub fn new(sort: SortSettings) -> Self {
-        let list = ListStore::new(EntryObject::static_type());
+        let list = ListStore::new::<EntryObject>();
         let selection = MultiSelection::new(Some(list.clone()));
         Self { list, sort, stale: false, selection }
     }
@@ -177,7 +177,7 @@ impl Contents {
 
     pub fn clear(&mut self, sort: SortSettings) {
         self.stale = false;
-        let new_list = ListStore::new(EntryObject::static_type());
+        let new_list = ListStore::new::<EntryObject>();
         self.selection.set_model(Some(&new_list));
         let old_list = std::mem::replace(&mut self.list, new_list);
 
@@ -189,11 +189,12 @@ impl Contents {
         let start = Instant::now();
         glib::idle_add_local(move || {
             if old_list.n_items() <= 1000 {
+                // Actually logs a tiny amount before dropping the last items.
                 trace!("Finished dropping items in {:?}", start.elapsed());
-                return glib::Continue(false);
+                return ControlFlow::Break;
             }
             old_list.splice(0, 1000, &[] as &[EntryObject]);
-            glib::Continue(true)
+            ControlFlow::Continue
         });
 
         self.sort = sort;

@@ -5,7 +5,7 @@ use dirs::home_dir;
 use gtk::gio::ListStore;
 use gtk::prelude::{Cast, CastNone, ListModelExt, StaticType};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::BoxExt;
+use gtk::traits::{BoxExt, ListItemExt};
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
 
 use super::element::TabElement;
@@ -45,7 +45,7 @@ pub struct TabsList {
 impl TabsList {
     pub fn new(window: &MainWindow) -> Self {
         let tabs_container = window.imp().tabs.clone();
-        let tab_elements = ListStore::new(TabElement::static_type());
+        let tab_elements = ListStore::new::<TabElement>();
 
 
         let factory = SignalListItemFactory::new();

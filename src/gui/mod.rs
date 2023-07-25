@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use ahash::AHashMap;
 use gtk::gdk::ModifierType;
-use gtk::glib::{SourceId, WeakRef};
+use gtk::glib::{ControlFlow, SourceId, WeakRef};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib};
@@ -270,7 +270,7 @@ impl Gui {
         self.win_state.set(s);
     }
 
-    fn handle_update(self: &Rc<Self>, gu: GuiAction) -> glib::Continue {
+    fn handle_update(self: &Rc<Self>, gu: GuiAction) -> ControlFlow {
         use crate::com::GuiAction::*;
 
         match gu {
@@ -295,10 +295,10 @@ impl Gui {
             Quit => {
                 self.window.close();
                 closing::close();
-                return glib::Continue(false);
+                return ControlFlow::Break;
             }
         }
-        glib::Continue(true)
+        ControlFlow::Continue
     }
 
     fn send_manager(&self, val: ManagerAction) {

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use gtk::gdk::Key;
 use gtk::glib::prelude::*;
-use gtk::glib::BoxedAnyObject;
+use gtk::glib::{BoxedAnyObject, ControlFlow};
 use gtk::prelude::*;
 
 use crate::config::{Shortcut, CONFIG};
@@ -29,7 +29,7 @@ impl Gui {
         #[cfg(windows)]
         dialog.add_css_class(self.win32.dpi_class());
 
-        let store = gtk::gio::ListStore::new(BoxedAnyObject::static_type());
+        let store = gtk::gio::ListStore::new::<BoxedAnyObject>();
 
         for s in &CONFIG.shortcuts {
             store.append(&BoxedAnyObject::new(s));
@@ -111,7 +111,7 @@ impl Gui {
         dialog.connect_close_request(move |d| {
             g.open_dialogs.borrow_mut().help.take();
             d.destroy();
-            gtk::Inhibit(false)
+            ControlFlow::Continue
         });
 
 

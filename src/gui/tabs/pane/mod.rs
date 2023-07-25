@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use gtk::gdk::Key;
+use gtk::glib::ControlFlow;
 use gtk::prelude::{Cast, CastNone, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, WidgetExt};
@@ -199,7 +200,7 @@ impl Pane {
         let weak = self.element.downgrade();
         key.connect_key_pressed(move |c, k, _b, m| {
             if !m.is_empty() {
-                return gtk::Inhibit(false);
+                return ControlFlow::Continue;
             }
 
             if Key::Escape == k {
@@ -207,7 +208,7 @@ impl Pane {
                 w.set_text(&weak.upgrade().unwrap().imp().original_text.borrow());
             }
 
-            gtk::Inhibit(false)
+            ControlFlow::Continue
         });
         imp.text_entry.add_controller(key);
 

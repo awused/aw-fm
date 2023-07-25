@@ -7,6 +7,7 @@ use std::str::FromStr;
 use ahash::AHashMap;
 use dirs::home_dir;
 use gtk::gdk::{Key, ModifierType};
+use gtk::glib::ControlFlow;
 use gtk::prelude::Cast;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{EventControllerExt, GtkWindowExt, WidgetExt};
@@ -43,7 +44,7 @@ impl Gui {
             if let Some(s) = g.shortcut_from_key(a, c) {
                 g.run_command(s);
             }
-            gtk::Inhibit(false)
+            ControlFlow::Continue
         });
 
         self.window.add_controller(key);
@@ -62,7 +63,7 @@ impl Gui {
                 }
                 _ => (),
             }
-            gtk::Inhibit(false)
+            ControlFlow::Continue
         });
 
         w.add_controller(key);

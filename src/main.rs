@@ -51,7 +51,7 @@ fn main() {
 
     let (manager_sender, manager_receiver) = tokio::sync::mpsc::unbounded_channel();
     // PRIORITY_LOW prioritize GTK redrawing events.
-    let (gui_sender, gui_receiver) = glib::MainContext::channel(glib::PRIORITY_LOW);
+    let (gui_sender, gui_receiver) = glib::MainContext::channel(glib::Priority::LOW);
 
     closing::init(gui_sender.clone());
 

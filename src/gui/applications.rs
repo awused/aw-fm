@@ -1,10 +1,9 @@
 use std::cell::RefCell;
 
 use ahash::AHashMap;
-use gtk::gdk::traits::AppLaunchContextExt;
 use gtk::gdk::Display;
 use gtk::gio::{AppInfo, File};
-use gtk::prelude::{AppInfoExt, Cast, DisplayExt, ListModelExt};
+use gtk::prelude::{AppInfoExt, Cast, DisplayExt, GdkAppLaunchContextExt, ListModelExt};
 use gtk::traits::SelectionModelExt;
 use gtk::{glib, MultiSelection};
 
