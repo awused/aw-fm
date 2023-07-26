@@ -1,11 +1,19 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::time::Instant;
 
 use gtk::gdk::Key;
 use gtk::glib::{ControlFlow, Object};
 use gtk::prelude::{Cast, CastNone, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, WidgetExt};
-use gtk::{CustomFilter, EventControllerKey, MultiSelection, Orientation, ScrolledWindow, Widget};
+use gtk::traits::{
+    AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, WidgetExt,
+};
+use gtk::{
+    CustomFilter, EventControllerKey, FilterChange, MultiSelection, Orientation, ScrolledWindow,
+    Widget,
+};
 
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
@@ -76,7 +84,7 @@ pub(super) trait PaneExt {
 
     fn apply_state(&mut self, state: SavedPaneState, list: &Contents);
 
-    fn workaround_scroller(&self) -> &ScrolledWindow;
+    fn workaround_scroller(&self) -> Option<&ScrolledWindow>;
 
     fn activate(&self);
 
@@ -92,7 +100,6 @@ pub(super) struct Pane {
     selection: MultiSelection,
 
     _signals: PaneSignals,
-    // _flat_sig: Option<SignalHolder<gtk::Entry>>,
 }
 
 impl Drop for Pane {
@@ -159,6 +166,25 @@ impl Pane {
             }
         };
 
+        // Reset on escape
+        let key = EventControllerKey::new();
+        let weak = element.downgrade();
+        key.connect_key_pressed(move |c, k, _b, m| {
+            if !m.is_empty() {
+                // https://github.com/gtk-rs/gtk4-rs/issues/1435
+                return ControlFlow::Break;
+            }
+
+            if Key::Escape == k {
+                let w = c.widget().downcast::<gtk::Entry>().unwrap();
+                w.set_text(&weak.upgrade().unwrap().imp().original_text.borrow());
+            }
+
+            // https://github.com/gtk-rs/gtk4-rs/issues/1435
+            ControlFlow::Break
+        });
+        element.imp().text_entry.add_controller(key);
+
 
         Self {
             view,
@@ -174,7 +200,7 @@ impl Pane {
 
     fn setup_flat(self, path: &Path) -> Self {
         let tab = self.tab;
-        debug!("Creating new flat pane for {:?}: {:?}", tab, path);
+        debug!("Creating new flat pane for {tab:?}: {path:?}");
 
         let location = path.to_string_lossy().to_string();
 
@@ -189,30 +215,63 @@ impl Pane {
         // imp.text_entry.connect_changed(|e| {
         //     println!("TODO -- changed {e:?}");
         // });
-        //
+
         imp.text_entry.connect_activate(move |e| {
             let path: PathBuf = e.text().into();
             tabs_run(|t| t.navigate(tab, &path));
         });
 
-        // Reset on escape
-        let key = EventControllerKey::new();
-        let weak = self.element.downgrade();
-        key.connect_key_pressed(move |c, k, _b, m| {
-            if !m.is_empty() {
-                // https://github.com/gtk-rs/gtk4-rs/issues/1435
-                return ControlFlow::Break;
-            }
 
-            if Key::Escape == k {
-                let w = c.widget().downcast::<gtk::Entry>().unwrap();
-                w.set_text(&weak.upgrade().unwrap().imp().original_text.borrow());
-            }
+        self
+    }
 
-            // https://github.com/gtk-rs/gtk4-rs/issues/1435
-            ControlFlow::Break
+    fn setup_search(self, filter: CustomFilter, query: String) -> Self {
+        let tab = self.tab;
+        let imp = self.element.imp();
+        debug!("Creating new search pane for {tab:?}: {query:?}");
+
+        imp.text_entry.set_text(&query);
+        imp.original_text.replace("".to_string());
+
+        let query_rc: Rc<_> = RefCell::new(query).into();
+        let query = query_rc.clone();
+
+        let filt = filter.clone();
+        imp.text_entry.connect_changed(move |e| {
+            let text = e.text();
+            let mut query = query_rc.borrow_mut();
+            let new = text.to_lowercase();
+
+            let change = if new == *query || (query.len() < 3 && new.len() < 3) {
+                return;
+            } else if query.len() < 3 {
+                FilterChange::LessStrict
+            } else if new.len() < 3 {
+                FilterChange::MoreStrict
+            } else if query.starts_with(&new) {
+                FilterChange::LessStrict
+            } else if new.starts_with(&*query) {
+                FilterChange::MoreStrict
+            } else {
+                FilterChange::Different
+            };
+
+            *query = new;
+            drop(query);
+            let start = Instant::now();
+            filt.changed(change);
+            trace!("Updated search filter in {:?}", start.elapsed());
         });
-        imp.text_entry.add_controller(key);
+
+        filter.set_filter_func(move |obj| {
+            let q = query.borrow();
+            if q.len() < 3 {
+                return false;
+            }
+
+            let eo = obj.downcast_ref::<EntryObject>().unwrap();
+            eo.get().name.lowercase().contains(&*q)
+        });
 
         self
     }
@@ -232,16 +291,6 @@ impl Pane {
         pane
     }
 
-    pub(super) fn search_fn(query: String) -> impl Fn(&Object) -> bool + 'static {
-        move |eo| {
-            if query.len() < 3 {
-                return false;
-            }
-
-            todo!()
-        }
-    }
-
     pub(super) fn flat_to_search(
         self,
         query: String,
@@ -249,9 +298,11 @@ impl Pane {
         selection: &MultiSelection,
         filter: CustomFilter,
     ) -> Self {
-        let pane = Self::create(self.tab, settings, selection);
+        let new = Self::create(self.tab, settings, selection).setup_search(filter, query);
 
-        todo!()
+        self.replace_with(new.element.upcast_ref::<Widget>());
+
+        new
     }
 
     pub(super) fn replace_with(self, new: &Widget) {
@@ -288,6 +339,10 @@ impl Pane {
 
     pub(super) fn text_contents(&self) -> String {
         self.element.imp().text_entry.text().to_string()
+    }
+
+    pub(super) fn update_search(&self, query: &str) {
+        self.element.imp().text_entry.set_text(query);
     }
 }
 
@@ -371,8 +426,8 @@ impl PaneExt for Pane {
     }
 
     // Most view state code should be moved here.
-    fn workaround_scroller(&self) -> &ScrolledWindow {
-        &self.element.imp().scroller
+    fn workaround_scroller(&self) -> Option<&ScrolledWindow> {
+        Some(&self.element.imp().scroller)
     }
 
     fn activate(&self) {

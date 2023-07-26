@@ -1,8 +1,9 @@
 use std::collections::hash_map;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use gtk::glib::Sender;
+use gtk::glib::{self, Sender};
 use notify::event::{ModifyKind, RenameMode};
 use notify::RecursiveMode::NonRecursive;
 use notify::{Event, Watcher};
@@ -10,7 +11,7 @@ use tokio::time::{Duration, Instant};
 
 use super::Manager;
 use crate::closing;
-use crate::com::{Entry, GuiAction, Update};
+use crate::com::{Entry, GuiAction, SearchUpdate, Update};
 
 // Use our own debouncer as the existing notify debouncers leave a lot to be desired.
 // Send the first event immediately and then at most one event per period.
@@ -28,15 +29,23 @@ const BATCH_GRACE: Duration = Duration::from_millis(5);
 // Debouncing -> Expiring
 // Expiring -> nothing
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 enum State {
     Deduping,
     Expiring,
     Debounced,
 }
 
+type Search = Arc<AtomicBool>;
+
+#[derive(Debug, Default)]
+pub struct Sources {
+    flat: bool,
+    searches: Vec<Search>,
+}
+
 #[derive(Debug)]
-pub struct PendingUpdates(Instant, State);
+pub struct PendingUpdates(Instant, State, Sources);
 
 impl Manager {
     pub(super) fn watch_dir(&mut self, path: &Arc<Path>) -> bool {
@@ -65,17 +74,52 @@ impl Manager {
         }
     }
 
-    fn send_update(gui_sender: &Sender<GuiAction>, path: Arc<Path>) {
-        match Entry::new(path) {
-            Ok(entry) => Self::send_gui(gui_sender, GuiAction::Update(Update::Entry(entry))),
-            Err((path, e)) => {
-                error!("Error handling file update {path:?}, assuming it was removed: {e}");
-                // For now, don't convey this error.
+    pub(super) fn watch_search(&mut self, path: Arc<Path>, cancel: Arc<AtomicBool>) {
+        error!("TODO -- search");
+    }
+
+    pub(super) fn unwatch_search(&mut self, cancel: Arc<AtomicBool>) {
+        let pos = self.open_searches.iter().position(|(id, _watcher)| Arc::ptr_eq(&cancel, id));
+        if let Some(pos) = pos {
+            debug!("Removing search watcher");
+            let (_, watcher) = self.open_searches.swap_remove(pos);
+            drop(watcher);
+        }
+    }
+
+    fn send_update(sender: &glib::Sender<GuiAction>, path: Arc<Path>, sources: Sources) {
+        for search in sources.searches {
+            match Entry::new(path.clone()) {
+                Ok(entry) => {
+                    sender.send(GuiAction::Update(Update::Entry(entry))).unwrap_or_else(|e| {
+                        error!("{e}");
+                        closing::close()
+                    })
+                }
+                Err((path, e)) => {
+                    error!("Error handling search file update for {path:?}: {e}");
+                    // For now, don't convey this error.
+                }
+            }
+        }
+
+        if sources.flat {
+            match Entry::new(path) {
+                Ok(entry) => {
+                    sender.send(GuiAction::Update(Update::Entry(entry))).unwrap_or_else(|e| {
+                        error!("{e}");
+                        closing::close()
+                    })
+                }
+                Err((path, e)) => {
+                    error!("Error handling file update {path:?}, assuming it was removed: {e}");
+                    // For now, don't convey this error.
+                }
             }
         }
     }
 
-    pub(super) fn handle_event(&mut self, event: notify::Result<Event>) {
+    pub(super) fn handle_event(&mut self, event: notify::Result<Event>, source: Option<Search>) {
         use notify::EventKind::*;
 
         let event = match event {
@@ -83,7 +127,7 @@ impl Manager {
             Err(e) => {
                 let e = format!("Error in notify watcher {e}");
                 error!("{e}");
-                return Self::send_gui(&self.gui_sender, GuiAction::ConveyError(e));
+                return self.send(GuiAction::ConveyError(e));
             }
         };
 
@@ -106,7 +150,13 @@ impl Manager {
                 let path = event.paths.pop().unwrap();
 
                 self.recent_mutations.remove(&*path);
-                Self::send_gui(&self.gui_sender, GuiAction::Update(Update::Removed(path.into())));
+                let update = Update::Removed(path.into());
+                match source {
+                    Some(search_id) => {
+                        self.send(GuiAction::SearchUpdate(SearchUpdate { search_id, update }))
+                    }
+                    None => self.send(GuiAction::Update(update)),
+                }
                 return;
             }
             // Treat Any as a generic Modify
@@ -127,24 +177,38 @@ impl Manager {
 
         match self.recent_mutations.entry(path.clone()) {
             hash_map::Entry::Occupied(occupied) => {
-                let PendingUpdates(_expiry, state) = occupied.into_mut();
-                match state {
-                    State::Deduping => {
-                        trace!("Deduping event for {path:?}");
-                        return;
-                    }
-                    State::Expiring => {
-                        *state = State::Debounced;
-                        // Expiry remains the same, and next_tick should already be set.
-                        assert!(self.next_tick.is_some());
-                    }
-                    State::Debounced => {}
+                let PendingUpdates(_expiry, state, sources) = occupied.into_mut();
+
+                if *state == State::Deduping {
+                    trace!("Deduping event for {path:?} from {source:?}");
+                } else {
+                    trace!("Debouncing event for {path:?} from {source:?}");
                 }
-                trace!("Debouncing event for {path:?}");
+
+                match source {
+                    Some(search) => {
+                        if !sources.searches.iter().any(|s| Arc::ptr_eq(&search, s)) {
+                            sources.searches.push(search);
+                        }
+                    }
+                    None => sources.flat = true,
+                }
+
+                if *state == State::Expiring {
+                    *state = State::Debounced;
+                    // Expiry remains the same, and next_tick should already be set.
+                    assert!(self.next_tick.is_some());
+                }
             }
             hash_map::Entry::Vacant(vacant) => {
                 let expiry = Instant::now() + DEDUPE_DELAY + BATCH_GRACE;
-                vacant.insert(PendingUpdates(expiry, State::Deduping));
+                let mut sources = Sources::default();
+                match source {
+                    Some(search) => sources.searches.push(search),
+                    None => sources.flat = true,
+                }
+
+                vacant.insert(PendingUpdates(expiry, State::Deduping, sources));
 
                 self.next_tick = self.next_tick.map_or(Some(expiry), |nt| Some(nt.min(expiry)));
             }
@@ -157,7 +221,7 @@ impl Manager {
         let mut expired_keys = Vec::new();
 
         // TODO -- this would match drain_filter
-        for (path, PendingUpdates(expiry, state)) in &mut self.recent_mutations {
+        for (path, PendingUpdates(expiry, state, sources)) in &mut self.recent_mutations {
             if *expiry < now {
                 match state {
                     State::Expiring => {
@@ -167,17 +231,17 @@ impl Manager {
                     }
                     State::Deduping => {
                         *state = State::Expiring;
-                        trace!("Sending update for {path:?}");
+                        trace!("Sending update for {path:?} and {sources:?}");
                     }
                     State::Debounced => {
                         *state = State::Expiring;
-                        trace!("Sending debounced update for {path:?}");
+                        trace!("Sending debounced update for {path:?} and {sources:?}");
                     }
                 }
 
                 *expiry += DEBOUNCE_DURATION;
                 maybe_tick = maybe_tick.min(*expiry);
-                Self::send_update(&self.gui_sender, path.clone());
+                Self::send_update(&self.gui_sender, path.clone(), std::mem::take(sources));
             } else if *expiry < maybe_tick {
                 maybe_tick = *expiry;
             }

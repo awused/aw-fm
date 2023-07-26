@@ -33,7 +33,6 @@ pub(super) struct SearchPane {
     pane: Option<Pane>,
     // This contains everything in tab.contents plus items from subdirectories.
     contents: Contents,
-    filter: CustomFilter,
     // This is used to store a view state until search is done loading.
     pending_view_state: Option<SavedPaneState>,
 }
@@ -51,7 +50,7 @@ impl SearchPane {
         let state = State::Loading(SearchId::new(path.clone()), Vec::new());
         let (contents, filter) = Contents::search_from(flat_contents);
 
-        let pane = flat_pane.flat_to_search(query, settings, &contents.selection, filter.clone());
+        let pane = flat_pane.flat_to_search(query, settings, &contents.selection, filter);
 
         Self {
             path,
@@ -59,7 +58,6 @@ impl SearchPane {
             flat_loading,
             pane: Some(pane),
             contents,
-            filter,
             pending_view_state: None,
         }
     }
@@ -73,7 +71,12 @@ impl SearchPane {
     }
 
     pub fn set_query(&mut self, query: String) {
-        self.filter.set_filter_func(Pane::search_fn(query));
+        if let Some(pane) = &self.pane {
+            pane.update_search(&query);
+        } else {
+            // Search query blows away previous pane state.
+            self.pending_view_state = Some(SavedPaneState { scroll_pos: None, search: Some(query) })
+        }
     }
 
     pub fn re_sort(&mut self) {
@@ -91,7 +94,7 @@ impl SearchPane {
         }
     }
 
-    pub fn matches_search_update(&self, update: &SearchUpdate) -> bool {
+    pub fn matches_update(&self, update: &SearchUpdate) -> bool {
         match &self.state {
             State::Unloaded => false,
             State::Loading(id, _) | State::AwaitingFlat(id, _) | State::Done(id) => {
@@ -113,7 +116,7 @@ impl SearchPane {
         self.contents.finish_update(update);
     }
 
-    // Special handling for flat events in other tabs that might overlap this one.
+    // Special handling for flat events in other tabs that might overlap this search.
     // They might need to be immediately applied, even during loading, because they could
     // change sort order.
     pub fn handle_subdir_flat_mutate(&mut self, update: &PartiallyAppliedUpdate) {
@@ -126,6 +129,8 @@ impl SearchPane {
             if let Some(pos) = self.contents.total_position_by_sorted(old) {
                 self.contents.reinsert_updated(pos, new, old);
             }
+        } else {
+            unreachable!()
         }
     }
 
@@ -149,7 +154,7 @@ impl SearchPane {
     }
 
     fn check_done(&mut self) {
-        todo!()
+        error!("TODO -- finish loading search")
     }
 }
 
@@ -194,8 +199,8 @@ impl PaneExt for SearchPane {
         }
     }
 
-    fn workaround_scroller(&self) -> &gtk::ScrolledWindow {
-        todo!()
+    fn workaround_scroller(&self) -> Option<&gtk::ScrolledWindow> {
+        self.pane.as_ref().and_then(PaneExt::workaround_scroller)
     }
 
     fn activate(&self) {

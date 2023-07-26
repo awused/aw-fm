@@ -117,7 +117,7 @@ impl Manager {
                         closing::close();
                         break 'main;
                     };
-                    self.handle_event(ev);
+                    self.handle_event(ev, None);
                 }
                 _ = async { sleep_until(self.next_tick.unwrap()).await },
                         if self.next_tick.is_some() => {
@@ -144,16 +144,19 @@ impl Manager {
             Refresh(path, cancel) => self.start_read_dir(path, cancel),
             Unwatch(path) => self.unwatch_dir(&path),
 
-            Search(path, cancel) => todo!(),
-            EndSearch(cancel) => todo!(),
+            Search(path, cancel) => {
+                self.watch_search(path.clone(), cancel.clone());
+                self.recurse_dir(path, cancel);
+            }
+            EndSearch(cancel) => self.unwatch_search(cancel),
 
             Execute(s, env) => self.execute(s, env),
             Script(s, env) => self.script(s, env),
         }
     }
 
-    fn send_gui(gui_sender: &glib::Sender<GuiAction>, action: GuiAction) {
-        if let Err(e) = gui_sender.send(action) {
+    fn send(&self, action: GuiAction) {
+        if let Err(e) = self.gui_sender.send(action) {
             error!("Sending to gui thread unexpectedly failed, {:?}", e);
             closing::close();
         }

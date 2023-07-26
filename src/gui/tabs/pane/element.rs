@@ -56,6 +56,7 @@ impl PaneElement {
 
         imp.tab.set(tab).unwrap();
         imp.text_entry.set_enable_undo(true);
+        imp.stack.set_visible_child_name("count");
 
         s.connect_destroy(move |_| trace!("Pane for {tab:?} destroyed"));
         (s, signals)

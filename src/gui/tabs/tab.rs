@@ -15,8 +15,8 @@ use super::pane::{Pane, PaneExt};
 use super::search::SearchPane;
 use super::{HistoryEntry, NavTarget, SavedPaneState, ScrollPosition};
 use crate::com::{
-    DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, SearchUpdate,
-    SnapshotId, SortSettings,
+    DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, SearchSnapshot,
+    SearchUpdate, SnapshotId, SortSettings,
 };
 use crate::gui::tabs::PartiallyAppliedUpdate;
 use crate::gui::{gui_run, Update};
@@ -203,6 +203,7 @@ impl Tab {
             if **self.dir.path() == **t.dir.path() {
                 self.dir = t.dir.clone();
                 self.contents.clone_from(&t.contents, self.settings.sort);
+                // TODO [search] this is not right
                 self.element.clone_from(&t.element);
 
                 self.apply_pane_state();
@@ -238,7 +239,10 @@ impl Tab {
             &self.contents,
             query,
             flat,
-        ))
+        ));
+
+        self.element.imp().spinner.start();
+        self.element.imp().spinner.set_visible(true);
     }
 
     // Only make this take &mut [Self] if truly necessary
@@ -270,10 +274,10 @@ impl Tab {
 
     fn apply_snapshot_inner(&mut self, snap: EntryObjectSnapshot) {
         if self.settings.display_mode == DisplayMode::Icons {
-            if let Some(pane) = &self.pane.get() {
-                if pane.workaround_scroller().vscrollbar_policy() != gtk::PolicyType::Never {
+            if let Some(scroller) = self.pane.get().and_then(PaneExt::workaround_scroller) {
+                if scroller.vscrollbar_policy() != gtk::PolicyType::Never {
                     error!("Locking scrolling to work around gtk crash");
-                    pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Never);
+                    scroller.set_vscrollbar_policy(gtk::PolicyType::Never);
                 }
             }
         }
@@ -326,7 +330,7 @@ impl Tab {
         let (updates, start) = self.dir.take_loaded();
 
         for u in updates {
-            self.matched_flat_update(left, right, u);
+            self.flat_update(left, right, u);
         }
 
         self.finish_flat_load();
@@ -335,13 +339,40 @@ impl Tab {
         info!("Finished loading {:?} in {:?}", self.dir.path(), start.elapsed());
     }
 
-    pub fn matches_flat_update(&self, ev: &Update) -> bool {
+    pub fn matches_search_snapshot(&self, snap: &SearchSnapshot) -> bool {
+        if let CurrentPane::Search(search) = &self.pane {
+            search.matches_snapshot(snap)
+        } else {
+            false
+        }
+    }
+
+    pub fn apply_search_snapshot(&mut self, snap: SearchSnapshot) {
+        let search = self.pane.search().unwrap();
+        assert!(search.matches_snapshot(&snap));
+        search.apply_search_snapshot(snap);
+    }
+
+    pub fn matches_flat_update(&self, update: &Update) -> bool {
         // Not watching anything -> cannot match an update
         let Some(_watch) = self.dir.state().watched() else {
             return false;
         };
 
-        Some(&**self.dir.path()) == ev.path().parent()
+        Some(&**self.dir.path()) == update.path().parent()
+    }
+
+    pub fn matches_search_update(&mut self, update: &SearchUpdate) -> bool {
+        // Not watching anything -> cannot match an update
+        let Some(_watch) = self.dir.state().watched() else {
+            return false;
+        };
+
+        let Some(search) = self.pane.search() else {
+            return false;
+        };
+
+        search.matches_update(update)
     }
 
     fn search_sort_after_snapshot(&mut self, path: &Path) {
@@ -355,43 +386,6 @@ impl Tab {
 
         trace!("Re-sorting search for {:?} after flat snapshot", self.id);
         search.re_sort();
-    }
-
-    fn search_extend(&mut self) {
-        let Some(search) = self.pane.search() else {
-            return;
-        };
-        // TODO [search]
-    }
-
-    // It hasn't matched any tabs, but it might match some searches.
-    //
-    // Generally, updates will match at least one tab, so we will rarely hit this without a search
-    // actually existing.
-    pub fn handle_unmatched_update(tabs: &mut [Self], update: SearchUpdate) {
-        // let existing = EntryObject::lookup(update.path());
-        // let partial = match (update, existing) {
-        //     (Update::Entry(entry), None) =>
-        // PartiallyAppliedUpdate::Insert(EntryObject::new(entry)),
-        //     (Update::Entry(entry), Some(obj)) => {
-        //         let Some(old) = obj.update(entry) else {
-        //             return;
-        //         };
-        //         PartiallyAppliedUpdate::Mutate(old, obj)
-        //     }
-        //     (Update::Removed(_), None) => {
-        //         return;
-        //     }
-        //     (Update::Removed(_), Some(existing)) => PartiallyAppliedUpdate::Delete(existing),
-        // };
-
-        if let Some(search) = tabs
-            .iter_mut()
-            .filter_map(|t| t.pane.search())
-            .find(|s| s.matches_search_update(&update))
-        {
-            search.apply_search_update(update);
-        }
     }
 
     pub fn check_directory_deleted(&self, removed: &Path) -> bool {
@@ -671,7 +665,11 @@ impl Tab {
 
     fn finish_flat_load(&mut self) {
         if let Some(search) = self.pane.search() {
-            todo!()
+            if !search.is_loading() {
+                let e = self.element.imp();
+                e.spinner.stop();
+                e.spinner.set_visible(false);
+            }
         } else {
             let e = self.element.imp();
             e.spinner.stop();
@@ -727,7 +725,7 @@ impl Tab {
             .get_mut()
             .unwrap()
             .workaround_scroller()
-            .set_vscrollbar_policy(gtk::PolicyType::Automatic);
+            .map(|s| s.set_vscrollbar_policy(gtk::PolicyType::Automatic));
 
 
         let state = self.pane_state.take().unwrap_or_default();
@@ -834,7 +832,7 @@ impl Tab {
         });
     }
 
-    pub fn matched_flat_update(&mut self, left: &mut [Self], right: &mut [Self], up: Update) {
+    pub fn flat_update(&mut self, left: &mut [Self], right: &mut [Self], up: Update) {
         assert!(self.matches_flat_update(&up));
 
         let Some(update) = self.dir.consume(up) else {

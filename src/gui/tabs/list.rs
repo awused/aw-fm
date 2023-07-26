@@ -11,7 +11,7 @@ use gtk::{NoSelection, Orientation, SignalListItemFactory};
 use super::element::TabElement;
 use super::id::TabId;
 use super::tab::Tab;
-use crate::com::{DirSnapshot, DisplayMode, SearchUpdate, SortSettings, Update};
+use crate::com::{DirSnapshot, DisplayMode, SearchSnapshot, SearchUpdate, SortSettings, Update};
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
@@ -200,7 +200,7 @@ impl TabsList {
         // Normal updates
         if let Some(index) = self.tabs.iter().position(|t| t.matches_flat_update(&update)) {
             let (left_tabs, tab, right_tabs) = self.split_around_mut(index);
-            tab.matched_flat_update(left_tabs, right_tabs, update);
+            tab.flat_update(left_tabs, right_tabs, update);
         }
     }
 
@@ -213,7 +213,13 @@ impl TabsList {
     // This cannot cause updates to other tabs, but it can fail to update some EntryObjects with
     // the newest versions if this snapshot has newer versions. To prevent races, flat tab
     // snapshots always take priority.
-    // pub fn apply_search_snapshot(&mut self, snap: SearchSnapshot) {}
+    pub fn apply_search_snapshot(&mut self, snap: SearchSnapshot) {
+        if let Some(t) = self.tabs.iter_mut().find(|t| t.matches_search_snapshot(&snap)) {
+            t.apply_search_snapshot(snap);
+        } else {
+            warn!("Unmatched search snapshot.");
+        }
+    }
 
     // Unlike with update() above, we know this is going to be the same Arc<>
     pub fn directory_failure(&mut self, path: Arc<Path>) {

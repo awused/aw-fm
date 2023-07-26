@@ -1,5 +1,5 @@
 use std::future::ready;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
@@ -75,23 +75,6 @@ enum ReadResult {
 }
 
 
-pub fn full_snap(path: &Arc<Path>, cancel: &Arc<AtomicBool>, entries: Vec<Entry>) -> GuiAction {
-    GuiAction::Snapshot(DirSnapshot::new(SnapshotKind::Complete, path, cancel, entries))
-}
-
-pub fn start_snap(path: &Arc<Path>, cancel: &Arc<AtomicBool>, entries: Vec<Entry>) -> GuiAction {
-    GuiAction::Snapshot(DirSnapshot::new(SnapshotKind::Start, path, cancel, entries))
-}
-
-pub fn mid_snap(path: &Arc<Path>, cancel: &Arc<AtomicBool>, entries: Vec<Entry>) -> GuiAction {
-    GuiAction::Snapshot(DirSnapshot::new(SnapshotKind::Middle, path, cancel, entries))
-}
-
-pub fn end_snap(path: &Arc<Path>, cancel: &Arc<AtomicBool>, entries: Vec<Entry>) -> GuiAction {
-    GuiAction::Snapshot(DirSnapshot::new(SnapshotKind::End, path, cancel, entries))
-}
-
-
 fn read_dir_sync(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
@@ -146,6 +129,18 @@ fn read_dir_sync(
     recv_done
 }
 
+fn recurse_dir_sync(
+    path: Arc<Path>,
+    cancel: Arc<AtomicBool>,
+    sender: UnboundedSender<ReadResult>,
+) -> oneshot::Receiver<()> {
+    error!("TODO [search] Search is a work in progress");
+    let (send_done, recv_done) = oneshot::channel();
+
+
+    recv_done
+}
+
 async fn read_dir_sync_thread(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
@@ -154,11 +149,62 @@ async fn read_dir_sync_thread(
     debug!("Starting to read directory {path:?}");
 
     let start = Instant::now();
-    let mut entries = Vec::new();
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let h = read_dir_sync(path.clone(), cancel.clone(), sender);
 
+    consume_entries(path.clone(), cancel, gui_sender, receiver, flat_snap).await;
+
+    let finished = h.await.is_ok();
+    debug!(
+        "Done reading directory {:?} in {:?}. finished: {}",
+        path,
+        start.elapsed(),
+        finished
+    );
+}
+
+async fn recurse_dir_sync_thread(
+    path: Arc<Path>,
+    cancel: Arc<AtomicBool>,
+    gui_sender: glib::Sender<GuiAction>,
+) {
+    debug!("Starting to recursively walk {path:?}");
+
+    let start = Instant::now();
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+
+    let h = recurse_dir_sync(path.clone(), cancel.clone(), sender);
+
+    consume_entries(path.clone(), cancel, gui_sender, receiver, flat_snap).await;
+
+    let finished = h.await.is_ok();
+    debug!(
+        "Done recursively walking {:?} in {:?}. finished: {}",
+        path,
+        start.elapsed(),
+        finished
+    );
+}
+
+fn flat_snap(
+    path: &Arc<Path>,
+    cancel: &Arc<AtomicBool>,
+    kind: SnapshotKind,
+    entries: Vec<Entry>,
+) -> GuiAction {
+    GuiAction::Snapshot(DirSnapshot::new(kind, path, cancel, entries))
+}
+
+async fn consume_entries(
+    path: Arc<Path>,
+    cancel: Arc<AtomicBool>,
+    gui_sender: glib::Sender<GuiAction>,
+    mut receiver: UnboundedReceiver<ReadResult>,
+    snap: impl Fn(&Arc<Path>, &Arc<AtomicBool>, SnapshotKind, Vec<Entry>) -> GuiAction,
+) {
+    let start = Instant::now();
+    let mut entries = Vec::new();
     // If we don't load everything in one second, it is a slow directory
     let fast_deadline = Instant::now() + FAST_TIMEOUT;
 
@@ -200,17 +246,16 @@ async fn read_dir_sync_thread(
             drop(receiver);
             trace!("Fast directory completed in {:?} with {} entries", start.elapsed(), entries.len());
             // Send off a full snapshot
-            if let Err(e) = gui_sender.send(full_snap(&path, &cancel, entries)) {
+            if let Err(e) = gui_sender.send(snap(&path, &cancel, SnapshotKind::Complete, entries)) {
                 if !closing::closed() {
                     error!("{e}");
                 }
-                return
             }
         }
         _ = sleep_until(fast_deadline) => {
             trace!("Starting slow directory handling at {} entries", entries.len());
 
-            if let Err(e) = gui_sender.send(start_snap(&path, &cancel, entries)) {
+            if let Err(e) = gui_sender.send(snap(&path, &cancel, SnapshotKind::Start, entries)) {
                 if !closing::closed() {
                     error!("{e}");
                 }
@@ -218,19 +263,12 @@ async fn read_dir_sync_thread(
             }
 
             // Send off an initial batch, the gui may elect not to show anything if it's tiny
-            read_slow_dir(path.clone(), cancel, receiver, gui_sender).await;
+            read_slow_dir(path.clone(), cancel, receiver, gui_sender, snap).await;
         }
     };
 
     // Technically this blocks, but it's more a formality by this point. Still want to wait so we
     // can be sure it has been cleaned up.
-    let finished = h.await.is_ok();
-    debug!(
-        "Done reading directory {:?} in {:?}. finished: {}",
-        path,
-        start.elapsed(),
-        finished
-    );
 }
 
 
@@ -246,7 +284,8 @@ async fn read_slow_dir(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
     mut receiver: UnboundedReceiver<ReadResult>,
-    gui_sender: glib::Sender<GuiAction>,
+    sender: glib::Sender<GuiAction>,
+    snap: impl Fn(&Arc<Path>, &Arc<AtomicBool>, SnapshotKind, Vec<Entry>) -> GuiAction,
 ) {
     #[derive(Eq, PartialEq)]
     enum SlowBatch {
@@ -285,7 +324,7 @@ async fn read_slow_dir(
                             }
                         }
                         ReadResult::DirUnreadable(e) => {
-                            if let Err(e) = gui_sender.send(
+                            if let Err(e) = sender.send(
                                 GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
                                 if !closing::closed() {
                                     error!("{e}");
@@ -294,9 +333,9 @@ async fn read_slow_dir(
                             break Failed;
                         }
                         ReadResult::DirError(e) => drop(
-                            gui_sender.send(GuiAction::DirectoryError(path.clone(), e.to_string()))),
+                            sender.send(GuiAction::DirectoryError(path.clone(), e.to_string()))),
                         ReadResult::EntryError(p, e) => drop(
-                            gui_sender.send(GuiAction::EntryReadError(path.clone(), p, e.to_string()))),
+                            sender.send(GuiAction::EntryReadError(path.clone(), p, e.to_string()))),
                     }
                 }
             } => {
@@ -313,7 +352,7 @@ async fn read_slow_dir(
                         batch.len()
                     );
 
-                    if let Err(e) = gui_sender.send(end_snap(&path, &cancel, batch)) {
+                    if let Err(e) = sender.send(snap(&path, &cancel, SnapshotKind::End, batch)) {
                         if !closing::closed() {
                             error!("{e}");
                         }
@@ -332,7 +371,7 @@ async fn read_slow_dir(
         {
             sleep_until(batch_deadline).await;
 
-            if let Err(e) = gui_sender.send(mid_snap(&path, &cancel, batch)) {
+            if let Err(e) = sender.send(snap(&path, &cancel, SnapshotKind::Middle, batch)) {
                 if !closing::closed() {
                     error!("{e}");
                 }
@@ -365,9 +404,9 @@ async fn read_slow_dir(
                             unreachable!("DirUnreadable despite reading it. {e}");
                         }
                         Some(ReadResult::DirError(e)) => drop(
-                            gui_sender.send(GuiAction::DirectoryError(path.clone(), e.to_string()))),
+                            sender.send(GuiAction::DirectoryError(path.clone(), e.to_string()))),
                         Some(ReadResult::EntryError(p, e)) => drop(
-                            gui_sender.send(GuiAction::EntryReadError(path.clone(), p, e.to_string()))),
+                            sender.send(GuiAction::EntryReadError(path.clone(), p, e.to_string()))),
                     }
                     !cancel.load(Relaxed)
                 } => {
@@ -378,7 +417,7 @@ async fn read_slow_dir(
                             start.elapsed(),
                             batch.len()
                         );
-                        if let Err(e) = gui_sender.send(end_snap(&path, &cancel, batch)) {
+                        if let Err(e) = sender.send(snap(&path, &cancel, SnapshotKind::End, batch)) {
                             if !closing::closed() {
                                 error!("{e}");
                             }
@@ -400,7 +439,7 @@ async fn read_slow_dir(
                         batch.len()
                     );
 
-                    if let Err(e) = gui_sender.send(mid_snap(&path, &cancel, batch)) {
+                    if let Err(e) = sender.send(snap(&path, &cancel, SnapshotKind::Middle, batch)) {
                         if !closing::closed() {
                             error!("{e}");
                         }
@@ -417,7 +456,7 @@ async fn read_slow_dir(
                         batch.len()
                     );
 
-                    if let Err(e) = gui_sender.send(mid_snap(&path, &cancel, batch)) {
+                    if let Err(e) = sender.send(snap(&path, &cancel, SnapshotKind::Middle, batch)) {
                         if !closing::closed() {
                             error!("{e}");
                         }
@@ -438,7 +477,10 @@ async fn read_slow_dir(
 
 impl Manager {
     pub(super) fn start_read_dir(&self, path: Arc<Path>, cancel: Arc<AtomicBool>) {
-        // Assume we don't need to worry about cancellation for this
         spawn_local(read_dir_sync_thread(path, cancel, self.gui_sender.clone()));
+    }
+
+    pub(super) fn recurse_dir(&self, path: Arc<Path>, cancel: Arc<AtomicBool>) {
+        spawn_local(recurse_dir_sync_thread(path, cancel, self.gui_sender.clone()));
     }
 }

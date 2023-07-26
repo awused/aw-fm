@@ -48,6 +48,9 @@ impl Contents {
         let filtered = FilterListModel::new(Some(list.clone()), Some(filter.clone()));
         let selection = MultiSelection::new(Some(filtered.clone()));
 
+        // filtered.set_incremental(true) causes annoying flickering.
+        // Better to just pay the cost up front.
+
         let mut s = Self {
             list,
             filtered: Some(filtered),
@@ -280,7 +283,13 @@ impl Contents {
     pub fn clear(&mut self, sort: SortSettings) {
         self.stale = false;
         let new_list = ListStore::new::<EntryObject>();
-        self.selection.set_model(Some(&new_list));
+
+        if let Some(filtered) = &self.filtered {
+            filtered.set_model(Some(&new_list));
+        } else {
+            self.selection.set_model(Some(&new_list));
+        }
+
         let old_list = std::mem::replace(&mut self.list, new_list);
 
         // Dropping in one go can be glacially slow due to callbacks and notifications.

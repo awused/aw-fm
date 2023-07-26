@@ -124,6 +124,10 @@ impl ParsedString {
         .build()
     }
 
+    pub fn lowercase(&self) -> &str {
+        self.borrow_lowercase()
+    }
+
     #[must_use]
     pub fn into_original(self) -> OsString {
         self.into_heads().original

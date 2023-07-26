@@ -96,6 +96,11 @@ specify them.
   * Navigates into a child directory of the current directory if there is only
   one or if you previously navigated from a subdirectory of the current directory.
   * `Parent` followed by `Child` will return you to the same directory.
+* `Search [query]`
+  * Opens a recursive search in the current directory.
+  * Searching requires at least three characters and uses a simple substring match.
+  * For more powerful searching, use an external program like rofi or fzf.
+
 
 ##### Tabs
 
