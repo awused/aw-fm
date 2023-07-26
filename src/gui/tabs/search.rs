@@ -2,14 +2,15 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use gtk::{CustomFilter, Orientation};
+use gtk::{CustomFilter, Orientation, Widget};
 
 use super::contents::Contents;
 use super::id::TabId;
 use super::pane::{Pane, PaneExt};
 use super::{PartiallyAppliedUpdate, SavedPaneState};
 use crate::com::{
-    DirSettings, EntryObjectSnapshot, ManagerAction, SearchSnapshot, SearchUpdate, SortSettings,
+    DirSettings, EntryObject, EntryObjectSnapshot, ManagerAction, SearchSnapshot, SearchUpdate,
+    SortSettings, Update,
 };
 use crate::gui::gui_run;
 
@@ -19,7 +20,7 @@ use crate::gui::gui_run;
 #[derive(Debug, Default)]
 enum State {
     #[default]
-    Unloaded,
+    Unattached,
     Loading(SearchId, Vec<PartiallyAppliedUpdate>),
     AwaitingFlat(SearchId, Vec<PartiallyAppliedUpdate>),
     Done(SearchId),
@@ -27,12 +28,14 @@ enum State {
 
 #[derive(Debug)]
 pub(super) struct SearchPane {
+    tab: TabId,
     path: Arc<Path>,
     state: State,
     flat_loading: bool,
     pane: Option<Pane>,
     // This contains everything in tab.contents plus items from subdirectories.
     contents: Contents,
+    filter: CustomFilter,
     // This is used to store a view state until search is done loading.
     pending_view_state: Option<SavedPaneState>,
 }
@@ -50,24 +53,62 @@ impl SearchPane {
         let state = State::Loading(SearchId::new(path.clone()), Vec::new());
         let (contents, filter) = Contents::search_from(flat_contents);
 
-        let pane = flat_pane.flat_to_search(query, settings, &contents.selection, filter);
+        let pane = flat_pane.flat_to_search(query, settings, &contents.selection, filter.clone());
 
         Self {
+            tab,
             path,
             state,
             flat_loading,
             pane: Some(pane),
             contents,
+            filter,
             pending_view_state: None,
         }
     }
 
     pub fn new_unattached(
-        parent_loading: bool,
-        flat: &Contents,
-        pane_state: SavedPaneState,
+        tab: TabId,
+        path: Arc<Path>,
+        settings: DirSettings,
+        flat_loading: bool,
+        flat_contents: &Contents,
     ) -> Self {
-        todo!()
+        let state = State::Unattached;
+        let (contents, filter) = Contents::search_from(flat_contents);
+
+        Self {
+            tab,
+            path,
+            state,
+            flat_loading,
+            pane: None,
+            contents,
+            filter,
+            pending_view_state: None,
+        }
+    }
+
+    pub fn attach_pane(&mut self, settings: DirSettings, attach: impl FnOnce(&Widget)) {
+        assert!(self.pane.is_none());
+        if let State::Unattached = self.state {
+            self.state = State::Loading(SearchId::new(self.path.clone()), Vec::new());
+        }
+
+        let query = self.pending_view_state.and_then(|ps| ps.search).unwrap_or_default();
+        // TODO -- optimization, if the search was detached from a pane earlier, we can assume the
+        // filter is unchanged.
+        let pane = Pane::new_search(
+            self.tab,
+            query,
+            &self.path,
+            settings,
+            &self.contents.selection,
+            self.filter.clone(),
+            attach,
+        );
+        self.pane = Some(pane);
+        todo!();
     }
 
     pub fn set_query(&mut self, query: String) {
@@ -89,14 +130,14 @@ impl SearchPane {
 
     pub fn matches_snapshot(&self, snap: &SearchSnapshot) -> bool {
         match &self.state {
-            State::Unloaded | State::Done(_) | State::AwaitingFlat(..) => false,
+            State::Unattached | State::Done(_) | State::AwaitingFlat(..) => false,
             State::Loading(id, _) => Arc::ptr_eq(&id.0, &snap.id),
         }
     }
 
     pub fn matches_update(&self, update: &SearchUpdate) -> bool {
         match &self.state {
-            State::Unloaded => false,
+            State::Unattached => false,
             State::Loading(id, _) | State::AwaitingFlat(id, _) | State::Done(id) => {
                 Arc::ptr_eq(&id.0, &update.search_id)
             }
@@ -149,12 +190,46 @@ impl SearchPane {
         self.check_done()
     }
 
-    pub fn apply_search_update(&mut self, update: SearchUpdate) {
+    pub fn apply_search_update(&mut self, s_update: SearchUpdate) {
+        let update = s_update.update;
+        // For consistency reasons we only process local inserts or deletions here.
+        // Do not process global or local mutations as they could overlap with another search or
+        // with flat directories and cause sort issues.
+        //
+        // This is probably good enough.
+        //
+        // Flat updates will always take priority over anything done in here.
+        let existing_global = EntryObject::lookup(update.path());
+        let local_position = existing_global
+            .clone()
+            .and_then(|eg| self.contents.total_position_by_sorted(&eg.get()));
+
+        match (update, local_position, existing_global) {
+            (_, Some(_), None) => unreachable!(),
+            (Update::Entry(_), None, None) => todo!(),
+            (Update::Entry(_), None, Some(eo)) => {
+                trace!("Inserting existing item from update in search tab.");
+                self.contents.insert(&eo);
+            }
+            (Update::Entry(_), Some(_), Some(_)) => {
+                debug!("Dropping mutation in search tab {:?}", self.path);
+            }
+            (Update::Removed(_), None, _) => {}
+            (Update::Removed(_), Some(pos), Some(_)) => {
+                debug!("Removing item in search tab {:?}", self.path);
+                self.contents.remove(pos);
+            }
+        }
+
         todo!()
     }
 
     fn check_done(&mut self) {
         error!("TODO -- finish loading search")
+    }
+
+    pub fn into_pane(self) -> Option<Pane> {
+        self.pane
     }
 }
 
@@ -191,7 +266,7 @@ impl PaneExt for SearchPane {
 
     fn apply_state(&mut self, state: super::SavedPaneState, _ignored: &super::Contents) {
         match self.state {
-            State::Unloaded | State::Loading(..) | State::AwaitingFlat(..) => {
+            State::Unattached | State::Loading(..) | State::AwaitingFlat(..) => {
                 self.pending_view_state = Some(state);
                 todo!()
             }

@@ -115,6 +115,8 @@ pub(super) struct Tab {
     // Each tab can only be open in one pane at once.
     // In theory we could do many-to-many but it's too niche.
     pane: CurrentPane,
+    // search: Option<Search>,
+    // pane: Option<Pane>
 }
 
 impl Tab {
@@ -177,9 +179,14 @@ impl Tab {
         let element = TabElement::new(id.copy(), Path::new(""));
 
         contents.clone_from(&source.contents, source.settings.sort);
+        // TOOD [search]: set title properly
         element.clone_from(&source.element);
 
-        // TODO [search]: Create search pane if necessary
+        // Spinner will start spinning for search when pane is attached
+        if !source.dir.state().loading() {
+            element.imp().spinner.stop();
+            element.imp().spinner.set_visible(false);
+        }
 
         (
             Self {
@@ -206,7 +213,10 @@ impl Tab {
                 // TODO [search] this is not right
                 self.element.clone_from(&t.element);
 
-                self.apply_pane_state();
+                if !self.dir.state().loading() {
+                    self.element.imp().spinner.stop();
+                    self.element.imp().spinner.set_visible(false);
+                }
 
                 return true;
             }
@@ -248,7 +258,11 @@ impl Tab {
     // Only make this take &mut [Self] if truly necessary
     fn load(&mut self, left: &[Self], right: &[Self]) {
         if let Some(search) = self.pane.search() {
-            todo!()
+            error!("TODO -- start loading search");
+            if search.is_loading() {
+                self.element.imp().spinner.start();
+                self.element.imp().spinner.set_visible(true);
+            }
         }
 
         if !self.dir.start_load() {
@@ -538,7 +552,7 @@ impl Tab {
 
         // Shouldn't be a jump, could be a search starting/ending.
         if next.location == *self.dir.path() {
-            self.check_history_search_end();
+            self.check_state_search_start_end();
             self.apply_pane_state();
             return;
         }
@@ -570,7 +584,7 @@ impl Tab {
 
         // Shouldn't be a jump, could be a search starting/ending.
         if prev.location == *self.dir.path() {
-            self.check_history_search_end();
+            self.check_state_search_start_end();
             self.apply_pane_state();
             return;
         }
@@ -659,6 +673,16 @@ impl Tab {
     }
 
     fn save_pane_state(&mut self) {
+        if !self.dir.state().loaded() {
+            return;
+        }
+
+        if let Some(search) = self.pane.search() {
+            if search.is_loading() {
+                return;
+            }
+        }
+
         self.pane_state = self.pane_snapshot();
         debug!("Saved state {:?} for {:?}", self.pane_state, self.id());
     }
@@ -679,31 +703,59 @@ impl Tab {
         self.apply_pane_state();
     }
 
-    fn check_history_search_end(&mut self) {
-        if self.pane.search().is_none() {
-            return;
-        } else if let Some(SavedPaneState { search: Some(_), .. }) = &self.pane_state {
+    fn check_state_search_start_end(&mut self) {
+        if !self.visible() {
             return;
         }
 
-        debug!("Closing search for {:?}", self.id);
-        todo!()
+        if self.pane.search().is_some() {
+            if self.pane_state.as_ref().map_or(false, |ps| ps.search.is_some()) {
+                info!("Closing search for {:?}", self.id);
+
+                let CurrentPane::Search(sp) = std::mem::take(&mut self.pane) else {
+                    unreachable!()
+                };
+
+
+                let pane = Pane::new_flat(
+                    self.id(),
+                    self.dir.path(),
+                    self.settings,
+                    &self.contents.selection,
+                    |new| sp.into_pane().unwrap().replace_with(new),
+                );
+                self.pane = CurrentPane::Flat(pane);
+            }
+        } else if let Some(SavedPaneState { search: Some(query), .. }) = &self.pane_state {
+            info!("Opening search for {:?}", self.id);
+            self.pane = CurrentPane::Search(SearchPane::new_unattached(
+                self.id(),
+                self.dir.path().clone(),
+                self.settings,
+                !self.dir.state().loaded(),
+                &self.contents,
+            ));
+        }
     }
 
-    // This can start a search from a history entry, but can't end one.
+    // Can create a SearchPane but not end one.
     fn apply_pane_state(&mut self) {
+        if let Some(SavedPaneState { search, .. }) = &mut self.pane_state {
+            if search.is_some() && self.pane.search().is_none() {
+                if self.pane.flat().is_some() {
+                    info!("Starting search for {:?} from saved state", self.id);
+                    let query = search.take().unwrap();
+                    self.search(query);
+                } else {
+                    info!("Initializing unattached SearchPane");
+                }
+            }
+        }
+
         if self.pane.get().is_none() {
             trace!("Ignoring start_apply_view_state on tab {:?} with no pane", self.id);
             return;
         };
-
-        if let Some(SavedPaneState { search, .. }) = &mut self.pane_state {
-            if search.is_some() && self.pane.search().is_none() {
-                info!("Restarting search for {:?} from saved state", self.id);
-                let query = search.take().unwrap();
-                self.search(query);
-            }
-        }
 
         if let Some(search) = self.pane.search() {
             // TODO [search] -- handle self.state.loaded()
@@ -721,11 +773,9 @@ impl Tab {
             error!("Unsetting GTK crash workaround");
         }
         // Unconditionally unset it in case mode was swapped.
-        self.pane
-            .get_mut()
-            .unwrap()
-            .workaround_scroller()
-            .map(|s| s.set_vscrollbar_policy(gtk::PolicyType::Automatic));
+        if let Some(s) = self.pane.get_mut().unwrap().workaround_scroller() {
+            s.set_vscrollbar_policy(gtk::PolicyType::Automatic)
+        }
 
 
         let state = self.pane_state.take().unwrap_or_default();
@@ -740,8 +790,9 @@ impl Tab {
             return;
         }
 
+        // TODO [search]
         if let Some(search) = self.pane.search() {
-            todo!();
+            search.attach_pane(self.settings, attach);
         } else {
             let pane = Pane::new_flat(
                 self.id(),
@@ -768,26 +819,24 @@ impl Tab {
         }
 
         let old = other.take_pane().unwrap();
-
+        // TODO [search]
         if let Some(search) = self.pane.search() {
-            todo!()
+            search.attach_pane(self.settings, |new| old.replace_with(new));
+        } else {
+            let pane = Pane::new_flat(
+                self.id(),
+                self.dir.path(),
+                self.settings,
+                &self.contents.selection,
+                |new| old.replace_with(new),
+            );
+
+            self.pane = CurrentPane::Flat(pane);
         }
 
-        let pane = Pane::new_flat(
-            self.id(),
-            self.dir.path(),
-            self.settings,
-            &self.contents.selection,
-            |new| old.replace_with(new),
-        );
-
-        self.pane = CurrentPane::Flat(pane);
         self.element.set_pane_visible(true);
 
-
-        if self.dir.state().loaded() {
-            self.apply_pane_state();
-        }
+        self.apply_pane_state();
     }
 
     pub fn load_after_replacement(&mut self, left: &[Self], right: &[Self]) {
@@ -805,7 +854,7 @@ impl Tab {
         self.pane.get().and_then(PaneExt::next_of_kin)
     }
 
-    fn take_pane(&mut self) -> Option<Pane> {
+    pub fn take_pane(&mut self) -> Option<Pane> {
         if self.pane.get().is_none() {
             error!("Called take_pane on tab with no pane");
             // Probably should panic here.
@@ -814,15 +863,13 @@ impl Tab {
 
         // Take the pane,
         // TODO [search]
-        if self.dir.state().loaded() {
-            self.save_pane_state();
-        }
+        self.save_pane_state();
         self.element.set_pane_visible(false);
 
         match std::mem::take(&mut self.pane) {
             CurrentPane::Nothing => unreachable!(),
             CurrentPane::Flat(p) => Some(p),
-            CurrentPane::Search(sp) => todo!(),
+            CurrentPane::Search(sp) => sp.into_pane(),
         }
     }
 
@@ -1003,6 +1050,13 @@ mod flat_dir {
             match self {
                 Self::Unloaded => None,
                 Self::Loading { watch, .. } | Self::Loaded(watch) => Some(watch),
+            }
+        }
+
+        pub const fn loading(&self) -> bool {
+            match self {
+                Self::Unloaded | Self::Loaded(_) => false,
+                Self::Loading { .. } => true,
             }
         }
 

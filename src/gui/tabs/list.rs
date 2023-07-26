@@ -291,6 +291,7 @@ impl TabsList {
         let active_index = self.position(active).unwrap();
 
         assert_ne!(index, active_index);
+        let old_pane = self.tabs[active_index].take_pane().unwrap();
         if index < active_index {
             let (left, right) = self.tabs.split_at_mut(active_index);
             left[index].replace_pane(&mut right[0]);

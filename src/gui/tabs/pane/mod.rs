@@ -153,7 +153,6 @@ impl Drop for Pane {
 }
 
 impl Pane {
-    // new_search(tab_id, settings, Selection)
     fn create(tab: TabId, settings: DirSettings, selection: &MultiSelection) -> Self {
         let (element, signals) = PaneElement::new(tab, selection);
 
@@ -233,7 +232,8 @@ impl Pane {
         imp.text_entry.set_text(&query);
         imp.original_text.replace("".to_string());
 
-        let query_rc: Rc<_> = RefCell::new(query).into();
+        // Decent opportunity for UnsafeCell if it benchmarks better.
+        let query_rc: Rc<_> = RefCell::new(query.to_lowercase()).into();
         let query = query_rc.clone();
 
         let filt = filter.clone();
@@ -248,9 +248,9 @@ impl Pane {
                 FilterChange::LessStrict
             } else if new.len() < 3 {
                 FilterChange::MoreStrict
-            } else if query.starts_with(&new) {
+            } else if query.starts_with(&new) || query.ends_with(&new) {
                 FilterChange::LessStrict
-            } else if new.starts_with(&*query) {
+            } else if new.starts_with(&*query) || new.ends_with(&*query) {
                 FilterChange::MoreStrict
             } else {
                 FilterChange::Different
@@ -284,6 +284,23 @@ impl Pane {
         attach: F,
     ) -> Self {
         let pane = Self::create(tab, settings, selection).setup_flat(path);
+
+        // Where panes are created is controlled in TabsList
+        attach(pane.element.upcast_ref());
+
+        pane
+    }
+
+    pub(super) fn new_search<F: FnOnce(&Widget)>(
+        tab: TabId,
+        query: String,
+        path: &Path,
+        settings: DirSettings,
+        selection: &MultiSelection,
+        filter: CustomFilter,
+        attach: F,
+    ) -> Self {
+        let pane = Self::create(tab, settings, selection).setup_search(filter, query);
 
         // Where panes are created is controlled in TabsList
         attach(pane.element.upcast_ref());

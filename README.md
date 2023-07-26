@@ -12,8 +12,8 @@ Some documentation may not be in-date yet.
 ## Features
 
 * Fast and efficient
-  * Opening directories containing one or two hundred thousand images shouldn't take
-      tens of minutes (or hours), or lock up the UI.
+  * Opening directories containing one or two hundred thousand images shouldn't
+      lock up the UI for minutes/hours.
 * Natural sorting, `abc` sorts before `XYZ` and `a2.png` sorts before `a10.png`.
 * Highly customizable, up to a point.
   * A reasonably complete set of text commands to control the application.
@@ -52,6 +52,9 @@ On fedora all required dependencies can be installed with
 
 The defaults should make some level of sense. Hit `?` for a popup containing all
 customizable keybinds.
+
+Mouse controls are not customizable but should work as expected. Middle clicking
+on a file or directory is the same as the `NewBackgroundTab` command below.
 
 ### Customization
 
@@ -122,12 +125,12 @@ specify them.
 * `Mode icons|columns`
   * Changes the mode of the current directory.
 
+# Everything below here is unimplemented
 TODO ---------------------------------
 
 * Activate
   * The same as hitting enter or using "Open" in the menu on selected files.
   * It is not recommended to bind this as a shortcut
-
 
 * Cut/Copy
   * Cuts or copies the current selection.
@@ -139,13 +142,13 @@ TODO ---------------------------------
   * Requires a single string argument which will be run as an executable.
   * Example: `Execute /path/to/save-page.sh`
 * Script
-  * Like Execute but reads stdout from the executable as a series of commands to run, one per line.
+  * Like Execute but reads stdout from the executable as a series of commands to
+    run, one per line.
   * Example: `Script /path/to/sample-script.sh`
 
 TODO ---------------------------------
 
 
-# Everything below here is unimplemented
 ### External Executable Environment
 
 The executables from `Execute`, `Script`, and custom actions will be called
@@ -186,6 +189,7 @@ Not planned, good luck. Probably won't work.
 
 ## Why
 
-Gui file managers on Linux aren't in a good state looking at either performance or
-features. I can't solve that. I can only write a file manager for myself.
+Gui file managers on Linux are almost all descended from Nautilus and have
+similar characteristics including performance traps and a lack of
+customization. They do, however, support things I won't, like udev.
 

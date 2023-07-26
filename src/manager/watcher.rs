@@ -1,4 +1,4 @@
-use std::collections::hash_map;
+use std::collections::{btree_map, hash_map};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -176,7 +176,7 @@ impl Manager {
         let path: Arc<Path> = event.paths.pop().unwrap().into();
 
         match self.recent_mutations.entry(path.clone()) {
-            hash_map::Entry::Occupied(occupied) => {
+            btree_map::Entry::Occupied(occupied) => {
                 let PendingUpdates(_expiry, state, sources) = occupied.into_mut();
 
                 if *state == State::Deduping {
@@ -200,7 +200,7 @@ impl Manager {
                     assert!(self.next_tick.is_some());
                 }
             }
-            hash_map::Entry::Vacant(vacant) => {
+            btree_map::Entry::Vacant(vacant) => {
                 let expiry = Instant::now() + DEDUPE_DELAY + BATCH_GRACE;
                 let mut sources = Sources::default();
                 match source {
@@ -217,10 +217,10 @@ impl Manager {
 
     pub(super) fn handle_pending_updates(&mut self) {
         let now = Instant::now();
+        let starting_len = self.recent_mutations.len();
         let mut maybe_tick = now + DEBOUNCE_DURATION;
         let mut expired_keys = Vec::new();
 
-        // TODO -- this would match drain_filter
         for (path, PendingUpdates(expiry, state, sources)) in &mut self.recent_mutations {
             if *expiry < now {
                 match state {
@@ -256,5 +256,7 @@ impl Manager {
         } else {
             self.next_tick = Some(maybe_tick + BATCH_GRACE);
         }
+
+        trace!("Processed {starting_len} events in {:?}", now.elapsed());
     }
 }

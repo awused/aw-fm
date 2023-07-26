@@ -198,7 +198,7 @@ impl Contents {
 
         if (t_pos == 0
             || comp(&self.list.item(t_pos - 1).unwrap(), new.upcast_ref::<Object>()).is_lt())
-            && (t_pos == self.list.n_items() - 1
+            && (t_pos + 1 == self.list.n_items()
                 || comp(&self.list.item(t_pos + 1).unwrap(), new.upcast_ref::<Object>()).is_gt())
         {
             trace!("Did not reinsert item as it was already in the correct position");
@@ -223,18 +223,9 @@ impl Contents {
 
         if was_selected {
             if let Some(filtered) = &self.filtered {
-                // TODO [incremental filtering] -- this might make the UI even laggier in practice
-                // if filtered.pending() > 0 {
-                //     filtered.set_incremental(false);
-                // }
-
                 if let Some(f_pos) = self.filtered_position_by_sorted(old) {
                     self.selection.select_item(f_pos, false);
                 }
-
-                // if !filtered.is_incremental() {
-                //     filtered.set_incremental(true);
-                // }
             } else {
                 self.selection.select_item(new_t_pos, false);
             }

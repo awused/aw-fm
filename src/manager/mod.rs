@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -32,9 +33,7 @@ struct Manager {
 
     // If there are pending mutations, we wait to clear and process them.
     // If the boolean is true, there was a second event we debounced.
-    //
-    // TODO -- a vector of tuples is likely faster here unless N gets unreasonably huge.
-    recent_mutations: AHashMap<Arc<Path>, PendingUpdates>,
+    recent_mutations: BTreeMap<Arc<Path>, PendingUpdates>,
     next_tick: Option<Instant>,
 
     watcher: RecommendedWatcher,
@@ -87,7 +86,7 @@ impl Manager {
         Self {
             gui_sender,
 
-            recent_mutations: AHashMap::new(),
+            recent_mutations: BTreeMap::new(),
             next_tick: None,
 
             watcher,
