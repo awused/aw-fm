@@ -11,7 +11,7 @@ use gtk::{NoSelection, Orientation, SignalListItemFactory};
 use super::element::TabElement;
 use super::id::TabId;
 use super::tab::Tab;
-use crate::com::{DirSnapshot, DisplayMode, SortSettings, Update};
+use crate::com::{DirSnapshot, DisplayMode, SearchUpdate, SortSettings, Update};
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
@@ -145,8 +145,9 @@ impl TabsList {
     fn active_element(&self) -> Option<u32> {
         let id = self.active?;
 
-        // Assert it exists.
-        Some(self.element_position(id).unwrap())
+        let pos = self.element_position(id);
+        assert!(pos.is_some());
+        pos
     }
 
     fn element(&self, i: u32) -> TabElement {
@@ -195,14 +196,16 @@ impl TabsList {
             }
         }
 
+
+        // Normal updates
         if let Some(index) = self.tabs.iter().position(|t| t.matches_flat_update(&update)) {
             let (left_tabs, tab, right_tabs) = self.split_around_mut(index);
             tab.matched_flat_update(left_tabs, right_tabs, update);
-        } else {
-            // TODO [search] handle search updates, which will be expensive but rare,
-            // and cheap when there is no search.
-            Tab::handle_unmatched_update(&mut self.tabs, update);
-        };
+        }
+    }
+
+    pub fn search_update(&mut self, update: SearchUpdate) {
+        todo!()
     }
 
     // Applies a search snapshot to its matching tab.
@@ -585,5 +588,15 @@ impl TabsList {
 
         let index = self.position(active).unwrap();
         self.tabs[index].update_display_mode(mode);
+    }
+
+    pub fn active_search(&mut self, query: &str) {
+        let Some(active) = self.active else {
+            warn!("Search called with no open panes");
+            return;
+        };
+
+        let index = self.position(active).unwrap();
+        self.tabs[index].search(query.to_owned());
     }
 }

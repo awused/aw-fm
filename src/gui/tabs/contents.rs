@@ -1,17 +1,19 @@
 use std::cmp::Ordering;
 use std::time::Instant;
 
-use gtk::gio::ListStore;
+use gtk::gio::{ListModel, ListStore};
 use gtk::glib::{self, ControlFlow, Object};
-use gtk::prelude::{Cast, ListModelExt, ListModelExtManual, StaticType};
+use gtk::prelude::{Cast, IsA, ListModelExt, ListModelExtManual, StaticType};
 use gtk::traits::SelectionModelExt;
-use gtk::MultiSelection;
+use gtk::{CustomFilter, Filter, FilterListModel, MultiSelection};
 
 use super::PartiallyAppliedUpdate;
-use crate::com::{Entry, EntryObject, EntryObjectSnapshot, SortSettings};
+use crate::com::{Entry, EntryObject, EntryObjectSnapshot, SearchSnapshot, SortSettings};
 
 pub struct Contents {
     list: ListStore,
+    // TODO -- non-optional once we support display hidden/true/false
+    filtered: Option<FilterListModel>,
     sort: SortSettings,
     // Stale means the entries in this list are for the previous directory.
     // They remain visible for up to the ~1s it takes for a snapshot of a slow directory to arrive.
@@ -25,11 +27,38 @@ impl std::fmt::Debug for Contents {
     }
 }
 
+pub struct TotalPos(u32);
+
 impl Contents {
     pub fn new(sort: SortSettings) -> Self {
         let list = ListStore::new::<EntryObject>();
         let selection = MultiSelection::new(Some(list.clone()));
-        Self { list, sort, stale: false, selection }
+        Self {
+            list,
+            filtered: None,
+            sort,
+            stale: false,
+            selection,
+        }
+    }
+
+    pub fn search_from(flat: &Self) -> (Self, CustomFilter) {
+        let list = ListStore::new::<EntryObject>();
+        let filter = CustomFilter::new(|eo| false);
+        let filtered = FilterListModel::new(Some(list.clone()), Some(filter.clone()));
+        let selection = MultiSelection::new(Some(filtered.clone()));
+
+        let mut s = Self {
+            list,
+            filtered: Some(filtered),
+            sort: flat.sort,
+            stale: false,
+            selection,
+        };
+
+        s.clone_from(flat, flat.sort);
+
+        (s, filter)
     }
 
     pub fn clone_from(&mut self, source: &Self, sort: SortSettings) {
@@ -51,36 +80,61 @@ impl Contents {
             if self.stale {
                 debug!("Clearing out stale items");
             }
-            self.clear(sort);
+            self.clear(self.sort);
             debug_assert!(self.list.n_items() == 0);
         }
         assert!(!self.stale);
-        debug_assert_eq!(self.sort, sort);
 
-        self.list.extend(snap.entries.into_iter());
+
         let start = Instant::now();
-        self.list.sort(self.sort.comparator());
-        trace!("Sorted {:?} items in {:?}", self.list.n_items(), start.elapsed());
+        if snap.id.kind.initial() {
+            // Sorting a vector is faster than inserting then sorting.
+            let mut entries = snap.entries;
+            // TODO -- as an optimization sort these by the assumed sort when creating the snapshot.
+            entries.sort_by(|a, b| a.get().cmp(&b.get(), self.sort));
+            self.list.extend(entries.into_iter());
+        } else {
+            self.list.extend(snap.entries.into_iter());
+            self.list.sort(self.sort.comparator());
+        }
 
-        // let a = self.contents.list.item(0).unwrap();
-        // let settings = self.settings;
-        // glib::timeout_add_local_once(Duration::from_secs(5), move || {
-        //     let b = a.downcast::<EntryObject>().unwrap();
-        //     let mut c = b.get().clone();
-        //     c.name = ParsedString::from(OsString::from("asdf"));
-        //     error!("Updating file for no reason");
-        //     b.update(c, settings.sort);
-        // });
+        // It can be marginally faster to detach, sort, and reattach the list when there is no
+        // filter.
+        trace!("Inserted and sorted {:?} items in {:?}", self.list.n_items(), start.elapsed());
     }
 
-    // Look for the location in the list.
-    // The list may no longer be sorted because of an update, but except for the single update to
-    // "entry's corresponding EntryObject" the list will be sorted.
-    // So using the old version of the entry we can search for the old location.
-    pub fn position_by_sorted_entry(&self, entry: &Entry) -> Option<u32> {
-        assert!(!self.stale);
+    pub fn re_sort_for_search(&mut self) {
+        let start = Instant::now();
+        self.list.sort(self.sort.comparator());
+        trace!(
+            "Re-sorted {} items in search pane in {:?}",
+            self.list.n_items(),
+            start.elapsed()
+        );
+    }
+
+    pub fn add_flat_elements_for_search(&mut self, snap: EntryObjectSnapshot) {
+        let start = Instant::now();
+        self.list.extend(snap.entries.into_iter());
+        self.list.sort(self.sort.comparator());
+        trace!("Sorted {:?} search items in {:?}", self.list.n_items(), start.elapsed());
+    }
+
+    pub fn apply_search_snapshot(&mut self, snap: SearchSnapshot) {
+        let start = Instant::now();
+        self.list.extend(snap.into_entries());
+        self.list.sort(self.sort.comparator());
+        trace!(
+            "Sorted {:?} items for search snapshot in {:?}",
+            self.list.n_items(),
+            start.elapsed()
+        );
+    }
+
+    // ListStore isn't even a flat array, so binary searching isn't much worse even at small sizes.
+    fn bsearch<L: IsA<ListModel>>(entry: &Entry, sort: SortSettings, list: &L) -> Option<u32> {
         let mut start = 0;
-        let mut end = self.list.n_items();
+        let mut end = list.n_items();
 
         if end == 0 {
             return None;
@@ -89,7 +143,7 @@ impl Contents {
         while start < end {
             let mid = start + (end - start) / 2;
 
-            let obj = self.list.item(mid).unwrap().downcast::<EntryObject>().unwrap();
+            let obj = list.item(mid).unwrap().downcast::<EntryObject>().unwrap();
 
             let inner = obj.get();
             if inner.abs_path == entry.abs_path {
@@ -97,7 +151,7 @@ impl Contents {
                 return Some(mid);
             }
 
-            match entry.cmp(&inner, self.sort) {
+            match entry.cmp(&inner, sort) {
                 Ordering::Equal => unreachable!(),
                 Ordering::Less => end = mid,
                 Ordering::Greater => start = mid + 1,
@@ -111,33 +165,82 @@ impl Contents {
         None
     }
 
-    pub fn reinsert_updated(&mut self, i: u32, new: &EntryObject) {
+    // Look for the location in the unfiltered list.
+    // The list may no longer be sorted because of an update, but except for the single update to
+    // "entry's corresponding EntryObject" the list will be sorted.
+    // So using the old version of the entry we can search for the old location.
+    pub fn total_position_by_sorted(&self, entry: &Entry) -> Option<TotalPos> {
+        assert!(!self.stale);
+
+        Self::bsearch(entry, self.sort, &self.list).map(TotalPos)
+    }
+
+    // Look for the location in the filtered list.
+    // The list may no longer be sorted because of an update, but except for the single update to
+    // "entry's corresponding EntryObject" the list will be sorted.
+    // So using the old version of the entry we can search for the old location.
+    pub fn filtered_position_by_sorted(&self, entry: &Entry) -> Option<u32> {
+        assert!(!self.stale);
+        if let Some(filtered) = &self.filtered {
+            Self::bsearch(entry, self.sort, filtered)
+        } else {
+            Self::bsearch(entry, self.sort, &self.list)
+        }
+    }
+
+    pub fn reinsert_updated(&mut self, pos: TotalPos, new: &EntryObject, old: &Entry) {
+        let t_pos = pos.0;
         assert!(!self.stale);
         let comp = self.sort.comparator();
 
-        if (i == 0 || comp(&self.list.item(i - 1).unwrap(), new.upcast_ref::<Object>()).is_lt())
-            && (i == self.list.n_items() - 1
-                || comp(&self.list.item(i + 1).unwrap(), new.upcast_ref::<Object>()).is_gt())
+        if (t_pos == 0
+            || comp(&self.list.item(t_pos - 1).unwrap(), new.upcast_ref::<Object>()).is_lt())
+            && (t_pos == self.list.n_items() - 1
+                || comp(&self.list.item(t_pos + 1).unwrap(), new.upcast_ref::<Object>()).is_gt())
         {
-            debug!("Did not reinsert item as it was already in the correct position");
+            trace!("Did not reinsert item as it was already in the correct position");
             return;
         }
 
-        let was_selected = self.selection.is_selected(i);
+        let was_selected = if let Some(filtered) = &self.filtered {
+            if let Some(f_pos) = self.filtered_position_by_sorted(old) {
+                self.selection.is_selected(f_pos)
+            } else {
+                false
+            }
+        } else {
+            self.selection.is_selected(t_pos)
+        };
 
         // After removing the lone updated item, the list is guaranteed to be sorted.
         // So we can reinsert it much more cheaply than sorting the entire list again.
-        self.list.remove(i);
-        let new_idx = self.list.insert_sorted(new, comp);
+        self.list.remove(t_pos);
+        let new_t_pos = self.list.insert_sorted(new, comp);
+
 
         if was_selected {
-            self.selection.select_item(new_idx, false);
+            if let Some(filtered) = &self.filtered {
+                // TODO [incremental filtering] -- this might make the UI even laggier in practice
+                // if filtered.pending() > 0 {
+                //     filtered.set_incremental(false);
+                // }
+
+                if let Some(f_pos) = self.filtered_position_by_sorted(old) {
+                    self.selection.select_item(f_pos, false);
+                }
+
+                // if !filtered.is_incremental() {
+                //     filtered.set_incremental(true);
+                // }
+            } else {
+                self.selection.select_item(new_t_pos, false);
+            }
         }
     }
 
     pub fn insert(&mut self, new: &EntryObject) {
         assert!(!self.stale);
-        debug_assert!(self.position_by_sorted_entry(&new.get()).is_none());
+        debug_assert!(self.total_position_by_sorted(&new.get()).is_none());
         self.list.insert_sorted(new, self.sort.comparator());
     }
 
@@ -146,22 +249,21 @@ impl Contents {
 
         match update {
             PartiallyAppliedUpdate::Mutate(old, new) => {
-                let old_position = self.position_by_sorted_entry(old).unwrap();
-                self.reinsert_updated(old_position, new);
+                let old_position = self.total_position_by_sorted(old).unwrap();
+                self.reinsert_updated(old_position, new, old);
             }
             PartiallyAppliedUpdate::Insert(new) => {
                 self.list.insert_sorted(new, self.sort.comparator());
             }
             PartiallyAppliedUpdate::Delete(old) => {
-                let i = self.position_by_sorted_entry(&old.get()).unwrap();
-                self.list.remove(i);
+                let i = self.total_position_by_sorted(&old.get()).unwrap();
+                self.remove(i);
             }
         }
     }
 
-    // Only remove this if it's really present.
-    pub fn remove(&mut self, pos: u32) {
-        self.list.remove(pos);
+    pub fn remove(&mut self, pos: TotalPos) {
+        self.list.remove(pos.0);
     }
 
     pub fn sort(&mut self, sort: SortSettings) {
@@ -189,7 +291,6 @@ impl Contents {
         let start = Instant::now();
         glib::idle_add_local(move || {
             if old_list.n_items() <= 1000 {
-                // Actually logs a tiny amount before dropping the last items.
                 trace!("Finished dropping items in {:?}", start.elapsed());
                 return ControlFlow::Break;
             }
@@ -200,7 +301,8 @@ impl Contents {
         self.sort = sort;
     }
 
-    pub fn mark_stale(&mut self) {
+    pub fn mark_stale(&mut self, sort: SortSettings) {
+        assert_eq!(self.sort, sort);
         debug!("Marking {self:?} as stale");
         self.stale = true;
     }

@@ -124,37 +124,43 @@ impl Gui {
         // if self.simple_action(cmd) {
         //     return;
         // }
+        let mut tabs = self.tabs.borrow_mut();
+
 
         if let Some((cmd, arg)) = cmd.split_once(' ') {
             let arg = arg.trim_start();
 
             let _ = match cmd {
                 "Mode" => match DisplayMode::from_str(arg) {
-                    Ok(m) => return self.tabs.borrow_mut().active_display_mode(m),
+                    Ok(m) => return tabs.active_display_mode(m),
                     Err(_e) => true,
                 },
-                "Navigate" => return self.tabs.borrow_mut().active_navigate(Path::new(arg)),
-                "JumpTo" => return self.tabs.borrow_mut().active_jump(Path::new(arg)),
-                "NewTab" => return self.tabs.borrow_mut().open_tab(Path::new(arg), true),
+                "Navigate" => return tabs.active_navigate(Path::new(arg)),
+                "JumpTo" => return tabs.active_jump(Path::new(arg)),
+                "NewTab" => return tabs.open_tab(Path::new(arg), true),
                 "NewBackgroundTab" => {
-                    return self.tabs.borrow_mut().open_tab(Path::new(arg), false);
+                    return tabs.open_tab(Path::new(arg), false);
                 }
 
                 "Split" => match arg {
                     "horizontal" => {
-                        return self.tabs.borrow_mut().active_split(Orientation::Horizontal);
+                        return tabs.active_split(Orientation::Horizontal);
                     }
                     "vertical" => {
-                        return self.tabs.borrow_mut().active_split(Orientation::Vertical);
+                        return tabs.active_split(Orientation::Vertical);
                     }
                     _ => true,
                 },
 
+                "Search" => return tabs.active_search(arg),
+
                 "Execute" => {
+                    drop(tabs);
                     return self
                         .send_manager(ManagerAction::Execute(arg.to_string(), self.get_env()));
                 }
                 "Script" => {
+                    drop(tabs);
                     return self
                         .send_manager(ManagerAction::Script(arg.to_string(), self.get_env()));
                 }
@@ -169,8 +175,6 @@ impl Gui {
             //     };
             // }
         }
-
-        let mut tabs = self.tabs.borrow_mut();
 
         let _ = match cmd {
             "Quit" => {
@@ -192,6 +196,8 @@ impl Gui {
             "Back" => return tabs.active_back(),
             "Parent" => return tabs.active_parent(),
             "Child" => return tabs.active_child(),
+
+            "Search" => return tabs.active_search(""),
             _ => true,
         };
 

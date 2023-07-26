@@ -281,6 +281,9 @@ impl Gui {
             Update(update) => {
                 self.tabs.borrow_mut().update(update);
             }
+            SearchUpdate(update) => {
+                self.tabs.borrow_mut().search_update(update);
+            }
             DirectoryOpenError(path, error) => {
                 // This is a special case where we failed to open a directory or read it at all.
                 // Treat it as if it were closed.

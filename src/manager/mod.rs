@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -12,7 +13,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::LocalSet;
 use tokio::time::{sleep_until, timeout, Instant};
 
-use self::watcher::PendingUpdate;
+use self::watcher::PendingUpdates;
 use crate::com::{GuiAction, ManagerAction};
 use crate::{closing, spawn_thread};
 
@@ -33,10 +34,13 @@ struct Manager {
     // If the boolean is true, there was a second event we debounced.
     //
     // TODO -- a vector of tuples is likely faster here unless N gets unreasonably huge.
-    recent_mutations: AHashMap<Arc<Path>, PendingUpdate>,
+    recent_mutations: AHashMap<Arc<Path>, PendingUpdates>,
     next_tick: Option<Instant>,
 
     watcher: RecommendedWatcher,
+
+    open_searches: Vec<(Arc<AtomicBool>, notify::RecommendedWatcher)>,
+
     notify_receiver: UnboundedReceiver<notify::Result<Event>>,
 }
 
@@ -87,6 +91,8 @@ impl Manager {
             next_tick: None,
 
             watcher,
+            open_searches: Vec::new(),
+
             notify_receiver,
         }
     }
@@ -137,6 +143,9 @@ impl Manager {
             }
             Refresh(path, cancel) => self.start_read_dir(path, cancel),
             Unwatch(path) => self.unwatch_dir(&path),
+
+            Search(path, cancel) => todo!(),
+            EndSearch(cancel) => todo!(),
 
             Execute(s, env) => self.execute(s, env),
             Script(s, env) => self.script(s, env),

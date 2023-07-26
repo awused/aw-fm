@@ -40,12 +40,20 @@ impl Update {
     }
 }
 
+#[derive(Debug)]
+pub struct SearchUpdate {
+    pub search_id: Arc<AtomicBool>,
+    pub update: Update,
+}
+
 
 #[derive(Debug)]
 pub enum ManagerAction {
     Open(Arc<Path>, Arc<AtomicBool>),
     Refresh(Arc<Path>, Arc<AtomicBool>),
     Unwatch(Arc<Path>),
+    Search(Arc<Path>, Arc<AtomicBool>),
+    EndSearch(Arc<AtomicBool>),
     Execute(String, Vec<(String, OsString)>),
     Script(String, Vec<(String, OsString)>),
 }
@@ -62,6 +70,8 @@ pub struct WorkParams {
 pub enum GuiAction {
     Snapshot(DirSnapshot),
     Update(Update),
+    SearchUpdate(SearchUpdate),
+
     DirectoryOpenError(Arc<Path>, String),
     // Directory errors that aren't as fatal. Could maybe flash the tab?
     DirectoryError(Arc<Path>, String),

@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use gtk::gdk::Key;
-use gtk::glib::ControlFlow;
+use gtk::glib::{ControlFlow, Object};
 use gtk::prelude::{Cast, CastNone, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, WidgetExt};
-use gtk::{EventControllerKey, MultiSelection, Orientation, ScrolledWindow, Widget};
+use gtk::{CustomFilter, EventControllerKey, MultiSelection, Orientation, ScrolledWindow, Widget};
 
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
@@ -232,7 +232,29 @@ impl Pane {
         pane
     }
 
-    pub(super) fn replace(self, new: &Widget) {
+    pub(super) fn search_fn(query: String) -> impl Fn(&Object) -> bool + 'static {
+        move |eo| {
+            if query.len() < 3 {
+                return false;
+            }
+
+            todo!()
+        }
+    }
+
+    pub(super) fn flat_to_search(
+        self,
+        query: String,
+        settings: DirSettings,
+        selection: &MultiSelection,
+        filter: CustomFilter,
+    ) -> Self {
+        let pane = Self::create(self.tab, settings, selection);
+
+        todo!()
+    }
+
+    pub(super) fn replace_with(self, new: &Widget) {
         let parent = self.element.parent().unwrap();
         let Some(paned) = parent.downcast_ref::<gtk::Paned>() else {
             let parent = parent.downcast::<gtk::Box>().unwrap();
@@ -262,6 +284,10 @@ impl Pane {
         self.element.imp().original_text.replace(location);
         self.element.imp().seek.set_text("");
         self.element.imp().stack.set_visible_child_name("count");
+    }
+
+    pub(super) fn text_contents(&self) -> String {
+        self.element.imp().text_entry.text().to_string()
     }
 }
 
@@ -314,7 +340,7 @@ impl PaneExt for Pane {
 
             eo.map(|child| super::ScrollPosition {
                 path: child.get().abs_path.clone(),
-                index: list.position_by_sorted_entry(&child.get()).unwrap_or_default(),
+                index: list.filtered_position_by_sorted(&child.get()).unwrap_or_default(),
             })
         } else {
             None
@@ -329,7 +355,7 @@ impl PaneExt for Pane {
             .scroll_pos
             .and_then(|sp| {
                 if let Some(eo) = EntryObject::lookup(&sp.path) {
-                    let pos = list.position_by_sorted_entry(&eo.get());
+                    let pos = list.filtered_position_by_sorted(&eo.get());
                     debug!("Scrolling to position from element {pos:?}");
                     pos
                 } else {
@@ -368,7 +394,6 @@ impl PaneExt for Pane {
         info!("Splitting pane for {:?}", self.tab);
         paned.set_shrink_start_child(false);
         paned.set_shrink_end_child(false);
-        // paned.set_position(position)
 
         let parent = self.element.parent().unwrap();
 

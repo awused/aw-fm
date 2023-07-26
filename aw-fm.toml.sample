@@ -56,7 +56,7 @@ shortcuts = [
   {key = "V", modifiers = "Alt", action = "Split vertical"},
   {key = "H", modifiers = "Alt", action = "Split horizontal"},
 
-  # {key = "F", modifiers = "Control", action = "Search"},
+  {key = "F", modifiers = "Control", action = "Search"},
 
   # {key = "R", modifiers = "Control", action = "Rename"},
 

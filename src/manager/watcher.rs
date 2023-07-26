@@ -36,7 +36,7 @@ enum State {
 }
 
 #[derive(Debug)]
-pub struct PendingUpdate(Instant, State);
+pub struct PendingUpdates(Instant, State);
 
 impl Manager {
     pub(super) fn watch_dir(&mut self, path: &Arc<Path>) -> bool {
@@ -127,7 +127,7 @@ impl Manager {
 
         match self.recent_mutations.entry(path.clone()) {
             hash_map::Entry::Occupied(occupied) => {
-                let PendingUpdate(_expiry, state) = occupied.into_mut();
+                let PendingUpdates(_expiry, state) = occupied.into_mut();
                 match state {
                     State::Deduping => {
                         trace!("Deduping event for {path:?}");
@@ -144,7 +144,7 @@ impl Manager {
             }
             hash_map::Entry::Vacant(vacant) => {
                 let expiry = Instant::now() + DEDUPE_DELAY + BATCH_GRACE;
-                vacant.insert(PendingUpdate(expiry, State::Deduping));
+                vacant.insert(PendingUpdates(expiry, State::Deduping));
 
                 self.next_tick = self.next_tick.map_or(Some(expiry), |nt| Some(nt.min(expiry)));
             }
@@ -157,7 +157,7 @@ impl Manager {
         let mut expired_keys = Vec::new();
 
         // TODO -- this would match drain_filter
-        for (path, PendingUpdate(expiry, state)) in &mut self.recent_mutations {
+        for (path, PendingUpdates(expiry, state)) in &mut self.recent_mutations {
             if *expiry < now {
                 match state {
                     State::Expiring => {

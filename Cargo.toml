@@ -15,7 +15,7 @@ links = "GTK4, X11"
 ahash = "0.8.3"
 async-channel = "1.9.0"
 awconf = { git = "https://github.com/awused/awconf" }
-chrono = "0.4.26"
+chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.3.19", features = ["derive"] }
 derive_more = { version = "0.99.17", default-features = false, features = ["deref", "deref_mut", "from"] }
 dirs = "5.0.1"

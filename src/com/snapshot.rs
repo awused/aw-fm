@@ -86,3 +86,23 @@ impl From<DirSnapshot> for EntryObjectSnapshot {
         }
     }
 }
+
+
+#[derive(Debug)]
+pub struct SearchSnapshot {
+    pub finished: bool,
+    pub id: Arc<AtomicBool>,
+    entries: Vec<Entry>,
+}
+
+impl SearchSnapshot {
+    pub fn new(finished: bool, id: Arc<AtomicBool>, entries: Vec<Entry>) -> Self {
+        Self { finished, id, entries }
+    }
+
+    pub fn into_entries(self) -> impl Iterator<Item = EntryObject> {
+        self.entries.into_iter().map(|entry| {
+            EntryObject::lookup(&entry.abs_path).unwrap_or_else(|| EntryObject::new(entry))
+        })
+    }
+}
