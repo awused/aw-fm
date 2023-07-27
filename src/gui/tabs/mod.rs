@@ -48,7 +48,8 @@ impl PartiallyAppliedUpdate {
 #[derive(Debug, Clone)]
 struct HistoryEntry {
     location: Arc<Path>,
-    state: TabState,
+    search: Option<String>,
+    state: PaneState,
 }
 
 #[derive(Debug, Clone)]
@@ -74,13 +75,6 @@ impl PaneState {
         }
     }
 }
-
-#[derive(Debug, Clone, Default)]
-struct TabState {
-    pub pane: PaneState,
-    pub search: Option<String>,
-}
-
 
 #[derive(Debug)]
 struct NavTarget {

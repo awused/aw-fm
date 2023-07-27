@@ -9,7 +9,7 @@ use gtk::{CustomFilter, Orientation, Widget};
 
 use super::contents::Contents;
 use super::id::TabId;
-use super::pane::{Pane, PaneExt};
+use super::pane::Pane;
 use super::{PaneState, PartiallyAppliedUpdate};
 use crate::com::{
     DirSettings, EntryObject, EntryObjectSnapshot, ManagerAction, SearchSnapshot, SearchUpdate,
@@ -29,18 +29,19 @@ enum State {
 }
 
 #[derive(Debug)]
-pub(super) struct SearchPane {
+pub(super) struct Search {
     tab: TabId,
     path: Arc<Path>,
     state: State,
     // This contains everything in tab.contents plus items from subdirectories.
     contents: Contents,
-    query: Rc<RefCell<String>>,
+    original: Rc<RefCell<String>>,
+    lowercase: Rc<RefCell<String>>,
     pub filter: CustomFilter,
     // This is used to store a view state until search is done loading.
 }
 
-impl SearchPane {
+impl Search {
     pub const fn contents(&self) -> &Contents {
         &self.contents
     }
@@ -63,8 +64,8 @@ impl SearchPane {
         }
     }
 
-    pub fn query(&self) -> Rc<RefCell<String>> {
-        self.query.clone()
+    pub fn query(&self) -> (Rc<RefCell<String>>, Rc<RefCell<String>>) {
+        (self.original.clone(), self.lowercase.clone())
     }
 
     pub fn new(
@@ -77,14 +78,16 @@ impl SearchPane {
         let state = State::Unloaded;
         let (contents, filter) = Contents::search_from(flat_contents);
 
-        let query = Rc::new(RefCell::new(query.to_lowercase()));
+        let lowercase = Rc::new(RefCell::new(query.to_lowercase()));
+        let original = Rc::new(RefCell::new(query));
 
         Self {
             tab,
             path,
             state,
             contents,
-            query,
+            original,
+            lowercase,
             filter,
         }
     }
@@ -93,21 +96,23 @@ impl SearchPane {
         let state = State::Unloaded;
         let (contents, filter) = Contents::search_from(new_contents);
 
-        let query = Rc::new(RefCell::new(self.query.borrow().clone()));
+        let original = Rc::new(RefCell::new(self.original.borrow().clone()));
+        let lowercase = Rc::new(RefCell::new(self.lowercase.borrow().clone()));
 
         Self {
             tab,
             path: self.path.clone(),
             state,
             contents,
-            query,
+            original,
+            lowercase,
             filter,
         }
     }
 
     pub fn set_query(&mut self, query: String) {
         trace!("Updated search to: {query}");
-        self.query.replace(query);
+        self.lowercase.replace(query);
         self.filter.changed(gtk::FilterChange::Different);
     }
 

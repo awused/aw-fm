@@ -70,27 +70,6 @@ fn get_last_visible_child(parent: &Widget) -> Option<Widget> {
     }
 }
 
-pub(super) trait PaneExt {
-    fn set_active(&mut self, active: bool);
-
-    fn visible(&self) -> bool;
-
-    fn split(&self, orientation: Orientation) -> Option<gtk::Paned>;
-
-    // I don't like needing to pass list into this, but it needs to check that it's not stale.
-    fn update_settings(&mut self, settings: DirSettings, list: &Contents);
-
-    fn get_state(&self, list: &Contents) -> PaneState;
-
-    fn apply_state(&mut self, state: PaneState, list: &Contents);
-
-    fn workaround_scroller(&self) -> Option<&ScrolledWindow>;
-
-    fn activate(&self);
-
-    fn next_of_kin(&self) -> Option<TabId>;
-}
-
 #[derive(Debug)]
 pub(super) struct Pane {
     view: View,
@@ -155,6 +134,10 @@ impl Drop for Pane {
 }
 
 impl Pane {
+    pub const fn tab(&self) -> TabId {
+        self.tab
+    }
+
     fn create(tab: TabId, settings: DirSettings, selection: &MultiSelection) -> Self {
         let (element, signals) = PaneElement::new(tab, selection);
 
@@ -229,13 +212,20 @@ impl Pane {
         self.connections = connections;
     }
 
-    fn setup_search(&mut self, filter: CustomFilter, query_rc: Rc<RefCell<String>>, display: &str) {
+    fn setup_search(
+        &mut self,
+        filter: CustomFilter,
+        queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
+    ) {
+        let original = queries.0;
+        let query_rc = queries.1;
+
         self.connections.clear();
         let tab = self.tab;
         let imp = self.element.imp();
-        debug!("Creating new search pane for {tab:?}: {:?}", query_rc.borrow());
+        debug!("Creating new search pane for {tab:?}: {:?}", original.borrow());
 
-        imp.text_entry.set_text(&display);
+        imp.text_entry.set_text(&original.borrow());
         imp.original_text.replace("".to_string());
 
         // Decent opportunity for UnsafeCell if it benchmarks better.
@@ -244,6 +234,8 @@ impl Pane {
         let filt = filter.clone();
         let signal = imp.text_entry.connect_changed(move |e| {
             let text = e.text();
+            original.replace(text.to_string());
+
             let mut query = query_rc.borrow_mut();
             let new = text.to_lowercase();
 
@@ -300,7 +292,7 @@ impl Pane {
 
     pub(super) fn new_search<F: FnOnce(&Widget)>(
         tab: TabId,
-        query: Rc<RefCell<String>>,
+        queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
         path: &Path,
         settings: DirSettings,
         selection: &MultiSelection,
@@ -308,7 +300,7 @@ impl Pane {
         attach: F,
     ) -> Self {
         let mut pane = Self::create(tab, settings, selection);
-        pane.setup_search(filter, query, "");
+        pane.setup_search(filter, queries);
 
         // Where panes are created is controlled in TabsList
         attach(pane.element.upcast_ref());
@@ -340,7 +332,7 @@ impl Pane {
     pub(super) fn flat_to_search(
         &mut self,
         display_query: &str,
-        query: Rc<RefCell<String>>,
+        queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
         selection: &MultiSelection,
         filter: CustomFilter,
         settings: DirSettings,
@@ -357,7 +349,7 @@ impl Pane {
             )),
         };
 
-        self.setup_search(filter, query, display_query);
+        self.setup_search(filter, queries);
 
         if self.element.imp().active.get() {
             self.element.imp().text_entry.grab_focus_without_selecting();
@@ -403,10 +395,8 @@ impl Pane {
     pub(super) fn update_search(&self, query: &str) {
         self.element.imp().text_entry.set_text(query);
     }
-}
 
-impl PaneExt for Pane {
-    fn set_active(&mut self, active: bool) {
+    pub fn set_active(&mut self, active: bool) {
         self.element.imp().active.set(active);
         if active {
             self.element.add_css_class("active-pane");
@@ -416,13 +406,7 @@ impl PaneExt for Pane {
         }
     }
 
-    fn visible(&self) -> bool {
-        // If a flat pane exists it is always visible.
-        // The only exception is the very brief period in replace_pane before it is dropped.
-        true
-    }
-
-    fn update_settings(&mut self, settings: DirSettings, list: &Contents) {
+    pub fn update_settings(&mut self, settings: DirSettings, list: &Contents) {
         if self.view.matches(settings.display_mode) {
             self.view.update_settings(settings);
             return;
@@ -445,7 +429,7 @@ impl PaneExt for Pane {
         self.apply_state(vs, list);
     }
 
-    fn get_state(&self, list: &Contents) -> PaneState {
+    pub fn get_state(&self, list: &Contents) -> PaneState {
         let scroll_pos = if self.element.imp().scroller.vadjustment().value() > 0.0 {
             let eo = match &self.view {
                 View::Icons(ic) => ic.get_last_visible(),
@@ -464,7 +448,7 @@ impl PaneExt for Pane {
         PaneState { scroll_pos }
     }
 
-    fn apply_state(&mut self, state: PaneState, list: &Contents) {
+    pub fn apply_state(&mut self, state: PaneState, list: &Contents) {
         let pos = state
             .scroll_pos
             .and_then(|sp| {
@@ -485,16 +469,16 @@ impl PaneExt for Pane {
     }
 
     // Most view state code should be moved here.
-    fn workaround_scroller(&self) -> Option<&ScrolledWindow> {
-        Some(&self.element.imp().scroller)
+    pub fn workaround_scroller(&self) -> &ScrolledWindow {
+        &self.element.imp().scroller
     }
 
-    fn activate(&self) {
+    pub fn activate(&self) {
         let display = self.element.display();
         applications::activate(self.tab, &display, &self.selection);
     }
 
-    fn split(&self, orient: Orientation) -> Option<gtk::Paned> {
+    pub fn split(&self, orient: Orientation) -> Option<gtk::Paned> {
         let paned = match orient {
             Orientation::Horizontal if self.element.width() > MIN_PANE_RES * 2 => {
                 gtk::Paned::new(orient)
@@ -535,7 +519,7 @@ impl PaneExt for Pane {
     }
 
     // Finds the next closest sibling in the tree by reversing splits.
-    fn next_of_kin(&self) -> Option<TabId> {
+    pub fn next_of_kin(&self) -> Option<TabId> {
         let paned = self.element.parent().and_downcast::<gtk::Paned>()?;
 
         let start = paned.start_child().unwrap();

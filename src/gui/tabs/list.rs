@@ -291,17 +291,10 @@ impl TabsList {
         let active_index = self.position(active).unwrap();
 
         assert_ne!(index, active_index);
-        let old_pane = self.tabs[active_index].take_pane().unwrap();
-        if index < active_index {
-            let (left, right) = self.tabs.split_at_mut(active_index);
-            left[index].replace_pane(&mut right[0]);
-        } else {
-            let (left, right) = self.tabs.split_at_mut(index);
-            right[0].replace_pane(&mut left[active_index]);
-        }
 
+        let old_pane = self.tabs[active_index].take_pane();
         let (left, tab, right) = self.split_around_mut(index);
-        tab.load_after_replacement(left, right);
+        tab.replace_pane(left, right, old_pane);
 
         self.set_active(id);
     }
@@ -320,16 +313,9 @@ impl TabsList {
         let old_index = self.position(visible).unwrap();
         let new_index = self.position(inactive).unwrap();
 
-        if new_index < old_index {
-            let (left, right) = self.tabs.split_at_mut(old_index);
-            left[new_index].replace_pane(&mut right[0]);
-        } else {
-            let (left, right) = self.tabs.split_at_mut(new_index);
-            right[0].replace_pane(&mut left[old_index]);
-        }
-
+        let old_pane = self.tabs[old_index].take_pane();
         let (left, tab, right) = self.split_around_mut(new_index);
-        tab.load_after_replacement(left, right);
+        tab.replace_pane(left, right, old_pane);
     }
 
     fn clone_active(&mut self) -> Option<(TabId, usize)> {
