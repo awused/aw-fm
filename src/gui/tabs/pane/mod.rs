@@ -313,6 +313,7 @@ impl Pane {
             View::Columns(cv) => cv.change_model(selection),
         }
 
+        self._signals = self.element.setup_signals(selection);
         self.setup_flat(path);
     }
 
@@ -327,6 +328,7 @@ impl Pane {
             View::Columns(cv) => cv.change_model(selection),
         }
 
+        self._signals = self.element.setup_signals(selection);
         self.setup_search(filter, queries);
 
         if self.element.imp().active.get() {

@@ -62,7 +62,7 @@ impl PaneElement {
         (s, signals)
     }
 
-    fn setup_signals(&self, selection: &MultiSelection) -> PaneSignals {
+    pub(super) fn setup_signals(&self, selection: &MultiSelection) -> PaneSignals {
         let count_label = &*self.imp().count;
         let selection_label = &*self.imp().selection;
         let stack = &*self.imp().stack;

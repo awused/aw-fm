@@ -12,6 +12,7 @@ use tokio::time::{Duration, Instant};
 use super::{Manager, RecurseId};
 use crate::closing;
 use crate::com::{Entry, GuiAction, SearchUpdate, Update};
+use crate::config::CONFIG;
 
 // Use our own debouncer as the existing notify debouncers leave a lot to be desired.
 // Send the first event immediately and then at most one event per period.
@@ -262,18 +263,41 @@ impl Manager {
         debug!("Watching {path:?} recursively");
 
         let sender = self.notify_sender.clone();
-        let parent = path.clone();
+        let search_root = path.clone();
         let id = cancel.clone();
         let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(ev) = &res {
                 if ev.paths.is_empty() {
                     return;
                 }
-                if Some(&*parent) == ev.paths[0].parent() {
+                let Some(parent) = ev.paths[0].parent() else {
+                    return;
+                };
+
+                if &*search_root == parent {
                     // Ignore changes inside the directory itself
                     return;
                 }
+
+                if let Some(depth) = CONFIG.search_max_depth {
+                    match parent.strip_prefix(&search_root) {
+                        Ok(dirs) => {
+                            if dirs.components().count() > depth.get() as usize {
+                                trace!(
+                                    "Ignoring search event in {:?} since it was too deep",
+                                    ev.paths[0].parent()
+                                );
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Path {:?} wasn't in search root {:?}", parent, search_root);
+                            return;
+                        }
+                    }
+                }
             }
+
             if let Err(e) = sender.send((res, Some(id.clone()))) {
                 if !closing::closed() {
                     error!("Error sending from notify watcher: {e}");

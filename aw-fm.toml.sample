@@ -108,6 +108,12 @@ skip_trash = false
 # More advanced configuration options below. They probably do not need to be changed.
 # ------------------------------------------------------------------------------------------------
 
+# How deeply to recurse for searches.
+#
+# 0 or unset to allow for unlimited depth. Not recommended.
+search_max_depth = 8
+
+
 # Thread Settings --------------------------------------------------------------------------------
 
 # How many concurrent thumbnail processes we allow.

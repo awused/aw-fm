@@ -198,7 +198,10 @@ impl Search {
         match &mut self.state {
             State::Unloaded => unreachable!(),
             State::Loading(_, pending) => {
-                trace!("Deferring search update {s_update:?} until loading is done.");
+                trace!(
+                    "Deferring search update {:?} until loading is done.",
+                    s_update.update.path()
+                );
                 pending.push(s_update);
             }
             State::Done(_) => self.apply_search_update_inner(s_update),

@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use std::fmt;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroU8};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -74,6 +74,9 @@ pub struct Config {
     pub max_thumbnailers: u8,
     #[serde(default)]
     pub background_thumbnailers: u8,
+
+    #[serde(default, deserialize_with = "zero_is_none")]
+    pub search_max_depth: Option<NonZeroU64>,
 }
 
 // Serde seems broken with OsString for some reason
