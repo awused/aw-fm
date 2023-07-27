@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use dirs::home_dir;
 use gtk::gio::ListStore;
-use gtk::prelude::{Cast, CastNone, ListModelExt, StaticType};
+use gtk::prelude::{Cast, CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{BoxExt, ListItemExt};
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
@@ -204,15 +204,17 @@ impl TabsList {
         }
     }
 
+    // Search data cannot cause updates to other tabs, but it can fail to EntryObjects
+    // with the newest versions.
+    // To prevent races, flat tab snapshots always take priority.
     pub fn search_update(&mut self, update: SearchUpdate) {
-        todo!()
+        if let Some(t) = self.tabs.iter_mut().find(|t| t.matches_search_update(&update)) {
+            t.apply_search_update(update);
+        } else {
+            warn!("Unmatched search update.");
+        }
     }
 
-    // Applies a search snapshot to its matching tab.
-    //
-    // This cannot cause updates to other tabs, but it can fail to update some EntryObjects with
-    // the newest versions if this snapshot has newer versions. To prevent races, flat tab
-    // snapshots always take priority.
     pub fn apply_search_snapshot(&mut self, snap: SearchSnapshot) {
         if let Some(t) = self.tabs.iter_mut().find(|t| t.matches_search_snapshot(&snap)) {
             t.apply_search_snapshot(snap);

@@ -4,16 +4,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use gtk::traits::FilterExt;
-use gtk::{CustomFilter, Orientation, Widget};
+use gtk::CustomFilter;
 
 use super::contents::Contents;
-use super::id::TabId;
-use super::pane::Pane;
-use super::{PaneState, PartiallyAppliedUpdate};
+use super::PartiallyAppliedUpdate;
 use crate::com::{
     DirSettings, EntryObject, EntryObjectSnapshot, ManagerAction, SearchSnapshot, SearchUpdate,
-    SortSettings, Update,
+    Update,
 };
 use crate::gui::gui_run;
 
@@ -30,12 +27,13 @@ enum State {
 
 #[derive(Debug)]
 pub(super) struct Search {
-    tab: TabId,
     path: Arc<Path>,
     state: State,
     // This contains everything in tab.contents plus items from subdirectories.
     contents: Contents,
     original: Rc<RefCell<String>>,
+    // Searching is case insensitive (for now at least).
+    // TODO -- smart case searching
     lowercase: Rc<RefCell<String>>,
     pub filter: CustomFilter,
     // This is used to store a view state until search is done loading.
@@ -68,13 +66,7 @@ impl Search {
         (self.original.clone(), self.lowercase.clone())
     }
 
-    pub fn new(
-        tab: TabId,
-        path: Arc<Path>,
-        settings: DirSettings,
-        flat_contents: &Contents,
-        query: String,
-    ) -> Self {
+    pub fn new(path: Arc<Path>, flat_contents: &Contents, query: String) -> Self {
         let state = State::Unloaded;
         let (contents, filter) = Contents::search_from(flat_contents);
 
@@ -82,7 +74,6 @@ impl Search {
         let original = Rc::new(RefCell::new(query));
 
         Self {
-            tab,
             path,
             state,
             contents,
@@ -92,7 +83,7 @@ impl Search {
         }
     }
 
-    pub fn clone_for(&self, tab: TabId, new_contents: &Contents) -> Self {
+    pub fn clone_for(&self, new_contents: &Contents) -> Self {
         let state = State::Unloaded;
         let (contents, filter) = Contents::search_from(new_contents);
 
@@ -100,7 +91,6 @@ impl Search {
         let lowercase = Rc::new(RefCell::new(self.lowercase.borrow().clone()));
 
         Self {
-            tab,
             path: self.path.clone(),
             state,
             contents,
@@ -108,12 +98,6 @@ impl Search {
             lowercase,
             filter,
         }
-    }
-
-    pub fn set_query(&mut self, query: String) {
-        trace!("Updated search to: {query}");
-        self.lowercase.replace(query);
-        self.filter.changed(gtk::FilterChange::Different);
     }
 
     pub fn re_sort(&mut self) {
@@ -213,7 +197,10 @@ impl Search {
     pub fn apply_search_update(&mut self, s_update: SearchUpdate) {
         match &mut self.state {
             State::Unloaded => unreachable!(),
-            State::Loading(_, pending) => pending.push(s_update),
+            State::Loading(_, pending) => {
+                trace!("Deferring search update {s_update:?} until loading is done.");
+                pending.push(s_update);
+            }
             State::Done(_) => self.apply_search_update_inner(s_update),
         }
     }

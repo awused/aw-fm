@@ -6,11 +6,10 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use ahash::AHashMap;
 use gtk::glib;
 use notify::{Event, RecommendedWatcher};
 use tokio::select;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::task::LocalSet;
 use tokio::time::{sleep_until, timeout, Instant};
 
@@ -22,6 +21,7 @@ mod actions;
 mod read_dir;
 mod watcher;
 
+type RecurseId = Arc<AtomicBool>;
 
 // Manages I/O work on files and directories.
 // Compared to the manager in aw-man, this one is much dumber and all of the driving logic lives in
@@ -40,7 +40,8 @@ struct Manager {
 
     open_searches: Vec<(Arc<AtomicBool>, notify::RecommendedWatcher)>,
 
-    notify_receiver: UnboundedReceiver<notify::Result<Event>>,
+    notify_sender: UnboundedSender<(notify::Result<Event>, Option<RecurseId>)>,
+    notify_receiver: UnboundedReceiver<(notify::Result<Event>, Option<RecurseId>)>,
 }
 
 pub fn run(
@@ -71,10 +72,11 @@ async fn run_local(f: impl Future<Output = ()>) {
 
 impl Manager {
     fn new(gui_sender: glib::Sender<GuiAction>) -> Self {
-        let (sender, notify_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (notify_sender, notify_receiver) = tokio::sync::mpsc::unbounded_channel();
 
+        let sender = notify_sender.clone();
         let watcher = notify::recommended_watcher(move |res| {
-            if let Err(e) = sender.send(res) {
+            if let Err(e) = sender.send((res, None)) {
                 if !closing::closed() {
                     error!("Error sending from notify watcher: {e}");
                 }
@@ -92,6 +94,7 @@ impl Manager {
             watcher,
             open_searches: Vec::new(),
 
+            notify_sender,
             notify_receiver,
         }
     }
@@ -111,12 +114,12 @@ impl Manager {
                     self.handle_action(ma);
                 }
                 ev = self.notify_receiver.recv() => {
-                    let Some(ev) = ev else {
+                    let Some((ev, id)) = ev else {
                         error!("Received nothing from notify watcher. This should never happen");
                         closing::close();
                         break 'main;
                     };
-                    self.handle_event(ev, None);
+                    self.handle_event(ev, id);
                 }
                 _ = async { sleep_until(self.next_tick.unwrap()).await },
                         if self.next_tick.is_some() => {

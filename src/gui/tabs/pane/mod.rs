@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use gtk::gdk::Key;
-use gtk::glib::{ControlFlow, Object};
+use gtk::glib::ControlFlow;
 use gtk::prelude::{Cast, CastNone, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
@@ -293,7 +293,6 @@ impl Pane {
     pub(super) fn new_search<F: FnOnce(&Widget)>(
         tab: TabId,
         queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
-        path: &Path,
         settings: DirSettings,
         selection: &MultiSelection,
         filter: CustomFilter,
@@ -308,46 +307,25 @@ impl Pane {
         pane
     }
 
-    pub(super) fn search_to_flat(
-        &mut self,
-        path: &Path,
-        selection: &MultiSelection,
-        settings: DirSettings,
-    ) {
-        let view = match settings.display_mode {
-            DisplayMode::Icons => {
-                View::Icons(IconView::new(&self.element.imp().scroller, self.tab, selection))
-            }
-            DisplayMode::Columns => View::Columns(DetailsView::new(
-                &self.element.imp().scroller,
-                self.tab,
-                settings,
-                selection,
-            )),
-        };
+    pub(super) fn search_to_flat(&mut self, path: &Path, selection: &MultiSelection) {
+        match &self.view {
+            View::Icons(ic) => ic.change_model(selection),
+            View::Columns(cv) => cv.change_model(selection),
+        }
 
         self.setup_flat(path);
     }
 
     pub(super) fn flat_to_search(
         &mut self,
-        display_query: &str,
         queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
         selection: &MultiSelection,
         filter: CustomFilter,
-        settings: DirSettings,
     ) {
-        let view = match settings.display_mode {
-            DisplayMode::Icons => {
-                View::Icons(IconView::new(&self.element.imp().scroller, self.tab, selection))
-            }
-            DisplayMode::Columns => View::Columns(DetailsView::new(
-                &self.element.imp().scroller,
-                self.tab,
-                settings,
-                selection,
-            )),
-        };
+        match &self.view {
+            View::Icons(ic) => ic.change_model(selection),
+            View::Columns(cv) => cv.change_model(selection),
+        }
 
         self.setup_search(filter, queries);
 
@@ -386,10 +364,6 @@ impl Pane {
         self.element.imp().original_text.replace(location);
         self.element.imp().seek.set_text("");
         self.element.imp().stack.set_visible_child_name("count");
-    }
-
-    pub(super) fn text_contents(&self) -> String {
-        self.element.imp().text_entry.text().to_string()
     }
 
     pub(super) fn update_search(&self, query: &str) {

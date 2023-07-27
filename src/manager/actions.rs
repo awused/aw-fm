@@ -1,7 +1,4 @@
 use std::ffi::OsString;
-use std::path::Path;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use std::time::Duration;
 
 use gtk::glib;

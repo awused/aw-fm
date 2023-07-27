@@ -1,6 +1,8 @@
 mod icon_tile;
 
 
+use std::time::Duration;
+
 use gtk::prelude::*;
 use gtk::{glib, GridView, MultiSelection, ScrolledWindow};
 
@@ -107,5 +109,9 @@ impl IconView {
             .and_then(|c| c.first_child())
             .and_downcast::<IconTile>()
             .and_then(|c| c.bound_object())
+    }
+
+    pub(super) fn change_model(&self, selection: &MultiSelection) {
+        self.grid.set_model(Some(selection));
     }
 }

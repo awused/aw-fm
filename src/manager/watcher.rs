@@ -1,15 +1,15 @@
-use std::collections::{btree_map, hash_map};
+use std::collections::btree_map;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use gtk::glib::{self, Sender};
+use gtk::glib;
 use notify::event::{ModifyKind, RenameMode};
 use notify::RecursiveMode::NonRecursive;
-use notify::{Event, Watcher};
+use notify::{Event, RecommendedWatcher, Watcher};
 use tokio::time::{Duration, Instant};
 
-use super::Manager;
+use super::{Manager, RecurseId};
 use crate::closing;
 use crate::com::{Entry, GuiAction, SearchUpdate, Update};
 
@@ -36,12 +36,11 @@ enum State {
     Debounced,
 }
 
-type Search = Arc<AtomicBool>;
 
 #[derive(Debug, Default)]
 pub struct Sources {
     flat: bool,
-    searches: Vec<Search>,
+    searches: Vec<RecurseId>,
 }
 
 #[derive(Debug)]
@@ -74,24 +73,23 @@ impl Manager {
         }
     }
 
-    pub(super) fn watch_search(&mut self, path: Arc<Path>, cancel: Arc<AtomicBool>) {
-        error!("TODO -- search");
-    }
-
-    pub(super) fn unwatch_search(&mut self, cancel: Arc<AtomicBool>) {
+    pub(super) fn unwatch_search(&mut self, cancel: RecurseId) {
         let pos = self.open_searches.iter().position(|(id, _watcher)| Arc::ptr_eq(&cancel, id));
         if let Some(pos) = pos {
-            debug!("Removing search watcher");
+            debug!("Removing recursive search watcher");
             let (_, watcher) = self.open_searches.swap_remove(pos);
             drop(watcher);
         }
     }
 
     fn send_update(sender: &glib::Sender<GuiAction>, path: Arc<Path>, sources: Sources) {
-        for search in sources.searches {
+        for search_id in sources.searches {
             match Entry::new(path.clone()) {
                 Ok(entry) => {
-                    sender.send(GuiAction::Update(Update::Entry(entry))).unwrap_or_else(|e| {
+                    let update = Update::Entry(entry);
+                    let s_up = SearchUpdate { search_id, update };
+
+                    sender.send(GuiAction::SearchUpdate(s_up)).unwrap_or_else(|e| {
                         error!("{e}");
                         closing::close()
                     })
@@ -119,7 +117,7 @@ impl Manager {
         }
     }
 
-    pub(super) fn handle_event(&mut self, event: notify::Result<Event>, source: Option<Search>) {
+    pub(super) fn handle_event(&mut self, event: notify::Result<Event>, source: Option<RecurseId>) {
         use notify::EventKind::*;
 
         let event = match event {
@@ -258,5 +256,49 @@ impl Manager {
         }
 
         // trace!("Processed {starting_len} events in {:?}", now.elapsed());
+    }
+
+    pub(super) fn watch_search(&mut self, path: Arc<Path>, cancel: RecurseId) {
+        debug!("Watching {path:?} recursively");
+
+        let sender = self.notify_sender.clone();
+        let parent = path.clone();
+        let id = cancel.clone();
+        let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(ev) = &res {
+                if ev.paths.is_empty() {
+                    return;
+                }
+                if Some(&*parent) == ev.paths[0].parent() {
+                    // Ignore changes inside the directory itself
+                    return;
+                }
+            }
+            if let Err(e) = sender.send((res, Some(id.clone()))) {
+                if !closing::closed() {
+                    error!("Error sending from notify watcher: {e}");
+                }
+                closing::close();
+            }
+        });
+
+        let mut watcher = match watcher {
+            Ok(w) => w,
+            Err(e) => {
+                let msg = format!("Search watcher error: {e}");
+                error!("{msg}");
+                self.send(GuiAction::DirectoryError(path, msg));
+                return;
+            }
+        };
+
+        if let Err(e) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
+            let msg = format!("Search watcher error: {e}");
+            error!("{msg}");
+            self.send(GuiAction::DirectoryError(path, msg));
+            return;
+        }
+
+        self.open_searches.push((cancel, watcher));
     }
 }

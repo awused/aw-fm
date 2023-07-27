@@ -1,5 +1,5 @@
 use std::future::ready;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
@@ -149,7 +149,7 @@ async fn read_dir_sync_thread(
     debug!("Starting to read directory {path:?}");
 
     let start = Instant::now();
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let h = read_dir_sync(path.clone(), cancel.clone(), sender);
 
@@ -172,7 +172,7 @@ async fn recurse_dir_sync_thread(
     debug!("Starting to recursively walk {path:?}");
 
     let start = Instant::now();
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let h = recurse_dir_sync(path.clone(), cancel.clone(), sender);
 

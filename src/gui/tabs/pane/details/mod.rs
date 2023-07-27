@@ -152,6 +152,10 @@ impl DetailsView {
 
         obj
     }
+
+    pub(super) fn change_model(&self, selection: &MultiSelection) {
+        self.column_view.set_model(Some(selection));
+    }
 }
 
 

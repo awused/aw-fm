@@ -69,7 +69,7 @@ impl MaybePane {
 
     fn overwrite_state(&mut self, state: PaneState) {
         match self {
-            Self::Pane(p) => {
+            Self::Pane(_p) => {
                 let new = Self::Closed(PaneState::default());
                 let old = std::mem::replace(self, new);
                 let Self::Pane(pane) = old else {
@@ -98,7 +98,7 @@ impl MaybePane {
                 };
                 pane
             }
-            Self::Pending(p, state) => {
+            Self::Pending(_p, state) => {
                 let state = std::mem::take(state);
                 let old = std::mem::replace(self, Self::Closed(state));
                 let Self::Pending(p, _) = old else {
@@ -113,7 +113,7 @@ impl MaybePane {
     fn must_resolve_pending(&mut self) -> PaneState {
         match self {
             Self::Pane(_) | Self::Closed(_) => unreachable!(),
-            Self::Pending(p, state) => {
+            Self::Pending(_p, _state) => {
                 let temp = Self::Closed(PaneState::default());
                 let old = std::mem::replace(self, temp);
                 let Self::Pending(pane, state) = old else {
@@ -139,20 +139,17 @@ impl MaybePane {
 pub(super) struct Tab {
     id: TabUid,
     dir: FlatDir,
+    pane: MaybePane,
+
     settings: DirSettings,
     contents: Contents,
-    // TODO -- this should only store snapshots and be sporadically updated/absent
-    // saved_state: Option<PaneState>,
     past: Vec<HistoryEntry>,
     future: Vec<HistoryEntry>,
     element: TabElement,
 
     // Each tab can only be open in one pane at once.
     // In theory we could do many-to-many but it's too niche.
-    // pane: CurrentPane,
     search: Option<Search>,
-    // pane: Option<Pane>,
-    pane: MaybePane,
 }
 
 impl Tab {
@@ -202,13 +199,14 @@ impl Tab {
         let mut t = Self {
             id,
             dir,
+            pane: MP::Closed(state),
+
             settings,
             contents,
             past: Vec::new(),
             future: Vec::new(),
             element: element.clone(),
             search: None,
-            pane: MP::Closed(state),
         };
 
         t.copy_from_donor(existing_tabs, &[]);
@@ -230,20 +228,20 @@ impl Tab {
             element.imp().spinner.set_visible(false);
         }
 
-        let search = source.search.as_ref().map(|s| s.clone_for(id.copy(), &contents));
+        let search = source.search.as_ref().map(|s| s.clone_for(&contents));
 
         (
             Self {
                 id,
                 dir: source.dir.clone(),
+                pane: MP::Closed(source.pane.clone_state(&source.contents)),
+
                 settings: source.settings,
                 contents,
-                // saved_state: view_state,
                 past: source.past.clone(),
                 future: source.future.clone(),
                 element: element.clone(),
                 search,
-                pane: MP::Closed(source.pane.clone_state(&source.contents)),
             },
             element,
         )
@@ -274,13 +272,7 @@ impl Tab {
 
     fn open_search(&mut self, query: String) {
         trace!("Creating Search for {:?}", self.id);
-        let mut search = Search::new(
-            self.id(),
-            self.dir.path().clone(),
-            self.settings,
-            &self.contents,
-            query.clone(),
-        );
+        let mut search = Search::new(self.dir.path().clone(), &self.contents, query);
 
         let Some(pane) = self.pane.getm() else {
             self.search = Some(search);
@@ -293,20 +285,14 @@ impl Tab {
         self.element.imp().spinner.start();
         self.element.imp().spinner.set_visible(true);
 
-        pane.flat_to_search(
-            &query,
-            search.query(),
-            &search.contents().selection,
-            search.filter.clone(),
-            self.settings,
-        );
+        pane.flat_to_search(search.query(), &search.contents().selection, search.filter.clone());
 
         self.search = Some(search);
     }
 
     fn close_search(&mut self) {
         trace!("Closing Search for {:?}", self.id);
-        let Some(search) = self.search.take() else {
+        let Some(_search) = self.search.take() else {
             return;
         };
 
@@ -321,21 +307,21 @@ impl Tab {
             return;
         };
 
-        pane.search_to_flat(self.dir.path(), &self.contents.selection, self.settings);
-        self.apply_pane_state();
+        pane.search_to_flat(self.dir.path(), &self.contents.selection);
     }
 
     // Starts a new search or updates an existing one with a new query.
     pub fn search(&mut self, query: String) {
         assert!(self.visible());
 
-        if let Some(search) = &mut self.search {
+        if let Some(_search) = &mut self.search {
             let pane = self.pane.getm().unwrap();
             pane.update_search(&query);
             return;
         }
 
         self.past.push(self.current_history());
+        self.future.clear();
         self.open_search(query);
     }
 
@@ -457,17 +443,21 @@ impl Tab {
         Some(&**self.dir.path()) == update.path().parent()
     }
 
-    pub fn matches_search_update(&mut self, update: &SearchUpdate) -> bool {
+    pub fn matches_search_update(&self, update: &SearchUpdate) -> bool {
         // Not watching anything -> cannot match an update
         let Some(_watch) = self.dir.state().watched() else {
             return false;
         };
 
-        let Some(search) = &mut self.search else {
+        let Some(search) = &self.search else {
             return false;
         };
 
         search.matches_update(update)
+    }
+
+    pub fn apply_search_update(&mut self, update: SearchUpdate) {
+        self.search.as_mut().unwrap().apply_search_update(update);
     }
 
     fn search_sort_after_snapshot(&mut self, path: &Path) {
@@ -652,6 +642,8 @@ impl Tab {
             } else {
                 self.close_search();
             }
+            self.pane.overwrite_state(next.state);
+            self.apply_pane_state();
             return;
         }
 
@@ -688,6 +680,8 @@ impl Tab {
             } else {
                 self.close_search();
             }
+            self.pane.overwrite_state(prev.state);
+            self.apply_pane_state();
             return;
         }
 
@@ -767,7 +761,11 @@ impl Tab {
     }
 
     fn current_history(&self) -> HistoryEntry {
-        let state = self.pane.clone_state(&self.contents);
+        let state = if let Some(search) = &self.search {
+            self.pane.clone_state(search.contents())
+        } else {
+            self.pane.clone_state(&self.contents)
+        };
         let search = self.search.as_ref().map(|s| s.query().0.borrow().clone());
         HistoryEntry { location: self.dir(), search, state }
     }
@@ -795,6 +793,8 @@ impl Tab {
             return;
         };
 
+        info!("Applying {:?} to tab {:?}", state, self.id);
+
         if self.settings.display_mode == DisplayMode::Icons {
             error!("Unsetting GTK crash workaround");
         }
@@ -804,7 +804,6 @@ impl Tab {
         let state = self.pane.must_resolve_pending();
         let pane = self.pane.getm().unwrap();
 
-        // self.pane.apply_view_state
         if let Some(search) = &self.search {
             pane.apply_state(state, search.contents());
         } else {
@@ -822,7 +821,6 @@ impl Tab {
             let pane = Pane::new_search(
                 self.id(),
                 search.query(),
-                self.dir.path(),
                 self.settings,
                 &search.contents().selection,
                 search.filter.clone(),
@@ -858,7 +856,6 @@ impl Tab {
             let pane = Pane::new_search(
                 self.id(),
                 search.query(),
-                self.dir.path(),
                 self.settings,
                 &search.contents().selection,
                 search.filter.clone(),
