@@ -25,10 +25,6 @@ impl Gui {
         dialog.set_default_width(800);
         dialog.set_default_height(600);
 
-        // It's enough, for now, to just set this at dialog spawn time.
-        #[cfg(windows)]
-        dialog.add_css_class(self.win32.dpi_class());
-
         let store = gtk::gio::ListStore::new::<BoxedAnyObject>();
 
         for s in &CONFIG.shortcuts {

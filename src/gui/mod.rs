@@ -1,7 +1,3 @@
-mod menu;
-#[cfg(windows)]
-mod windows;
-
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
@@ -25,6 +21,7 @@ use crate::database::DBCon;
 mod applications;
 mod input;
 mod main_window;
+mod menu;
 mod tabs;
 mod thumbnailer;
 
@@ -84,9 +81,6 @@ struct Gui {
     manager_sender: UnboundedSender<ManagerAction>,
 
     warning_timeout: DebugIgnore<Cell<Option<SourceId>>>,
-
-    #[cfg(windows)]
-    win32: windows::WindowsEx,
 }
 
 pub fn run(
@@ -170,9 +164,6 @@ impl Gui {
             shortcuts: Self::parse_shortcuts(),
 
             manager_sender,
-
-            #[cfg(windows)]
-            win32: windows::WindowsEx::default(),
         });
 
         let g = rc.clone();
@@ -184,8 +175,6 @@ impl Gui {
         let g = rc.clone();
         application.connect_shutdown(move |_a| {
             info!("Shutting down application");
-            #[cfg(windows)]
-            g.win32.teardown();
 
             g.database.destroy();
 
@@ -200,10 +189,6 @@ impl Gui {
         gui_receiver.attach(None, move |gu| g.handle_update(gu));
 
         rc.setup();
-
-        // Hack around https://github.com/gtk-rs/gtk4-rs/issues/520
-        #[cfg(windows)]
-        rc.win32.setup(rc.clone());
 
         rc
     }
@@ -252,10 +237,7 @@ impl Gui {
     fn window_state_changed(self: &Rc<Self>) {
         let mut s = self.win_state.get();
 
-        #[cfg(unix)]
         let fullscreen = self.window.is_fullscreen();
-        #[cfg(windows)]
-        let fullscreen = self.win32.is_fullscreen();
 
         let maximized = self.window.is_maximized();
 
