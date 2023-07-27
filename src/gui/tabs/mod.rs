@@ -48,7 +48,7 @@ impl PartiallyAppliedUpdate {
 #[derive(Debug, Clone)]
 struct HistoryEntry {
     location: Arc<Path>,
-    state: SavedPaneState,
+    state: TabState,
 }
 
 #[derive(Debug, Clone)]
@@ -61,14 +61,12 @@ struct ScrollPosition {
 
 // Not kept up to date, maybe an enum?
 #[derive(Debug, Clone, Default)]
-struct SavedPaneState {
+struct PaneState {
     // If the directory has updated we just don't care, it'll be wrong.
     pub scroll_pos: Option<ScrollPosition>,
-    // Selected items?
-    pub search: Option<String>,
 }
 
-impl SavedPaneState {
+impl PaneState {
     fn for_jump(jump: Option<Arc<Path>>) -> Self {
         Self {
             scroll_pos: jump.map(|path| ScrollPosition { path, index: 0 }),
@@ -76,6 +74,13 @@ impl SavedPaneState {
         }
     }
 }
+
+#[derive(Debug, Clone, Default)]
+struct TabState {
+    pub pane: PaneState,
+    pub search: Option<String>,
+}
+
 
 #[derive(Debug)]
 struct NavTarget {

@@ -217,7 +217,7 @@ impl Manager {
 
     pub(super) fn handle_pending_updates(&mut self) {
         let now = Instant::now();
-        let starting_len = self.recent_mutations.len();
+        // let starting_len = self.recent_mutations.len();
         let mut maybe_tick = now + DEBOUNCE_DURATION;
         let mut expired_keys = Vec::new();
 
@@ -257,6 +257,6 @@ impl Manager {
             self.next_tick = Some(maybe_tick + BATCH_GRACE);
         }
 
-        trace!("Processed {starting_len} events in {:?}", now.elapsed());
+        // trace!("Processed {starting_len} events in {:?}", now.elapsed());
     }
 }

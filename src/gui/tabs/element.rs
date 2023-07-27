@@ -69,6 +69,16 @@ impl TabElement {
         imp.title.set_tooltip_text(Some(&path.to_string_lossy()));
     }
 
+    pub fn search_title(&self, path: &Path) {
+        let imp = self.imp();
+        let title =
+            format!("Search: {}", &path.file_name().unwrap_or(path.as_os_str()).to_string_lossy());
+        let tooltip = format!("Searching in {}", &path.to_string_lossy());
+
+        imp.title.set_text(&title);
+        imp.title.set_tooltip_text(Some(&tooltip));
+    }
+
     pub fn set_pane_visible(&self, visible: bool) {
         if visible {
             self.add_css_class("visible-tab");

@@ -261,8 +261,13 @@ impl Contents {
     }
 
     pub fn sort(&mut self, sort: SortSettings) {
+        let old_sort = self.sort;
         if self.stale {
             self.clear(sort);
+        }
+
+        if old_sort == sort {
+            return;
         }
 
         self.sort = sort;

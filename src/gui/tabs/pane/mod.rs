@@ -19,8 +19,8 @@ use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
 use super::id::TabId;
-use super::{Contents, SavedPaneState};
-use crate::com::{DirSettings, DisplayMode, EntryObject};
+use super::{Contents, PaneState};
+use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
 use crate::gui::{applications, tabs_run};
 
 mod details;
@@ -80,9 +80,9 @@ pub(super) trait PaneExt {
     // I don't like needing to pass list into this, but it needs to check that it's not stale.
     fn update_settings(&mut self, settings: DirSettings, list: &Contents);
 
-    fn get_state(&self, list: &Contents) -> SavedPaneState;
+    fn get_state(&self, list: &Contents) -> PaneState;
 
-    fn apply_state(&mut self, state: SavedPaneState, list: &Contents);
+    fn apply_state(&mut self, state: PaneState, list: &Contents);
 
     fn workaround_scroller(&self) -> Option<&ScrolledWindow>;
 
@@ -100,6 +100,8 @@ pub(super) struct Pane {
     selection: MultiSelection,
 
     _signals: PaneSignals,
+
+    connections: Vec<SignalHolder<gtk::Entry>>,
 }
 
 impl Drop for Pane {
@@ -194,10 +196,13 @@ impl Pane {
             selection: selection.clone(),
 
             _signals: signals,
+
+            connections: Vec::new(),
         }
     }
 
-    fn setup_flat(self, path: &Path) -> Self {
+    fn setup_flat(&mut self, path: &Path) {
+        self.connections.clear();
         let tab = self.tab;
         debug!("Creating new flat pane for {tab:?}: {path:?}");
 
@@ -215,29 +220,29 @@ impl Pane {
         //     println!("TODO -- changed {e:?}");
         // });
 
-        imp.text_entry.connect_activate(move |e| {
+        let sig = imp.text_entry.connect_activate(move |e| {
             let path: PathBuf = e.text().into();
             tabs_run(|t| t.navigate(tab, &path));
         });
+        let connections = vec![SignalHolder::new(&*imp.text_entry, sig)];
 
-
-        self
+        self.connections = connections;
     }
 
-    fn setup_search(self, filter: CustomFilter, query: String) -> Self {
+    fn setup_search(&mut self, filter: CustomFilter, query_rc: Rc<RefCell<String>>, display: &str) {
+        self.connections.clear();
         let tab = self.tab;
         let imp = self.element.imp();
-        debug!("Creating new search pane for {tab:?}: {query:?}");
+        debug!("Creating new search pane for {tab:?}: {:?}", query_rc.borrow());
 
-        imp.text_entry.set_text(&query);
+        imp.text_entry.set_text(&display);
         imp.original_text.replace("".to_string());
 
         // Decent opportunity for UnsafeCell if it benchmarks better.
-        let query_rc: Rc<_> = RefCell::new(query.to_lowercase()).into();
         let query = query_rc.clone();
 
         let filt = filter.clone();
-        imp.text_entry.connect_changed(move |e| {
+        let signal = imp.text_entry.connect_changed(move |e| {
             let text = e.text();
             let mut query = query_rc.borrow_mut();
             let new = text.to_lowercase();
@@ -245,12 +250,13 @@ impl Pane {
             let change = if new == *query || (query.len() < 3 && new.len() < 3) {
                 return;
             } else if query.len() < 3 {
+                // TODO -- optimization - could set incremental here and clear it later.
                 FilterChange::LessStrict
             } else if new.len() < 3 {
                 FilterChange::MoreStrict
-            } else if query.starts_with(&new) || query.ends_with(&new) {
+            } else if query.contains(&new) {
                 FilterChange::LessStrict
-            } else if new.starts_with(&*query) || new.ends_with(&*query) {
+            } else if new.contains(&*query) {
                 FilterChange::MoreStrict
             } else {
                 FilterChange::Different
@@ -260,7 +266,7 @@ impl Pane {
             drop(query);
             let start = Instant::now();
             filt.changed(change);
-            trace!("Updated search filter in {:?}", start.elapsed());
+            trace!("Updated search filter to be {change:?} in {:?}", start.elapsed());
         });
 
         filter.set_filter_func(move |obj| {
@@ -273,7 +279,7 @@ impl Pane {
             eo.get().name.lowercase().contains(&*q)
         });
 
-        self
+        self.connections = vec![SignalHolder::new(&*imp.text_entry, signal)];
     }
 
     pub(super) fn new_flat<F: FnOnce(&Widget)>(
@@ -283,7 +289,8 @@ impl Pane {
         selection: &MultiSelection,
         attach: F,
     ) -> Self {
-        let pane = Self::create(tab, settings, selection).setup_flat(path);
+        let mut pane = Self::create(tab, settings, selection);
+        pane.setup_flat(path);
 
         // Where panes are created is controlled in TabsList
         attach(pane.element.upcast_ref());
@@ -293,14 +300,15 @@ impl Pane {
 
     pub(super) fn new_search<F: FnOnce(&Widget)>(
         tab: TabId,
-        query: String,
+        query: Rc<RefCell<String>>,
         path: &Path,
         settings: DirSettings,
         selection: &MultiSelection,
         filter: CustomFilter,
         attach: F,
     ) -> Self {
-        let pane = Self::create(tab, settings, selection).setup_search(filter, query);
+        let mut pane = Self::create(tab, settings, selection);
+        pane.setup_search(filter, query, "");
 
         // Where panes are created is controlled in TabsList
         attach(pane.element.upcast_ref());
@@ -308,21 +316,55 @@ impl Pane {
         pane
     }
 
-    pub(super) fn flat_to_search(
-        self,
-        query: String,
-        settings: DirSettings,
+    pub(super) fn search_to_flat(
+        &mut self,
+        path: &Path,
         selection: &MultiSelection,
-        filter: CustomFilter,
-    ) -> Self {
-        let new = Self::create(self.tab, settings, selection).setup_search(filter, query);
+        settings: DirSettings,
+    ) {
+        let view = match settings.display_mode {
+            DisplayMode::Icons => {
+                View::Icons(IconView::new(&self.element.imp().scroller, self.tab, selection))
+            }
+            DisplayMode::Columns => View::Columns(DetailsView::new(
+                &self.element.imp().scroller,
+                self.tab,
+                settings,
+                selection,
+            )),
+        };
 
-        self.replace_with(new.element.upcast_ref::<Widget>());
-
-        new
+        self.setup_flat(path);
     }
 
-    pub(super) fn replace_with(self, new: &Widget) {
+    pub(super) fn flat_to_search(
+        &mut self,
+        display_query: &str,
+        query: Rc<RefCell<String>>,
+        selection: &MultiSelection,
+        filter: CustomFilter,
+        settings: DirSettings,
+    ) {
+        let view = match settings.display_mode {
+            DisplayMode::Icons => {
+                View::Icons(IconView::new(&self.element.imp().scroller, self.tab, selection))
+            }
+            DisplayMode::Columns => View::Columns(DetailsView::new(
+                &self.element.imp().scroller,
+                self.tab,
+                settings,
+                selection,
+            )),
+        };
+
+        self.setup_search(filter, query, display_query);
+
+        if self.element.imp().active.get() {
+            self.element.imp().text_entry.grab_focus_without_selecting();
+        }
+    }
+
+    pub(super) fn replace_with_other_tab(self, new: &Widget) {
         let parent = self.element.parent().unwrap();
         let Some(paned) = parent.downcast_ref::<gtk::Paned>() else {
             let parent = parent.downcast::<gtk::Box>().unwrap();
@@ -403,7 +445,7 @@ impl PaneExt for Pane {
         self.apply_state(vs, list);
     }
 
-    fn get_state(&self, list: &Contents) -> SavedPaneState {
+    fn get_state(&self, list: &Contents) -> PaneState {
         let scroll_pos = if self.element.imp().scroller.vadjustment().value() > 0.0 {
             let eo = match &self.view {
                 View::Icons(ic) => ic.get_last_visible(),
@@ -419,10 +461,10 @@ impl PaneExt for Pane {
         };
 
 
-        SavedPaneState { scroll_pos, search: None }
+        PaneState { scroll_pos }
     }
 
-    fn apply_state(&mut self, state: SavedPaneState, list: &Contents) {
+    fn apply_state(&mut self, state: PaneState, list: &Contents) {
         let pos = state
             .scroll_pos
             .and_then(|sp| {

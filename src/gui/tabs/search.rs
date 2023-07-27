@@ -1,13 +1,16 @@
+use std::cell::RefCell;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use gtk::traits::FilterExt;
 use gtk::{CustomFilter, Orientation, Widget};
 
 use super::contents::Contents;
 use super::id::TabId;
 use super::pane::{Pane, PaneExt};
-use super::{PartiallyAppliedUpdate, SavedPaneState};
+use super::{PaneState, PartiallyAppliedUpdate};
 use crate::com::{
     DirSettings, EntryObject, EntryObjectSnapshot, ManagerAction, SearchSnapshot, SearchUpdate,
     SortSettings, Update,
@@ -20,9 +23,8 @@ use crate::gui::gui_run;
 #[derive(Debug, Default)]
 enum State {
     #[default]
-    Unattached,
-    Loading(SearchId, Vec<PartiallyAppliedUpdate>),
-    AwaitingFlat(SearchId, Vec<PartiallyAppliedUpdate>),
+    Unloaded,
+    Loading(SearchId, Vec<SearchUpdate>),
     Done(SearchId),
 }
 
@@ -31,125 +33,104 @@ pub(super) struct SearchPane {
     tab: TabId,
     path: Arc<Path>,
     state: State,
-    flat_loading: bool,
-    pane: Option<Pane>,
     // This contains everything in tab.contents plus items from subdirectories.
     contents: Contents,
-    filter: CustomFilter,
+    query: Rc<RefCell<String>>,
+    pub filter: CustomFilter,
     // This is used to store a view state until search is done loading.
-    pending_view_state: Option<SavedPaneState>,
 }
 
 impl SearchPane {
+    pub const fn contents(&self) -> &Contents {
+        &self.contents
+    }
+
+    pub const fn loaded(&self) -> bool {
+        matches!(self.state, State::Done(..))
+    }
+
+    pub const fn loading(&self) -> bool {
+        matches!(self.state, State::Loading(..))
+    }
+
+    pub fn start_load(&mut self) -> bool {
+        match self.state {
+            State::Unloaded => {
+                self.state = State::Loading(SearchId::new(self.path.clone()), Vec::new());
+                true
+            }
+            State::Loading(..) | State::Done(_) => false,
+        }
+    }
+
+    pub fn query(&self) -> Rc<RefCell<String>> {
+        self.query.clone()
+    }
+
     pub fn new(
         tab: TabId,
         path: Arc<Path>,
         settings: DirSettings,
-        flat_loading: bool,
         flat_contents: &Contents,
         query: String,
-        flat_pane: Pane,
     ) -> Self {
-        let state = State::Loading(SearchId::new(path.clone()), Vec::new());
+        let state = State::Unloaded;
         let (contents, filter) = Contents::search_from(flat_contents);
 
-        let pane = flat_pane.flat_to_search(query, settings, &contents.selection, filter.clone());
+        let query = Rc::new(RefCell::new(query.to_lowercase()));
 
         Self {
             tab,
             path,
             state,
-            flat_loading,
-            pane: Some(pane),
             contents,
-            filter,
-            pending_view_state: None,
-        }
-    }
-
-    pub fn new_unattached(
-        tab: TabId,
-        path: Arc<Path>,
-        settings: DirSettings,
-        flat_loading: bool,
-        flat_contents: &Contents,
-    ) -> Self {
-        let state = State::Unattached;
-        let (contents, filter) = Contents::search_from(flat_contents);
-
-        Self {
-            tab,
-            path,
-            state,
-            flat_loading,
-            pane: None,
-            contents,
-            filter,
-            pending_view_state: None,
-        }
-    }
-
-    pub fn attach_pane(&mut self, settings: DirSettings, attach: impl FnOnce(&Widget)) {
-        assert!(self.pane.is_none());
-        if let State::Unattached = self.state {
-            self.state = State::Loading(SearchId::new(self.path.clone()), Vec::new());
-        }
-
-        let query = self.pending_view_state.and_then(|ps| ps.search).unwrap_or_default();
-        // TODO -- optimization, if the search was detached from a pane earlier, we can assume the
-        // filter is unchanged.
-        let pane = Pane::new_search(
-            self.tab,
             query,
-            &self.path,
-            settings,
-            &self.contents.selection,
-            self.filter.clone(),
-            attach,
-        );
-        self.pane = Some(pane);
-        todo!();
+            filter,
+        }
+    }
+
+    pub fn clone_for(&self, tab: TabId, new_contents: &Contents) -> Self {
+        let state = State::Unloaded;
+        let (contents, filter) = Contents::search_from(new_contents);
+
+        let query = Rc::new(RefCell::new(self.query.borrow().clone()));
+
+        Self {
+            tab,
+            path: self.path.clone(),
+            state,
+            contents,
+            query,
+            filter,
+        }
     }
 
     pub fn set_query(&mut self, query: String) {
-        if let Some(pane) = &self.pane {
-            pane.update_search(&query);
-        } else {
-            // Search query blows away previous pane state.
-            self.pending_view_state = Some(SavedPaneState { scroll_pos: None, search: Some(query) })
-        }
+        trace!("Updated search to: {query}");
+        self.query.replace(query);
+        self.filter.changed(gtk::FilterChange::Different);
     }
 
     pub fn re_sort(&mut self) {
         self.contents.re_sort_for_search();
     }
 
-    pub const fn is_loading(&self) -> bool {
-        matches!(self.state, State::Done(..))
-    }
-
     pub fn matches_snapshot(&self, snap: &SearchSnapshot) -> bool {
         match &self.state {
-            State::Unattached | State::Done(_) | State::AwaitingFlat(..) => false,
+            State::Unloaded | State::Done(_) => false,
             State::Loading(id, _) => Arc::ptr_eq(&id.0, &snap.id),
         }
     }
 
     pub fn matches_update(&self, update: &SearchUpdate) -> bool {
         match &self.state {
-            State::Unattached => false,
-            State::Loading(id, _) | State::AwaitingFlat(id, _) | State::Done(id) => {
-                Arc::ptr_eq(&id.0, &update.search_id)
-            }
+            State::Unloaded => false,
+            State::Loading(id, _) | State::Done(id) => Arc::ptr_eq(&id.0, &update.search_id),
         }
     }
 
     pub fn apply_flat_snapshot(&mut self, snap: EntryObjectSnapshot) {
-        self.flat_loading = !snap.id.kind.finished();
-
         self.contents.add_flat_elements_for_search(snap);
-
-        self.check_done();
     }
 
     // These need to go through to the contents immediately
@@ -184,13 +165,15 @@ impl SearchPane {
                 unreachable!();
             };
 
-            self.state = State::AwaitingFlat(id, pending);
-        }
+            for u in pending {
+                self.apply_search_update_inner(u);
+            }
 
-        self.check_done()
+            self.state = State::Done(id);
+        }
     }
 
-    pub fn apply_search_update(&mut self, s_update: SearchUpdate) {
+    fn apply_search_update_inner(&mut self, s_update: SearchUpdate) {
         let update = s_update.update;
         // For consistency reasons we only process local inserts or deletions here.
         // Do not process global or local mutations as they could overlap with another search or
@@ -220,76 +203,21 @@ impl SearchPane {
                 self.contents.remove(pos);
             }
         }
-
-        todo!()
     }
 
-    fn check_done(&mut self) {
-        error!("TODO -- finish loading search")
+    pub fn apply_search_update(&mut self, s_update: SearchUpdate) {
+        match &mut self.state {
+            State::Unloaded => unreachable!(),
+            State::Loading(_, pending) => pending.push(s_update),
+            State::Done(_) => self.apply_search_update_inner(s_update),
+        }
     }
 
-    pub fn into_pane(self) -> Option<Pane> {
-        self.pane
+    pub fn update_settings(&mut self, settings: DirSettings) {
+        self.contents.sort(settings.sort);
     }
 }
 
-impl PaneExt for SearchPane {
-    fn set_active(&mut self, active: bool) {
-        assert!(
-            !active || self.pane.is_some(),
-            "Called set_active on a pane that wasn't visible"
-        );
-        if let Some(pane) = &mut self.pane {
-            pane.set_active(active);
-        }
-    }
-
-    fn visible(&self) -> bool {
-        self.pane.as_ref().map_or(false, PaneExt::visible)
-    }
-
-    fn update_settings(&mut self, settings: DirSettings, _ignored: &Contents) {
-        todo!()
-    }
-
-    fn get_state(&self, _ignored: &super::Contents) -> super::SavedPaneState {
-        if let Some(pane) = &self.pane {
-            let query = pane.text_contents();
-            let mut state = pane.get_state(&self.contents);
-
-            state.search = Some(query);
-            state
-        } else {
-            todo!()
-        }
-    }
-
-    fn apply_state(&mut self, state: super::SavedPaneState, _ignored: &super::Contents) {
-        match self.state {
-            State::Unattached | State::Loading(..) | State::AwaitingFlat(..) => {
-                self.pending_view_state = Some(state);
-                todo!()
-            }
-            State::Done(..) => todo!(),
-        }
-    }
-
-    fn workaround_scroller(&self) -> Option<&gtk::ScrolledWindow> {
-        self.pane.as_ref().and_then(PaneExt::workaround_scroller)
-    }
-
-    fn activate(&self) {
-        todo!()
-    }
-
-    fn split(&self, orient: Orientation) -> Option<gtk::Paned> {
-        self.pane.as_ref().unwrap().split(orient)
-    }
-
-    fn next_of_kin(&self) -> Option<TabId> {
-        todo!()
-    }
-}
 
 // The pointer is used for uniqueness, the boolean is used to signal cancellation on drop.
 #[derive(Debug)]
