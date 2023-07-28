@@ -256,16 +256,10 @@ impl Gui {
         use crate::com::GuiAction::*;
 
         match gu {
-            Snapshot(snap) => {
-                let g = self.clone();
-                g.tabs.borrow_mut().apply_snapshot(snap);
-            }
-            Update(update) => {
-                self.tabs.borrow_mut().update(update);
-            }
-            SearchUpdate(update) => {
-                self.tabs.borrow_mut().search_update(update);
-            }
+            Snapshot(snap) => self.tabs.borrow_mut().apply_snapshot(snap),
+            Update(update) => self.tabs.borrow_mut().update(update),
+            SearchSnapshot(snap) => self.tabs.borrow_mut().apply_search_snapshot(snap),
+            SearchUpdate(update) => self.tabs.borrow_mut().search_update(update),
             DirectoryOpenError(path, error) => {
                 // This is a special case where we failed to open a directory or read it at all.
                 // Treat it as if it were closed.

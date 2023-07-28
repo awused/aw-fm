@@ -3,9 +3,9 @@ use std::time::Instant;
 
 use gtk::gio::{ListModel, ListStore};
 use gtk::glib::{self, ControlFlow, Object};
-use gtk::prelude::{Cast, IsA, ListModelExt, ListModelExtManual, StaticType};
+use gtk::prelude::{Cast, IsA, ListModelExt, ListModelExtManual};
 use gtk::traits::SelectionModelExt;
-use gtk::{CustomFilter, Filter, FilterListModel, MultiSelection};
+use gtk::{CustomFilter, FilterListModel, MultiSelection};
 
 use super::PartiallyAppliedUpdate;
 use crate::com::{Entry, EntryObject, EntryObjectSnapshot, SearchSnapshot, SortSettings};
@@ -13,7 +13,7 @@ use crate::com::{Entry, EntryObject, EntryObjectSnapshot, SearchSnapshot, SortSe
 pub struct Contents {
     list: ListStore,
     // TODO -- non-optional once we support display hidden/true/false
-    filtered: Option<FilterListModel>,
+    pub filtered: Option<FilterListModel>,
     sort: SortSettings,
     // Stale means the entries in this list are for the previous directory.
     // They remain visible for up to the ~1s it takes for a snapshot of a slow directory to arrive.
@@ -44,12 +44,13 @@ impl Contents {
 
     pub fn search_from(flat: &Self) -> (Self, CustomFilter) {
         let list = ListStore::new::<EntryObject>();
-        let filter = CustomFilter::new(|eo| false);
+        let filter = CustomFilter::new(|_eo| false);
         let filtered = FilterListModel::new(Some(list.clone()), Some(filter.clone()));
         let selection = MultiSelection::new(Some(filtered.clone()));
 
-        // filtered.set_incremental(true) causes annoying flickering.
-        // Better to just pay the cost up front.
+        // Causes annoying flickering, but as an optimization incremental mode is used occasionally
+        // elsewhere.
+        filtered.set_incremental(false);
 
         let mut s = Self {
             list,
@@ -78,7 +79,7 @@ impl Contents {
         }
     }
 
-    pub fn apply_snapshot(&mut self, snap: EntryObjectSnapshot, sort: SortSettings) {
+    pub fn apply_snapshot(&mut self, snap: EntryObjectSnapshot) {
         if snap.id.kind.initial() {
             if self.stale {
                 debug!("Clearing out stale items");
@@ -90,10 +91,10 @@ impl Contents {
 
 
         let start = Instant::now();
-        if snap.id.kind.initial() {
+        if self.list.n_items() == 0 {
             // Sorting a vector is faster than inserting then sorting.
             let mut entries = snap.entries;
-            // TODO -- as an optimization sort these by the assumed sort when creating the snapshot.
+            // TODO -- as an optimization sort these by the assumed sort when creating the snapshot?
             entries.sort_by(|a, b| a.get().cmp(&b.get(), self.sort));
             self.list.extend(entries.into_iter());
         } else {
@@ -102,7 +103,7 @@ impl Contents {
         }
 
         // It can be marginally faster to detach, sort, and reattach the list when there is no
-        // filter.
+        // filter, but selection gets clobbered.
         trace!("Inserted and sorted {:?} items in {:?}", self.list.n_items(), start.elapsed());
     }
 
@@ -118,8 +119,14 @@ impl Contents {
 
     pub fn add_flat_elements_for_search(&mut self, snap: EntryObjectSnapshot) {
         let start = Instant::now();
-        self.list.extend(snap.entries.into_iter());
-        self.list.sort(self.sort.comparator());
+        if self.list.n_items() == 0 {
+            let mut entries = snap.entries;
+            entries.sort_by(|a, b| a.get().cmp(&b.get(), self.sort));
+            self.list.extend(entries.into_iter());
+        } else {
+            self.list.extend(snap.entries.into_iter());
+            self.list.sort(self.sort.comparator());
+        }
         trace!("Sorted {:?} search items in {:?}", self.list.n_items(), start.elapsed());
     }
 
@@ -185,6 +192,10 @@ impl Contents {
     pub fn filtered_position_by_sorted(&self, entry: &Entry) -> Option<u32> {
         assert!(!self.stale);
         if let Some(filtered) = &self.filtered {
+            if filtered.is_incremental() {
+                // Must unset incremental to get an accurate position.
+                filtered.set_incremental(false);
+            }
             Self::bsearch(entry, self.sort, filtered)
         } else {
             Self::bsearch(entry, self.sort, &self.list)
@@ -205,7 +216,7 @@ impl Contents {
             return;
         }
 
-        let was_selected = if let Some(filtered) = &self.filtered {
+        let was_selected = if self.filtered.is_some() {
             if let Some(f_pos) = self.filtered_position_by_sorted(old) {
                 self.selection.is_selected(f_pos)
             } else {
@@ -222,7 +233,7 @@ impl Contents {
 
 
         if was_selected {
-            if let Some(filtered) = &self.filtered {
+            if self.filtered.is_some() {
                 if let Some(f_pos) = self.filtered_position_by_sorted(old) {
                     self.selection.select_item(f_pos, false);
                 }

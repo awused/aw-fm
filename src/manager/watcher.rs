@@ -1,12 +1,11 @@
 use std::collections::btree_map;
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use gtk::glib;
 use notify::event::{ModifyKind, RenameMode};
 use notify::RecursiveMode::NonRecursive;
-use notify::{Event, RecommendedWatcher, Watcher};
+use notify::{Event, Watcher};
 use tokio::time::{Duration, Instant};
 
 use super::{Manager, RecurseId};
@@ -80,6 +79,8 @@ impl Manager {
             debug!("Removing recursive search watcher");
             let (_, watcher) = self.open_searches.swap_remove(pos);
             drop(watcher);
+        } else if Some(0) != CONFIG.search_max_depth {
+            error!("Stopped watching non-existent search. Updates were broken.");
         }
     }
 
@@ -260,6 +261,10 @@ impl Manager {
     }
 
     pub(super) fn watch_search(&mut self, path: Arc<Path>, cancel: RecurseId) {
+        if Some(0) == CONFIG.search_max_depth {
+            return;
+        }
+
         debug!("Watching {path:?} recursively");
 
         let sender = self.notify_sender.clone();
@@ -282,7 +287,7 @@ impl Manager {
                 if let Some(depth) = CONFIG.search_max_depth {
                     match parent.strip_prefix(&search_root) {
                         Ok(dirs) => {
-                            if dirs.components().count() > depth.get() as usize {
+                            if dirs.components().count() > depth as usize {
                                 trace!(
                                     "Ignoring search event in {:?} since it was too deep",
                                     ev.paths[0].parent()
@@ -290,7 +295,7 @@ impl Manager {
                                 return;
                             }
                         }
-                        Err(e) => {
+                        Err(_e) => {
                             error!("Path {:?} wasn't in search root {:?}", parent, search_root);
                             return;
                         }

@@ -70,6 +70,7 @@ pub struct WorkParams {
 pub enum GuiAction {
     Snapshot(DirSnapshot),
     Update(Update),
+    SearchSnapshot(SearchSnapshot),
     SearchUpdate(SearchUpdate),
 
     DirectoryOpenError(Arc<Path>, String),

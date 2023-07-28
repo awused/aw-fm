@@ -70,8 +70,8 @@ impl MaybePane {
     fn overwrite_state(&mut self, state: PaneState) {
         match self {
             Self::Pane(_p) => {
-                let new = Self::Closed(PaneState::default());
-                let old = std::mem::replace(self, new);
+                let temp = Self::Closed(PaneState::default());
+                let old = std::mem::replace(self, temp);
                 let Self::Pane(pane) = old else {
                     unreachable!()
                 };
@@ -285,7 +285,12 @@ impl Tab {
         self.element.imp().spinner.start();
         self.element.imp().spinner.set_visible(true);
 
-        pane.flat_to_search(search.query(), &search.contents().selection, search.filter.clone());
+        pane.flat_to_search(
+            search.query(),
+            &search.contents().selection,
+            search.filter.clone(),
+            search.contents().filtered.clone().unwrap(),
+        );
 
         self.search = Some(search);
     }
@@ -365,7 +370,7 @@ impl Tab {
         if let Some(search) = &mut self.search {
             search.apply_flat_snapshot(snap.clone());
         }
-        self.contents.apply_snapshot(snap, self.settings.sort);
+        self.contents.apply_snapshot(snap);
     }
 
     pub fn apply_snapshot(&mut self, left: &mut [Self], right: &mut [Self], snap: DirSnapshot) {
@@ -658,6 +663,12 @@ impl Tab {
             return;
         }
 
+        if let Some(query) = next.search {
+            self.open_search(query);
+        } else {
+            self.close_search();
+        }
+
         self.pane.overwrite_state(next.state);
         self.apply_pane_state()
     }
@@ -694,6 +705,12 @@ impl Tab {
             self.pane.overwrite_state(prev.state);
             self.apply_pane_state();
             return;
+        }
+
+        if let Some(query) = prev.search {
+            self.open_search(query);
+        } else {
+            self.close_search();
         }
 
         self.pane.overwrite_state(prev.state);
@@ -786,9 +803,10 @@ impl Tab {
         }
 
         let MP::Pending(pane, state) = &mut self.pane else {
-            info!(
+            debug!(
                 "Ignoring apply_pane_state on tab {:?} without pending state and ready pane {:?}",
-                self.id, self.pane
+                self.id,
+                self.element.imp().title.text()
             );
             return;
         };
@@ -824,6 +842,7 @@ impl Tab {
                 self.settings,
                 &search.contents().selection,
                 search.filter.clone(),
+                search.contents().filtered.clone().unwrap(),
                 attach,
             );
             self.pane.set_pane(pane);
@@ -859,6 +878,7 @@ impl Tab {
                 self.settings,
                 &search.contents().selection,
                 search.filter.clone(),
+                search.contents().filtered.clone().unwrap(),
                 |new| old.replace_with_other_tab(new),
             );
 

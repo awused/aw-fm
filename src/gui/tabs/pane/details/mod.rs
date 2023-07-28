@@ -1,6 +1,3 @@
-mod icon_cell;
-mod string_cell;
-
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -17,6 +14,9 @@ use super::get_last_visible_child;
 use crate::com::{DirSettings, EntryObject, SignalHolder, SortDir, SortMode, SortSettings};
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, tabs_run};
+
+mod icon_cell;
+mod string_cell;
 
 const NAME: &str = "Name";
 const SIZE: &str = "Size";

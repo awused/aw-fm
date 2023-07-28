@@ -1,8 +1,3 @@
-mod icon_tile;
-
-
-use std::time::Duration;
-
 use gtk::prelude::*;
 use gtk::{glib, GridView, MultiSelection, ScrolledWindow};
 
@@ -11,6 +6,8 @@ use super::get_last_visible_child;
 use crate::com::{EntryObject, SignalHolder};
 use crate::gui::applications;
 use crate::gui::tabs::id::TabId;
+
+mod icon_tile;
 
 #[derive(Debug)]
 pub(super) struct IconView {

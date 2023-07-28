@@ -11,8 +11,8 @@ use gtk::traits::{
     AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, WidgetExt,
 };
 use gtk::{
-    CustomFilter, EventControllerKey, FilterChange, MultiSelection, Orientation, ScrolledWindow,
-    Widget,
+    CustomFilter, EventControllerKey, FilterChange, FilterListModel, MultiSelection, Orientation,
+    ScrolledWindow, Widget,
 };
 
 use self::details::DetailsView;
@@ -28,6 +28,7 @@ mod element;
 mod icon_view;
 
 static MIN_PANE_RES: i32 = 400;
+static MIN_SEARCH: usize = 2;
 
 #[derive(Debug)]
 enum View {
@@ -215,6 +216,7 @@ impl Pane {
     fn setup_search(
         &mut self,
         filter: CustomFilter,
+        filtered: FilterListModel,
         queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
     ) {
         let original = queries.0;
@@ -239,18 +241,23 @@ impl Pane {
             let mut query = query_rc.borrow_mut();
             let new = text.to_lowercase();
 
-            let change = if new == *query || (query.len() < 3 && new.len() < 3) {
+            filtered.set_incremental(true);
+
+            let change = if new == *query || (query.len() < MIN_SEARCH && new.len() < MIN_SEARCH) {
                 return;
-            } else if query.len() < 3 {
-                // TODO -- optimization - could set incremental here and clear it later.
+            } else if query.len() < MIN_SEARCH {
                 FilterChange::LessStrict
-            } else if new.len() < 3 {
+            } else if new.len() < MIN_SEARCH {
                 FilterChange::MoreStrict
             } else if query.contains(&new) {
                 FilterChange::LessStrict
             } else if new.contains(&*query) {
+                // Causes annoying flickering
+                filtered.set_incremental(false);
                 FilterChange::MoreStrict
             } else {
+                // Clobbers selection
+                filtered.set_incremental(false);
                 FilterChange::Different
             };
 
@@ -258,12 +265,16 @@ impl Pane {
             drop(query);
             let start = Instant::now();
             filt.changed(change);
-            trace!("Updated search filter to be {change:?} in {:?}", start.elapsed());
+            trace!(
+                "Updated search filter to be {change:?} in {:?}, incremental {}",
+                start.elapsed(),
+                filtered.is_incremental()
+            );
         });
 
         filter.set_filter_func(move |obj| {
             let q = query.borrow();
-            if q.len() < 3 {
+            if q.len() < MIN_SEARCH {
                 return false;
             }
 
@@ -296,10 +307,11 @@ impl Pane {
         settings: DirSettings,
         selection: &MultiSelection,
         filter: CustomFilter,
+        filtered: FilterListModel,
         attach: F,
     ) -> Self {
         let mut pane = Self::create(tab, settings, selection);
-        pane.setup_search(filter, queries);
+        pane.setup_search(filter, filtered, queries);
 
         // Where panes are created is controlled in TabsList
         attach(pane.element.upcast_ref());
@@ -322,6 +334,7 @@ impl Pane {
         queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
         selection: &MultiSelection,
         filter: CustomFilter,
+        filtered: FilterListModel,
     ) {
         match &self.view {
             View::Icons(ic) => ic.change_model(selection),
@@ -329,7 +342,7 @@ impl Pane {
         }
 
         self._signals = self.element.setup_signals(selection);
-        self.setup_search(filter, queries);
+        self.setup_search(filter, filtered, queries);
 
         if self.element.imp().active.get() {
             self.element.imp().text_entry.grab_focus_without_selecting();

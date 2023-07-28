@@ -311,7 +311,7 @@ impl TabsList {
         }
 
         info!("Swapping pane from {visible:?} to {inactive:?}");
-        error!("TODO -- haven't tested this");
+        error!("TODO [session restore] -- haven't tested this");
         let old_index = self.position(visible).unwrap();
         let new_index = self.position(inactive).unwrap();
 

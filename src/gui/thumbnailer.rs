@@ -199,7 +199,7 @@ impl Thumbnailer {
         let mtime_sec = obj.get().mtime.sec;
         let mime_type = entry.mime.clone();
 
-        let start = Instant::now();
+        // let start = Instant::now();
 
         self.pool.spawn(move || {
             let existing = factory.lookup(&uri, mtime_sec);
@@ -231,11 +231,12 @@ impl Thumbnailer {
 
             match factory.generate_and_save_thumbnail(&uri, &mime_type, mtime_sec) {
                 Some(tex) => {
-                    trace!(
-                        "Generated new thumbnail in {:?} for {:?}",
-                        start.elapsed(),
-                        path.file_name().unwrap_or(path.as_os_str())
-                    );
+                    // Spammy
+                    // trace!(
+                    //     "Generated new thumbnail in {:?} for {:?}",
+                    //     start.elapsed(),
+                    //     path.file_name().unwrap_or(path.as_os_str())
+                    // );
                     Self::finish_thumbnail(factory, tex, path);
                 }
                 None => Self::fail_thumbnail(factory, path),

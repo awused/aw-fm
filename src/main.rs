@@ -1,7 +1,4 @@
 #![cfg_attr(not(feature = "windows-console"), windows_subsystem = "windows")]
-// TEMPORARY until search is ready.
-#![allow(dead_code)]
-#![allow(unused)]
 
 #[macro_use]
 extern crate log;

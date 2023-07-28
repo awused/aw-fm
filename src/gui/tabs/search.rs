@@ -178,7 +178,11 @@ impl Search {
 
         match (update, local_position, existing_global) {
             (_, Some(_), None) => unreachable!(),
-            (Update::Entry(_), None, None) => todo!(),
+            (Update::Entry(entry), None, None) => {
+                trace!("Inserting new item from update in search tab.");
+                let new = EntryObject::new(entry);
+                self.contents.insert(&new);
+            }
             (Update::Entry(_), None, Some(eo)) => {
                 trace!("Inserting existing item from update in search tab.");
                 self.contents.insert(&eo);

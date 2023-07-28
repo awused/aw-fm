@@ -29,8 +29,12 @@ impl Gui {
     pub(super) fn setup_interaction(self: &Rc<Self>) {
         let dismiss_toast = gtk::GestureClick::new();
 
-        dismiss_toast.connect_pressed(|gc, _n, _x, _y| {
+        let g = self.clone();
+        dismiss_toast.connect_pressed(move |gc, _n, _x, _y| {
             gc.widget().set_visible(false);
+            if let Some(s) = g.warning_timeout.take() {
+                s.remove()
+            }
         });
 
         self.window.imp().toast.add_controller(dismiss_toast);

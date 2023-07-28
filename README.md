@@ -104,7 +104,6 @@ specify them.
   * Searching requires at least three characters and uses a simple substring match.
   * For more powerful searching, use an external program like rofi or fzf.
 
-
 ##### Tabs
 
 * `NewTab [directory/file]` and `NewBackgroundTab [directory/file]`

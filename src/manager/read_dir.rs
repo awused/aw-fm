@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use constants::*;
 use gtk::glib;
+use ignore::{WalkBuilder, WalkState};
 use once_cell::sync::Lazy;
 use rayon::prelude::{ParallelBridge, ParallelIterator};
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -17,7 +18,8 @@ use tokio::task::spawn_local;
 use tokio::time::{sleep, sleep_until, Instant};
 
 use super::Manager;
-use crate::com::{DirSnapshot, Entry, GuiAction, SnapshotKind};
+use crate::com::{DirSnapshot, Entry, GuiAction, SearchSnapshot, SnapshotKind};
+use crate::config::CONFIG;
 use crate::{closing, handle_panic};
 
 #[cfg(not(feature = "debug-forced-slow"))]
@@ -67,6 +69,7 @@ static READ_POOL: Lazy<ThreadPool> = Lazy::new(|| {
         .expect("Error creating directory read threadpool")
 });
 
+#[derive(Debug)]
 enum ReadResult {
     DirUnreadable(std::io::Error),
     DirError(std::io::Error),
@@ -92,7 +95,7 @@ fn read_dir_sync(
             }
         };
 
-        rdir.take_while(|_| !closing::closed() && !cancel.load(Relaxed))
+        rdir.take_while(|_| !cancel.load(Relaxed) && !closing::closed())
             .par_bridge()
             .for_each(|dirent| {
                 if cancel.load(Relaxed) {
@@ -130,13 +133,77 @@ fn read_dir_sync(
 }
 
 fn recurse_dir_sync(
-    path: Arc<Path>,
+    root: Arc<Path>,
     cancel: Arc<AtomicBool>,
     sender: UnboundedSender<ReadResult>,
 ) -> oneshot::Receiver<()> {
-    error!("TODO [search] Search is a work in progress");
     let (send_done, recv_done) = oneshot::channel();
 
+    if Some(0) == CONFIG.search_max_depth {
+        let _ignored = send_done.send(());
+        return recv_done;
+    }
+
+    READ_POOL.spawn(move || {
+        let show_all = CONFIG.search_show_all;
+        let walker = WalkBuilder::new(&root)
+            // Uncertain.
+            .follow_links(true)
+            .max_depth(CONFIG.search_max_depth.map(|n|n as usize + 1))
+            .hidden(!show_all)
+            .ignore(!show_all)
+            .git_ignore(!show_all)
+            .git_global(!show_all)
+            .git_exclude(!show_all)
+            .build_parallel();
+
+        walker.run(|| {
+            let visitor = |res: Result<ignore::DirEntry, ignore::Error>| {
+                if cancel.load(Relaxed) || closing::closed() {
+                    return WalkState::Quit;
+                }
+
+                let path = match res {
+                    Ok(dirent) => dirent.into_path(),
+                    Err(e) => {
+                        error!("Unexpected error reading directory {root:?} {e}");
+                        if let Some(io) = e.into_io_error() {
+                            drop(sender.send(ReadResult::DirError(io)));
+                        }
+                        return WalkState::Continue;
+                    }
+                };
+
+                let Some(parent) = path.parent() else {
+                    return WalkState::Continue;
+                };
+
+                if root.as_os_str().len() >= parent.as_os_str().len() {
+                    return WalkState::Continue;
+                }
+
+                // TODO -- move onto a new rayon task to unblock this walker thread?
+                let entry = match Entry::new(path.into()) {
+                    Ok(entry) => entry,
+                    Err((path, e)) => {
+                        error!("Unexpected error reading file info {path:?} {e}");
+                        drop(sender.send(ReadResult::EntryError(path, e)));
+                        return WalkState::Continue;
+                    }
+                };
+
+                if sender.send(ReadResult::Entry(entry)).is_err() && !closing::closed() {
+                    error!("Channel unexpectedly closed while recursively reading {root:?}");
+                    closing::close();
+                }
+                WalkState::Continue
+            };
+
+            Box::new(visitor)
+        });
+
+        let _ignored = send_done.send(());
+    });
 
     recv_done
 }
@@ -155,6 +222,8 @@ async fn read_dir_sync_thread(
 
     consume_entries(path.clone(), cancel, gui_sender, receiver, flat_snap).await;
 
+    // Technically this blocks, but it's more a formality by this point. Still want to wait so we
+    // can be sure it has been cleaned up.
     let finished = h.await.is_ok();
     debug!(
         "Done reading directory {:?} in {:?}. finished: {}",
@@ -176,7 +245,7 @@ async fn recurse_dir_sync_thread(
 
     let h = recurse_dir_sync(path.clone(), cancel.clone(), sender);
 
-    consume_entries(path.clone(), cancel, gui_sender, receiver, flat_snap).await;
+    consume_entries(path.clone(), cancel, gui_sender, receiver, search_snap).await;
 
     let finished = h.await.is_ok();
     debug!(
@@ -195,6 +264,16 @@ fn flat_snap(
 ) -> GuiAction {
     GuiAction::Snapshot(DirSnapshot::new(kind, path, cancel, entries))
 }
+
+fn search_snap(
+    _path: &Arc<Path>,
+    cancel: &Arc<AtomicBool>,
+    kind: SnapshotKind,
+    entries: Vec<Entry>,
+) -> GuiAction {
+    GuiAction::SearchSnapshot(SearchSnapshot::new(kind.finished(), cancel.clone(), entries))
+}
+
 
 async fn consume_entries(
     path: Arc<Path>,
@@ -224,7 +303,7 @@ async fn consume_entries(
                     ReadResult::DirUnreadable(e) => {
                         if let Err(e) =
                             gui_sender.send(
-                            GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
+                                GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
                             if !closing::closed() {
                                 error!("{e}");
                             }
@@ -266,9 +345,6 @@ async fn consume_entries(
             read_slow_dir(path.clone(), cancel, receiver, gui_sender, snap).await;
         }
     };
-
-    // Technically this blocks, but it's more a formality by this point. Still want to wait so we
-    // can be sure it has been cleaned up.
 }
 
 

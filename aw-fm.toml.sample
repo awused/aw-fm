@@ -110,8 +110,15 @@ skip_trash = false
 
 # How deeply to recurse for searches.
 #
-# 0 or unset to allow for unlimited depth. Not recommended.
+# Set to 0 to only search the current directory. Max 255.
+# Comment out to allow for unlimited depth. Not recommended.
 search_max_depth = 8
+
+# Whether to show all files in search or not.
+#
+# The default behaviour is to respect .gitignore files and ignore hidden files and directories for
+# recursive searching, but to show everything within the current directory unconditionally.
+search_show_all = false
 
 
 # Thread Settings --------------------------------------------------------------------------------

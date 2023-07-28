@@ -498,8 +498,8 @@ impl EntryObject {
         let old = self.imp().get();
         assert!(old.abs_path == entry.abs_path);
         if *old == entry {
-            // No change we care about
-            trace!("Update for {:?} was unimportant", entry.abs_path);
+            // No change we care about (spammy)
+            // trace!("Update for {:?} was unimportant", entry.abs_path);
             return None;
         }
 
