@@ -4,15 +4,16 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use gtk::gdk::Key;
-use gtk::glib::ControlFlow;
-use gtk::prelude::{Cast, CastNone, ObjectExt};
+use gtk::glib::{ControlFlow, WeakRef};
+use gtk::prelude::{Cast, CastNone, IsA, ListModelExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
-    AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, WidgetExt,
+    AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, GestureSingleExt,
+    WidgetExt,
 };
 use gtk::{
-    CustomFilter, EventControllerKey, FilterChange, FilterListModel, MultiSelection, Orientation,
-    ScrolledWindow, Widget,
+    CustomFilter, EventControllerKey, FilterChange, FilterListModel, GestureClick, MultiSelection,
+    Orientation, ScrolledWindow, Widget,
 };
 
 use self::details::DetailsView;
@@ -21,6 +22,7 @@ use self::icon_view::IconView;
 use super::id::TabId;
 use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
+use crate::gui::tabs::NavTarget;
 use crate::gui::{applications, tabs_run};
 
 mod details;
@@ -29,6 +31,7 @@ mod icon_view;
 
 static MIN_PANE_RES: i32 = 400;
 static MIN_SEARCH: usize = 2;
+
 
 #[derive(Debug)]
 enum View {
@@ -69,6 +72,41 @@ fn get_last_visible_child(parent: &Widget) -> Option<Widget> {
 
         child = child.prev_sibling()?;
     }
+}
+
+trait Bound {
+    fn bind(&self, eo: &EntryObject);
+    fn unbind(&self, eo: &EntryObject);
+    fn bound_object(&self) -> Option<EntryObject>;
+}
+
+fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
+    tab: TabId,
+    widget: &W,
+    bound: WeakRef<B>,
+) {
+    let click = GestureClick::new();
+    click.set_button(0);
+
+    // let weak = bound.clone();
+    click.connect_pressed(move |c, _n, _x, _y| {
+        let ele = bound.upgrade().unwrap();
+        let eo = ele.bound_object().unwrap();
+
+        debug!("Click {} for {eo:?} in {tab:?}", c.current_button());
+
+        match c.current_button() {
+            2 => {
+                if let Some(nav) = NavTarget::open_or_jump_abs(eo.get().abs_path.clone()) {
+                    tabs_run(|t| t.create_tab(Some(tab), nav, false));
+                }
+            }
+            3 => println!("TODO -- right click context menu"),
+            _ => {}
+        }
+    });
+
+    widget.add_controller(click);
 }
 
 #[derive(Debug)]
@@ -241,11 +279,14 @@ impl Pane {
             let mut query = query_rc.borrow_mut();
             let new = text.to_lowercase();
 
-            filtered.set_incremental(true);
-
-            let change = if new == *query || (query.len() < MIN_SEARCH && new.len() < MIN_SEARCH) {
+            if new == *query || (query.len() < MIN_SEARCH && new.len() < MIN_SEARCH) {
                 return;
-            } else if query.len() < MIN_SEARCH {
+            }
+
+            // https://gitlab.gnome.org/GNOME/gtk/-/issues/5989
+            // let mut incremental = true;
+
+            let change = if query.len() < MIN_SEARCH {
                 FilterChange::LessStrict
             } else if new.len() < MIN_SEARCH {
                 FilterChange::MoreStrict
@@ -253,17 +294,19 @@ impl Pane {
                 FilterChange::LessStrict
             } else if new.contains(&*query) {
                 // Causes annoying flickering
-                filtered.set_incremental(false);
+                // incremental = false;
                 FilterChange::MoreStrict
             } else {
                 // Clobbers selection
-                filtered.set_incremental(false);
+                // incremental = false;
                 FilterChange::Different
             };
 
             *query = new;
             drop(query);
+
             let start = Instant::now();
+            // filtered.set_incremental(incremental);
             filt.changed(change);
             trace!(
                 "Updated search filter to be {change:?} in {:?}, incremental {}",
@@ -320,7 +363,7 @@ impl Pane {
     }
 
     pub(super) fn search_to_flat(&mut self, path: &Path, selection: &MultiSelection) {
-        match &self.view {
+        match &mut self.view {
             View::Icons(ic) => ic.change_model(selection),
             View::Columns(cv) => cv.change_model(selection),
         }
@@ -336,7 +379,7 @@ impl Pane {
         filter: CustomFilter,
         filtered: FilterListModel,
     ) {
-        match &self.view {
+        match &mut self.view {
             View::Icons(ic) => ic.change_model(selection),
             View::Columns(cv) => cv.change_model(selection),
         }

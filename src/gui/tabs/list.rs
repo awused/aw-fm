@@ -333,14 +333,19 @@ impl TabsList {
         Some((id, self.tabs.len() - 1))
     }
 
-    fn create_tab(&mut self, target: NavTarget, activate: bool) -> TabId {
+    pub(super) fn create_tab(
+        &mut self,
+        after: Option<TabId>,
+        target: NavTarget,
+        activate: bool,
+    ) -> TabId {
         let (new_tab, element) = Tab::new(next_id(), target, &self.tabs);
 
         let id = new_tab.id();
         self.tabs.push(new_tab);
 
-        if let Some(active_index) = self.active_element() {
-            self.tab_elements.insert(active_index + 1, &element);
+        if let Some(index) = after.and_then(|a| self.element_position(a)) {
+            self.tab_elements.insert(index + 1, &element);
         } else {
             self.tab_elements.append(&element);
         }
@@ -358,7 +363,15 @@ impl TabsList {
             return;
         };
 
-        self.create_tab(target, activate);
+        self.create_tab(self.active, target, activate);
+    }
+
+    pub fn open_tab_after<P: AsRef<Path>>(&mut self, tab: TabId, path: P, activate: bool) {
+        let Some(target) = NavTarget::open_or_jump(path, self) else {
+            return;
+        };
+
+        self.create_tab(self.active, target, activate);
     }
 
     // Clones the active tab or opens a new tab to the user's home directory.
@@ -378,7 +391,7 @@ impl TabsList {
             return;
         };
 
-        self.create_tab(target, activate);
+        self.create_tab(self.active, target, activate);
     }
 
     // Splits based on index in self.tabs.
@@ -512,7 +525,7 @@ impl TabsList {
             return;
         }
 
-        self.create_tab(jump, true);
+        self.create_tab(self.active, jump, true);
     }
 
     pub fn active_forward(&mut self) {

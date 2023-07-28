@@ -2,7 +2,7 @@ use gtk::prelude::*;
 use gtk::{glib, GridView, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
-use super::get_last_visible_child;
+use super::{get_last_visible_child, setup_item_controllers, Bound};
 use crate::com::{EntryObject, SignalHolder};
 use crate::gui::applications;
 use crate::gui::tabs::id::TabId;
@@ -18,17 +18,14 @@ pub(super) struct IconView {
 }
 
 impl IconView {
-    pub(super) fn new(
-        scroller: &ScrolledWindow,
-        tab_id: TabId,
-        selection: &MultiSelection,
-    ) -> Self {
+    pub(super) fn new(scroller: &ScrolledWindow, tab: TabId, selection: &MultiSelection) -> Self {
         let factory = gtk::SignalListItemFactory::new();
 
         factory.connect_setup(move |_factory, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
-            let row = IconTile::default();
-            item.set_child(Some(&row));
+            let tile = IconTile::default();
+            setup_item_controllers(tab, &tile, tile.downgrade());
+            item.set_child(Some(&tile));
         });
 
         // the bind stage is used for "binding" the data to the created widgets on the "setup" stage
@@ -64,7 +61,7 @@ impl IconView {
             let display = gv.display();
             let model = gv.model().and_downcast::<MultiSelection>().unwrap();
 
-            applications::activate(tab_id, &display, &model)
+            applications::activate(tab, &display, &model)
         });
 
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
@@ -108,7 +105,15 @@ impl IconView {
             .and_then(|c| c.bound_object())
     }
 
-    pub(super) fn change_model(&self, selection: &MultiSelection) {
+    pub(super) fn change_model(&mut self, selection: &MultiSelection) {
         self.grid.set_model(Some(selection));
+
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
+        self.grid.set_enable_rubberband(selection.n_items() != 0);
+        let g = self.grid.clone();
+        let signal = selection.connect_items_changed(move |sel, _, _, _| {
+            g.set_enable_rubberband(sel.n_items() != 0);
+        });
+        self._workaround_rubber = SignalHolder::new(selection, signal);
     }
 }

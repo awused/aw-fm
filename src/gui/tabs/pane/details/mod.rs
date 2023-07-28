@@ -10,7 +10,7 @@ use gtk::{
 
 use self::icon_cell::IconCell;
 use self::string_cell::{EntryString, StringCell};
-use super::get_last_visible_child;
+use super::{get_last_visible_child, setup_item_controllers, Bound};
 use crate::com::{DirSettings, EntryObject, SignalHolder, SortDir, SortMode, SortSettings};
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, tabs_run};
@@ -32,17 +32,18 @@ pub(super) struct DetailsView {
     _workaround_rubber: SignalHolder<MultiSelection>,
 }
 
+// TODO -- gtk4.12, use ColumnViewRow
 
 impl DetailsView {
     pub(super) fn new(
         scroller: &ScrolledWindow,
-        tab_id: TabId,
+        tab: TabId,
         settings: DirSettings,
         selection: &MultiSelection,
     ) -> Self {
         let column_view = ColumnView::new(Some(selection.clone()));
 
-        setup_columns(&column_view);
+        setup_columns(tab, &column_view);
         set_sort(&column_view, settings.sort);
 
         let current_sort = Rc::new(Cell::new(settings.sort));
@@ -70,7 +71,7 @@ impl DetailsView {
             if cur_sort.get() != new_sort {
                 cur_sort.set(new_sort);
                 trace!("Sorter changed: {col:?} {direction:?}");
-                tabs_run(|t| t.update_sort(tab_id, new_sort))
+                tabs_run(|t| t.update_sort(tab, new_sort))
             }
         });
 
@@ -80,7 +81,7 @@ impl DetailsView {
             let display = cv.display();
             let model = cv.model().and_downcast::<MultiSelection>().unwrap();
 
-            applications::activate(tab_id, &display, &model)
+            applications::activate(tab, &display, &model)
         });
 
         scroller.set_child(Some(&column_view));
@@ -159,13 +160,15 @@ impl DetailsView {
 }
 
 
-fn setup_columns(column_view: &ColumnView) {
+fn setup_columns(tab: TabId, column_view: &ColumnView) {
     let dummy_sorter = CustomSorter::new(dummy_sort_fn);
 
     let icon_factory = SignalListItemFactory::new();
     icon_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = IconCell::default();
+        setup_item_controllers(tab, &cell, cell.downgrade());
+
         item.set_child(Some(&cell));
     });
     icon_factory.connect_bind(move |_factory, item| {
@@ -184,6 +187,8 @@ fn setup_columns(column_view: &ColumnView) {
     name_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = StringCell::new(EntryString::Name);
+        setup_item_controllers(tab, &cell, cell.downgrade());
+
         item.set_child(Some(&cell));
     });
     setup_string_binds(&name_factory);
@@ -197,6 +202,8 @@ fn setup_columns(column_view: &ColumnView) {
     size_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = StringCell::new(EntryString::Size);
+        setup_item_controllers(tab, &cell, cell.downgrade());
+
         cell.align_end(9);
         item.set_child(Some(&cell));
     });
@@ -211,6 +218,8 @@ fn setup_columns(column_view: &ColumnView) {
     modified_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = StringCell::new(EntryString::Modified);
+        setup_item_controllers(tab, &cell, cell.downgrade());
+
         item.set_child(Some(&cell));
     });
     setup_string_binds(&modified_factory);

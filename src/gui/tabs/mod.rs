@@ -88,23 +88,30 @@ impl NavTarget {
         let p = path.as_ref();
         let target = Self::cleaned_abs(p, list)?;
 
+        Self::open_or_jump_abs(target.into())
+    }
+
+    fn open_or_jump_abs(target: Arc<Path>) -> Option<Self> {
+        assert!(target.has_root());
+        debug_assert!(*target == *target.clean());
+
         if !target.exists() {
-            gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
+            gui_run(|g| g.warning(&format!("Could not locate {target:?}")));
             None
         } else if target.is_dir() {
-            Some(Self { dir: target.into(), scroll: None })
+            Some(Self { dir: target, scroll: None })
         } else if let Some(parent) = target.parent() {
             if !parent.is_dir() {
-                gui_run(|g| g.warning(&format!("Could not open {p:?}")));
+                gui_run(|g| g.warning(&format!("Could not open {target:?}")));
                 return None;
             }
 
             let dir: Arc<Path> = parent.into();
-            let scroll = if target.exists() { Some(target.into()) } else { None };
+            let scroll = if target.exists() { Some(target) } else { None };
 
             Some(Self { dir, scroll })
         } else {
-            gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
+            gui_run(|g| g.warning(&format!("Could not locate {target:?}")));
             None
         }
     }
@@ -135,6 +142,19 @@ impl NavTarget {
     // Will cause an error later if this isn't a directory.
     fn assume_dir<P: AsRef<Path> + Into<Arc<Path>>>(path: P) -> Self {
         Self { dir: path.into(), scroll: None }
+    }
+
+    // Will cause an error later if this isn't a directory.
+    fn assume_jump<P: AsRef<Path> + Into<Arc<Path>>>(path: P) -> Option<Self> {
+        assert!(path.as_ref().has_root());
+
+        let Some(parent) = path.as_ref().parent() else {
+            return None;
+        };
+        Some(Self {
+            dir: parent.into(),
+            scroll: Some(path.into()),
+        })
     }
 
     fn initial(list: &TabsList) -> Option<Self> {

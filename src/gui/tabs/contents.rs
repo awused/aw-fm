@@ -50,7 +50,9 @@ impl Contents {
 
         // Causes annoying flickering, but as an optimization incremental mode is used occasionally
         // elsewhere.
-        filtered.set_incremental(false);
+        //
+        // No, no incremental anywhere: https://gitlab.gnome.org/GNOME/gtk/-/issues/5989
+        // filtered.set_incremental(false);
 
         let mut s = Self {
             list,
@@ -192,10 +194,11 @@ impl Contents {
     pub fn filtered_position_by_sorted(&self, entry: &Entry) -> Option<u32> {
         assert!(!self.stale);
         if let Some(filtered) = &self.filtered {
-            if filtered.is_incremental() {
-                // Must unset incremental to get an accurate position.
-                filtered.set_incremental(false);
-            }
+            // https://gitlab.gnome.org/GNOME/gtk/-/issues/5989
+            // if filtered.is_incremental() {
+            //     // Must unset incremental to get an accurate position.
+            //     filtered.set_incremental(false);
+            // }
             Self::bsearch(entry, self.sort, filtered)
         } else {
             Self::bsearch(entry, self.sort, &self.list)
@@ -289,6 +292,10 @@ impl Contents {
 
     pub fn clear(&mut self, sort: SortSettings) {
         self.stale = false;
+        if self.list.n_items() == 0 {
+            return;
+        }
+
         let new_list = ListStore::new::<EntryObject>();
 
         if let Some(filtered) = &self.filtered {
@@ -305,9 +312,10 @@ impl Contents {
         // 160ms for 50k
         // More with thumbnails
         let start = Instant::now();
+        let total = old_list.n_items();
         glib::idle_add_local(move || {
             if old_list.n_items() <= 1000 {
-                trace!("Finished dropping items in {:?}", start.elapsed());
+                trace!("Finished dropping {total} items in {:?}", start.elapsed());
                 return ControlFlow::Break;
             }
             old_list.splice(0, 1000, &[] as &[EntryObject]);

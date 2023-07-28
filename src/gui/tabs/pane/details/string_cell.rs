@@ -3,6 +3,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
 use crate::com::{EntryObject, SignalHolder};
+use crate::gui::tabs::pane::{setup_item_controllers, Bound};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) enum EntryString {
@@ -22,6 +23,7 @@ impl StringCell {
     pub(super) fn new(kind: EntryString) -> Self {
         let obj: Self = glib::Object::new();
         obj.imp().kind.set(kind);
+
         obj
     }
 
@@ -29,8 +31,10 @@ impl StringCell {
         self.imp().contents.set_xalign(1.0);
         self.imp().contents.set_min_chars(chars);
     }
+}
 
-    pub fn bind(&self, obj: &EntryObject) {
+impl Bound for StringCell {
+    fn bind(&self, obj: &EntryObject) {
         let imp = self.imp();
         imp.update_contents(&obj.get());
 
@@ -53,15 +57,20 @@ impl StringCell {
         assert!(imp.update_connection.replace(Some(d)).is_none())
     }
 
-    pub fn unbind(&self, _obj: &EntryObject) {
+    fn unbind(&self, _obj: &EntryObject) {
+        self.imp().bound_object.take();
         self.imp().update_connection.take();
+    }
+
+    fn bound_object(&self) -> Option<EntryObject> {
+        self.imp().bound_object.borrow().clone()
     }
 }
 
 
 mod imp {
     use std::borrow::Cow;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     use chrono::{Local, TimeZone};
     use gtk::subclass::prelude::*;
@@ -77,6 +86,8 @@ mod imp {
         pub contents: TemplateChild<gtk::Inscription>,
         pub(super) kind: Cell<EntryString>,
 
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
+        pub bound_object: RefCell<Option<EntryObject>>,
         pub update_connection: Cell<Option<SignalHolder<EntryObject>>>,
     }
 

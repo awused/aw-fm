@@ -35,7 +35,7 @@ mod constants {
     pub static INITIAL_BATCH: usize = 100;
     // The timeout after which we send a completed batch as soon as no more items are immediately
     // available.
-    pub static BATCH_TIMEOUT: Duration = Duration::from_millis(100);
+    pub static BATCH_TIMEOUT: Duration = Duration::from_millis(1000);
 }
 
 // For testing, force directories to load very slowly

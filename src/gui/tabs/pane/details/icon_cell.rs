@@ -3,6 +3,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
 use crate::com::{EntryObject, SignalHolder};
+use crate::gui::tabs::pane::Bound;
 
 glib::wrapper! {
     pub struct IconCell(ObjectSubclass<imp::IconCell>)
@@ -34,8 +35,8 @@ impl Default for IconCell {
 }
 
 
-impl IconCell {
-    pub fn bind(&self, eo: &EntryObject) {
+impl Bound for IconCell {
+    fn bind(&self, eo: &EntryObject) {
         let imp = self.imp();
         imp.update_contents(eo);
 
@@ -57,17 +58,16 @@ impl IconCell {
         assert!(imp.update_connection.replace(Some(d)).is_none())
     }
 
-    pub fn unbind(&self, eo: &EntryObject) {
+    fn unbind(&self, eo: &EntryObject) {
         eo.mark_unbound(self.is_mapped());
         self.imp().bound_object.take().unwrap();
         self.imp().update_connection.take().unwrap();
     }
 
-    pub fn bound_object(&self) -> Option<EntryObject> {
+    fn bound_object(&self) -> Option<EntryObject> {
         self.imp().bound_object.borrow().clone()
     }
 }
-
 
 mod imp {
     use std::cell::{Cell, RefCell};

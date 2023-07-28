@@ -1,10 +1,11 @@
-use gtk::glib;
 use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::ObjectExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::WidgetExt;
+use gtk::{glib, GestureClick};
 
 use crate::com::{EntryObject, SignalHolder};
+use crate::gui::tabs::pane::Bound;
 
 
 thread_local! {
@@ -42,12 +43,16 @@ impl Default for IconTile {
             }
         });
 
+        let click = GestureClick::new();
+
+        s.add_controller(click);
+
         s
     }
 }
 
-impl IconTile {
-    pub fn bind(&self, eo: &EntryObject) {
+impl Bound for IconTile {
+    fn bind(&self, eo: &EntryObject) {
         let imp = self.imp();
 
         // Name can never change, only set it once.
@@ -80,13 +85,13 @@ impl IconTile {
         assert!(imp.update_connection.replace(Some(d)).is_none())
     }
 
-    pub fn unbind(&self, eo: &EntryObject) {
+    fn unbind(&self, eo: &EntryObject) {
         eo.mark_unbound(self.is_mapped());
         self.imp().bound_object.take().unwrap();
         self.imp().update_connection.take().unwrap();
     }
 
-    pub fn bound_object(&self) -> Option<EntryObject> {
+    fn bound_object(&self) -> Option<EntryObject> {
         self.imp().bound_object.borrow().clone()
     }
 }
