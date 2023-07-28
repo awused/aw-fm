@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use gtk::gdk::Key;
 use gtk::glib::{ControlFlow, WeakRef};
-use gtk::prelude::{Cast, CastNone, IsA, ListModelExt, ObjectExt};
+use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
     AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, GestureSingleExt,
@@ -23,14 +23,15 @@ use super::id::TabId;
 use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
 use crate::gui::tabs::NavTarget;
-use crate::gui::{applications, tabs_run};
+use crate::gui::tabs_run;
 
 mod details;
 mod element;
 mod icon_view;
 
 static MIN_PANE_RES: i32 = 400;
-static MIN_SEARCH: usize = 2;
+// TODO -- lower to 2 when incremental filtering isn't broken.
+static MIN_SEARCH: usize = 3;
 
 
 #[derive(Debug)]
@@ -88,7 +89,6 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
     let click = GestureClick::new();
     click.set_button(0);
 
-    // let weak = bound.clone();
     click.connect_pressed(move |c, _n, _x, _y| {
         let ele = bound.upgrade().unwrap();
         let eo = ele.bound_object().unwrap();
@@ -503,11 +503,6 @@ impl Pane {
     // Most view state code should be moved here.
     pub fn workaround_scroller(&self) -> &ScrolledWindow {
         &self.element.imp().scroller
-    }
-
-    pub fn activate(&self) {
-        let display = self.element.display();
-        applications::activate(self.tab, &display, &self.selection);
     }
 
     pub fn split(&self, orient: Orientation) -> Option<gtk::Paned> {

@@ -1,4 +1,5 @@
 use gtk::prelude::*;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{glib, GridView, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
@@ -24,7 +25,10 @@ impl IconView {
         factory.connect_setup(move |_factory, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let tile = IconTile::default();
-            setup_item_controllers(tab, &tile, tile.downgrade());
+            // Bind to the individual items, not the entire massive tile.
+            setup_item_controllers(tab, &*tile.imp().image, tile.downgrade());
+            setup_item_controllers(tab, &*tile.imp().name, tile.downgrade());
+            setup_item_controllers(tab, &*tile.imp().size, tile.downgrade());
             item.set_child(Some(&tile));
         });
 

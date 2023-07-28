@@ -80,6 +80,9 @@ specify them.
 * `Help`
   * List current keybinds.
 * `Quit`
+* `Activate`
+  * The same as hitting enter or using "Open" in the menu on selected files.
+  * It is not recommended to bind this as a shortcut
 
 ##### Navigation Commands
 
@@ -102,7 +105,7 @@ specify them.
 * `Search [query]`
   * Opens a recursive search in the current directory.
   * Searching requires at least three characters and uses a simple substring match.
-  * For more powerful searching, use an external program like rofi or fzf.
+  * For more powerful/flexible searching, use an external program like rofi or fzf.
 
 ##### Tabs
 
@@ -126,10 +129,6 @@ specify them.
 
 # Everything below here is unimplemented
 TODO ---------------------------------
-
-* Activate
-  * The same as hitting enter or using "Open" in the menu on selected files.
-  * It is not recommended to bind this as a shortcut
 
 * Cut/Copy
   * Cuts or copies the current selection.

@@ -43,10 +43,6 @@ impl Default for IconTile {
             }
         });
 
-        let click = GestureClick::new();
-
-        s.add_controller(click);
-
         s
     }
 }

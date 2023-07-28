@@ -20,7 +20,7 @@ use crate::com::{
     SearchUpdate, SnapshotId, SortSettings,
 };
 use crate::gui::tabs::PartiallyAppliedUpdate;
-use crate::gui::{gui_run, Update};
+use crate::gui::{applications, gui_run, Update};
 
 /* This efficiently supports multiple tabs being open to the same directory with different
  * settings.
@@ -593,6 +593,16 @@ impl Tab {
             pane.set_active(false);
         }
         self.element.set_active(false);
+    }
+
+    pub fn activate(&self) {
+        let display = self.element.display();
+        let selection = if let Some(search) = &self.search {
+            &search.contents().selection
+        } else {
+            &self.contents.selection
+        };
+        applications::activate(self.id(), &display, selection);
     }
 
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: NavTarget) {

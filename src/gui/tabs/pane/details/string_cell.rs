@@ -37,6 +37,7 @@ impl Bound for StringCell {
     fn bind(&self, obj: &EntryObject) {
         let imp = self.imp();
         imp.update_contents(&obj.get());
+        imp.bound_object.replace(Some(obj.clone()));
 
         // Can never change.
         if matches!(imp.kind.get(), EntryString::Name) {

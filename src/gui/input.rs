@@ -186,6 +186,8 @@ impl Gui {
                 return self.window.close();
             }
             "Help" => return self.help_dialog(),
+            "Activate" => return tabs.activate(),
+
             "Home" => {
                 return tabs.active_navigate(&home_dir().unwrap_or_default());
             }

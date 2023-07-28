@@ -366,14 +366,6 @@ impl TabsList {
         self.create_tab(self.active, target, activate);
     }
 
-    pub fn open_tab_after<P: AsRef<Path>>(&mut self, tab: TabId, path: P, activate: bool) {
-        let Some(target) = NavTarget::open_or_jump(path, self) else {
-            return;
-        };
-
-        self.create_tab(self.active, target, activate);
-    }
-
     // Clones the active tab or opens a new tab to the user's home directory.
     pub fn new_tab(&mut self, activate: bool) {
         if let Some((id, _)) = self.clone_active() {
@@ -501,6 +493,16 @@ impl TabsList {
     // Tries to run f() against the active tab, if one exists
     fn try_active<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(&mut self, f: F) -> Option<T> {
         self.active.map(|active| self.must_run_tab(active, f))
+    }
+
+    pub fn activate(&mut self) {
+        if let Some(active) = self.active {
+            let Some(index) = self.position(active) else {
+                unreachable!("Couldn't find tab for {active:?}");
+            };
+
+            self.tabs[index].activate();
+        }
     }
 
     // Don't want to expose the Tab methods to Gui, so annoying wrapper functions.
