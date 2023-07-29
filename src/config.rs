@@ -28,6 +28,12 @@ pub struct Shortcut {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct Bookmark {
+    pub action: String,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContextMenuGroup {
     Section(String),
@@ -64,11 +70,13 @@ pub struct Config {
 
     #[serde(default)]
     pub shortcuts: Vec<Shortcut>,
+    #[serde(default)]
+    pub bookmarks: Vec<Bookmark>,
+    #[serde(default)]
+    pub context_menu: Vec<ContextMenuEntry>,
 
     #[serde(default)]
     pub skip_trash: bool,
-    #[serde(default)]
-    pub context_menu: Vec<ContextMenuEntry>,
 
     #[serde(default)]
     pub max_thumbnailers: u8,

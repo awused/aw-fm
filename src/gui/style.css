@@ -61,8 +61,6 @@ gridview .name {
   padding-right: 2px;
 }
 
-
-
 .left-bar {
   border-right: 1px solid black;
 }
@@ -71,13 +69,31 @@ listview.tabs-list>* {
   padding: 0;
 }
 
-.tab {
+.left-header {
+  font-weight: 700;
+  padding-left: 8px;
+  padding-top: 12px;
+  padding-bottom: 14px;
+}
+
+.left-header:last-child {
+  border-top: 1px solid black;
+}
+
+.tab,
+.bookmark {
   padding-left: 3px;
   padding-top: 8px;
   padding-bottom: 10px;
+  border-top: 1px solid black;
 }
 
-.tab:hover {
+.tabs-list> :last-child {
+  border-bottom: 1px solid black;
+}
+
+.tab:hover,
+.bookmark:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 

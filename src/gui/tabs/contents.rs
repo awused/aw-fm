@@ -27,6 +27,13 @@ impl std::fmt::Debug for Contents {
     }
 }
 
+impl Drop for Contents {
+    fn drop(&mut self) {
+        // Drops things in small batches in callbacks
+        self.clear(self.sort);
+    }
+}
+
 pub struct TotalPos(u32);
 
 impl Contents {

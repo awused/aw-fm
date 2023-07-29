@@ -1,4 +1,5 @@
 use std::future::ready;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
@@ -166,9 +167,12 @@ fn recurse_dir_sync(
                 let path = match res {
                     Ok(dirent) => dirent.into_path(),
                     Err(e) => {
-                        error!("Unexpected error reading directory {root:?} {e}");
+                        error!("Unexpected error reading directory {root:?}: {e}");
                         if let Some(io) = e.into_io_error() {
-                            drop(sender.send(ReadResult::DirError(io)));
+                            // Ignore broken symlinks
+                            if io.kind() != ErrorKind::NotFound {
+                                drop(sender.send(ReadResult::DirError(io)));
+                            }
                         }
                         return WalkState::Continue;
                     }
@@ -553,6 +557,7 @@ async fn read_slow_dir(
 
 impl Manager {
     pub(super) fn start_read_dir(&self, path: Arc<Path>, cancel: Arc<AtomicBool>) {
+        trace!("Starting to read flat directory {path:?}");
         spawn_local(read_dir_sync_thread(path, cancel, self.gui_sender.clone()));
     }
 

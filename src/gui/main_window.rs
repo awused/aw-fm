@@ -48,6 +48,9 @@ mod imp {
 
         #[template_child]
         pub toast: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub bookmarks: TemplateChild<gtk::Box>,
     }
 
     #[glib::object_subclass]

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use gtk::prelude::{Cast, CastNone, ListModelExt};
+use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{SelectionModelExt, WidgetExt};
 use gtk::{Orientation, Widget};
@@ -548,7 +548,6 @@ impl Tab {
         if was_search {
             // Clear so we don't flicker
             self.contents.clear(self.settings.sort);
-            self.close_search();
         }
 
         self.element.flat_title(&target.dir);
@@ -566,12 +565,16 @@ impl Tab {
             // This allows us to keep something visible just a tiny bit longer.
             // Safe enough when the settings match.
             if was_search {
-                // already cleared
+                self.close_search();
             } else if self.pane.has_pane() && self.settings == old_settings {
                 self.contents.mark_stale(self.settings.sort);
             } else {
                 self.contents.clear(self.settings.sort);
             }
+        }
+
+        if was_search {
+            self.close_search();
         }
 
         if let Some(pane) = self.pane.getm() {

@@ -26,6 +26,13 @@
                   <class name="left-bar"/>
                 </style>
 
+                <child>
+                  <object class="GtkBox" id="bookmarks">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">0</property>
+                    <property name="width-request">200</property>
+                  </object>
+                </child>
 
                 <child>
                   <object class="GtkScrolledWindow">

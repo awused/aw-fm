@@ -84,9 +84,8 @@ shortcuts = [
 # Ask yourself if you really want these, or if a keyboard shortcut and a
 # rofi script wouldn't be a better option.
 # Defined as { name = "Name", action = "Command" },
-# UNIMPLEMENTED
 bookmarks = [
-  # { name = "Home", action = "Home" },
+  { name = "Home", action = "Home" },
 ]
 
 # Context Menu

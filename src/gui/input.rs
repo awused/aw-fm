@@ -8,9 +8,12 @@ use ahash::AHashMap;
 use dirs::home_dir;
 use gtk::gdk::{Key, ModifierType};
 use gtk::glib::ControlFlow;
+use gtk::pango::EllipsizeMode;
 use gtk::prelude::Cast;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{EventControllerExt, GtkWindowExt, WidgetExt};
+use gtk::traits::{
+    BoxExt, ButtonExt, EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt,
+};
 use gtk::Orientation;
 
 use super::Gui;
@@ -54,6 +57,54 @@ impl Gui {
         });
 
         self.window.add_controller(key);
+
+        self.setup_bookmarks();
+    }
+
+    fn setup_bookmarks(self: &Rc<Self>) {
+        if CONFIG.bookmarks.is_empty() {
+            return;
+        }
+
+        let container = &self.window.imp().bookmarks;
+
+        let header = gtk::Label::builder()
+            .label("Bookmarks")
+            .css_classes(["left-header"])
+            .xalign(0.0)
+            .build();
+        container.append(&header);
+
+        for book in &CONFIG.bookmarks {
+            let label = gtk::Label::builder()
+                .label(&book.name)
+                .tooltip_text(&book.action)
+                .max_width_chars(1)
+                .ellipsize(EllipsizeMode::End)
+                .css_classes(["bookmark"])
+                .xalign(0.0)
+                .build();
+
+            let click = gtk::GestureClick::new();
+            click.set_button(1);
+            let g = self.clone();
+            click.connect_pressed(move |gc, _n, _x, _y| {
+                let command = gc.widget().tooltip_text().unwrap();
+                info!("Running command from clicked bookmark: {command}");
+                g.run_command(&command);
+            });
+
+            label.add_controller(click);
+
+            container.append(&label);
+        }
+
+        let header = gtk::Label::builder()
+            .label("Tabs")
+            .css_classes(["left-header"])
+            .xalign(0.0)
+            .build();
+        container.append(&header);
     }
 
     fn close_on_quit<T: WidgetExt>(self: &Rc<Self>, w: &T) {
