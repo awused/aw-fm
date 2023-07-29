@@ -508,17 +508,16 @@ impl Pane {
     pub fn split(&self, orient: Orientation) -> Option<gtk::Paned> {
         let paned = match orient {
             Orientation::Horizontal if self.element.width() > MIN_PANE_RES * 2 => {
-                gtk::Paned::new(orient)
+                gtk::Paned::builder().orientation(orient).position(self.element.width() / 2)
             }
             Orientation::Vertical if self.element.height() > MIN_PANE_RES * 2 => {
-                gtk::Paned::new(orient)
+                gtk::Paned::builder().orientation(orient).position(self.element.height() / 2)
             }
             Orientation::Horizontal | Orientation::Vertical => return None,
             _ => unreachable!(),
         };
         info!("Splitting pane for {:?}", self.tab);
-        paned.set_shrink_start_child(false);
-        paned.set_shrink_end_child(false);
+        let paned = paned.shrink_start_child(false).shrink_end_child(false).build();
 
         let parent = self.element.parent().unwrap();
 
