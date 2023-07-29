@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
 
 use gtk::gdk::Texture;
 use gtk::glib::WeakRef;

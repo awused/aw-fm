@@ -1,8 +1,8 @@
+use gtk::glib;
 use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::ObjectExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::WidgetExt;
-use gtk::{glib, GestureClick};
 
 use crate::com::{EntryObject, SignalHolder};
 use crate::gui::tabs::pane::Bound;

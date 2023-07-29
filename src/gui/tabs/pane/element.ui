@@ -72,6 +72,19 @@
               </object>
             </child>
 
+
+            <child>
+              <object class="GtkStackPage">
+                <property name="name">clipboard</property>
+                <property name="child">
+                  <object class="GtkLabel" id="clipboard">
+                    <property name="xalign">0</property>
+                    <property name="ellipsize">PANGO_ELLIPSIZE_MIDDLE</property>
+                  </object>
+                </property>
+              </object>
+            </child>
+
           </object>
         </child>
 

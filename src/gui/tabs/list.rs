@@ -9,6 +9,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{BoxExt, ListItemExt};
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
 
+use super::clipboard::Operation;
 use super::element::TabElement;
 use super::id::TabId;
 use super::tab::Tab;
@@ -125,6 +126,10 @@ impl TabsList {
     }
 
     pub fn set_active(&mut self, id: TabId) {
+        if Some(id) == self.active {
+            return;
+        }
+
         // this should be synchronous so should never fail.
         let index = self.position(id).unwrap();
 
@@ -502,6 +507,22 @@ impl TabsList {
 
             self.tabs[index].activate();
         }
+    }
+
+    pub fn active_copy(&self) {
+        let Some(active) = self.active else {
+            return;
+        };
+
+        self.find(active).unwrap().set_clipboard(Operation::Copy);
+    }
+
+    pub fn active_cut(&self) {
+        let Some(active) = self.active else {
+            return;
+        };
+
+        self.find(active).unwrap().set_clipboard(Operation::Cut);
     }
 
     // Don't want to expose the Tab methods to Gui, so annoying wrapper functions.

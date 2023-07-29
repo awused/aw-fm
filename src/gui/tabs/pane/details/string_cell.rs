@@ -3,7 +3,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
 use crate::com::{EntryObject, SignalHolder};
-use crate::gui::tabs::pane::{setup_item_controllers, Bound};
+use crate::gui::tabs::pane::Bound;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) enum EntryString {

@@ -12,7 +12,7 @@ Some documentation may not be in-date yet.
 ## Features
 
 * Fast and efficient
-  * Opening directories containing one or two hundred thousand images shouldn't
+  * Opening directories containing hundreds of thousands of images shouldn't
       lock up the UI for minutes/hours.
 * Natural sorting, `abc` sorts before `XYZ` and `a2.png` sorts before `a10.png`.
 * Highly customizable, up to a point.
@@ -83,6 +83,9 @@ specify them.
 * `Activate`
   * The same as hitting enter or using "Open" in the menu on selected files.
   * It is not recommended to bind this as a shortcut
+* `Cut`/`Copy`
+  * Cuts or copies the current selection.
+  * Will set the clipboard even if nothing is selected.
 
 ##### Navigation Commands
 
@@ -142,9 +145,6 @@ specify them.
 # Everything below here is unimplemented
 TODO ---------------------------------
 
-* Cut/Copy
-  * Cuts or copies the current selection.
-  * Clears the clipboard if nothing is selected.
 * Paste
   * Pastes into the current tab.
   * Calling this from scripts would be strange.

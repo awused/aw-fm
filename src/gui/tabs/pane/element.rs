@@ -45,6 +45,10 @@ impl PaneElement {
         forward_back_mouse.connect_pressed(move |c, _n, _x, _y| {
             trace!("Mouse button {} in pane {:?}", c.current_button(), tab);
             match c.current_button() {
+                3 => {
+                    println!("TODO -- bare tab context menu");
+                    tabs_run(|t| t.set_active(tab));
+                }
                 8 => event_run_tab(tab, Tab::back),
                 9 => event_run_tab(tab, Tab::forward),
                 _ => {}
@@ -74,7 +78,7 @@ impl PaneElement {
         let count_signal = selection.connect_items_changed(move |list, _p, _a, _r| {
             // There is no selection_changed event on item removal
             // selection().size() is comparatively expensive but unavoidable.
-            if stk.visible_child_name().map_or(false, |n| n == "selection")
+            if stk.visible_child_name().map_or(false, |n| n != "count")
                 && (list.n_items() == 0 || list.selection().size() == 0)
             {
                 stk.set_visible_child_name("count");
@@ -88,28 +92,31 @@ impl PaneElement {
         let update_selected = move |selection: &MultiSelection, _p: u32, _n: u32| {
             let set = selection.selection();
             let len = set.size();
-            if len == 0 && stk.visible_child_name().map_or(false, |n| n == "selection") {
+            if len == 0 && stk.visible_child_name().map_or(false, |n| n != "count") {
                 stk.set_visible_child_name("count");
                 return;
             }
 
 
-            if len == 1 {
+            let text = if len == 1 {
                 let obj = selection.item(set.nth(0)).unwrap().downcast::<EntryObject>().unwrap();
                 let entry = obj.get();
 
-                selected.set_text(&format!(
+                format!(
                     "\"{}\" selected ({}{})",
                     entry.name.to_string_lossy(),
                     if entry.dir() { "containing " } else { "" },
                     entry.long_size_string()
-                ));
+                )
             } else {
                 // Costly, but not unbearably slow at <20ms for 100k items.
-                selected.set_text(&selected_string(selection, &set));
-            }
+                selected_string(selection, &set)
+            };
 
-            if stk.visible_child_name().map_or(false, |n| n == "count") {
+            selected.set_text(&text);
+            selected.set_tooltip_text(Some(&text));
+
+            if stk.visible_child_name().map_or(false, |n| n != "selection") {
                 stk.set_visible_child_name("selection");
             }
         };
@@ -153,6 +160,9 @@ mod imp {
 
         #[template_child]
         pub seek: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub clipboard: TemplateChild<gtk::Label>,
 
         pub active: Cell<bool>,
         pub original_text: RefCell<String>,

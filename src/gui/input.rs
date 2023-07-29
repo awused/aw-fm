@@ -11,9 +11,7 @@ use gtk::glib::ControlFlow;
 use gtk::pango::EllipsizeMode;
 use gtk::prelude::Cast;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{
-    BoxExt, ButtonExt, EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt,
-};
+use gtk::traits::{BoxExt, EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt};
 use gtk::Orientation;
 
 use super::Gui;
@@ -176,9 +174,6 @@ impl Gui {
 
         debug!("Running command {}", cmd);
 
-        // if self.simple_action(cmd) {
-        //     return;
-        // }
         let mut tabs = self.tabs.borrow_mut();
 
 
@@ -238,6 +233,9 @@ impl Gui {
             }
             "Help" => return self.help_dialog(),
             "Activate" => return tabs.activate(),
+
+            "Copy" => return tabs.active_copy(),
+            "Cut" => return tabs.active_cut(),
 
             "Home" => {
                 return tabs.active_navigate(&home_dir().unwrap_or_default());

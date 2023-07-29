@@ -10,6 +10,7 @@ use gtk::{Orientation, Widget};
 use MaybePane as MP;
 
 use self::flat_dir::FlatDir;
+use super::clipboard::{ClipboardProvider, Operation};
 use super::contents::Contents;
 use super::element::TabElement;
 use super::id::{TabId, TabUid};
@@ -1048,6 +1049,27 @@ impl Tab {
                 search.handle_subdir_flat_mutate(&mutate);
             }
         }
+    }
+
+    pub fn set_clipboard(&self, operation: Operation) {
+        let selection = self
+            .search
+            .as_ref()
+            .map_or(&self.contents.selection, |s| &s.contents().selection);
+
+        let provider = ClipboardProvider::new(operation, selection);
+        let text = provider.display_string();
+        info!("Setting clipboard as: {text}");
+        if let Some(pane) = self.pane.get() {
+            pane.set_clipboard_text(&provider.display_string())
+        }
+
+        if let Err(e) = self.element.clipboard().set_content(Some(&provider)) {
+            let msg = format!("Failed to set clipboard: {e}");
+            error!("{msg}");
+            gui_run(|g| g.error(&msg))
+        }
+        // gtk::gdk::Clipboard::set_content(&self, provider)
     }
 
     pub fn env_vars(&self, prefix: &str, env: &mut Vec<(String, OsString)>) {

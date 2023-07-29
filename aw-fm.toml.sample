@@ -1,11 +1,6 @@
 # You can use the --awconf flag to override the config being loaded.
 # This config file is optional, the options specified here are the defaults.
 
-# The location of the database to use for persistent data storage.
-# Currently only per-directory sort and display settings.
-# Defaults to $XDG_DATA_HOME/aw-fm/settings.db or $HOME/.local/share/aw-fm/settings.db
-# database = ''
-
 # The colour used for the background.
 # This is any string understood by GDK, such as "black", "magenta", or "#55667788"
 # Transparency is allowed but depends on the display server for support.
@@ -108,6 +103,11 @@ context_menu = [
 # aw-fm doesn't really deal with trash and can't empty it for you.
 # UNIMPLEMENTED
 skip_trash = false
+
+# The location of the database to use for persistent data storage.
+# Currently only per-directory sort and display settings.
+# Defaults to $XDG_DATA_HOME/aw-fm/settings.db or $HOME/.local/share/aw-fm/settings.db
+# database = ''
 
 # ------------------------------------------------------------------------------------------------
 # More advanced configuration options below. They probably do not need to be changed.

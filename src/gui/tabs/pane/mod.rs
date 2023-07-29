@@ -101,7 +101,10 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
                     tabs_run(|t| t.create_tab(Some(tab), nav, false));
                 }
             }
-            3 => println!("TODO -- right click context menu"),
+            3 => {
+                tabs_run(|t| t.set_active(tab));
+                println!("TODO -- right click context menu")
+            }
             _ => {}
         }
     });
@@ -426,6 +429,16 @@ impl Pane {
 
     pub(super) fn update_search(&self, query: &str) {
         self.element.imp().text_entry.set_text(query);
+    }
+
+    pub(super) fn set_clipboard_text(&self, text: &str) {
+        let stack = &self.element.imp().stack;
+        let clipboard = &self.element.imp().clipboard;
+
+        clipboard.set_text(text);
+        clipboard.set_tooltip_text(Some(text));
+
+        stack.set_visible_child_name("clipboard");
     }
 
     pub fn set_active(&mut self, active: bool) {

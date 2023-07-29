@@ -6,19 +6,17 @@ use path_clean::PathClean;
 
 use self::contents::Contents;
 use self::list::TabsList;
+use super::gui_run;
 use crate::com::{Entry, EntryObject};
 use crate::config::OPTIONS;
 
-
+mod clipboard;
 mod contents;
 mod element;
 pub mod list;
 mod pane;
 mod search;
 mod tab;
-
-
-use super::gui_run;
 
 
 #[derive(Debug)]
