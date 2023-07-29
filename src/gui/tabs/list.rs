@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -99,6 +100,14 @@ impl TabsList {
         self.set_active(self.tabs[0].id());
     }
 
+    fn position(&self, id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id() == id)
+    }
+
+    fn find(&self, id: TabId) -> Option<&Tab> {
+        self.tabs.iter().find(|t| t.id() == id)
+    }
+
     fn find_mut(&mut self, id: TabId) -> Option<&mut Tab> {
         self.tabs.iter_mut().find(|t| t.id() == id)
     }
@@ -120,16 +129,11 @@ impl TabsList {
         let index = self.position(id).unwrap();
 
         if let Some(old) = self.active {
-            let old_index = self.position(old).unwrap();
-            self.tabs[old_index].set_inactive();
+            self.find_mut(old).unwrap().set_inactive();
         }
 
         self.active = Some(id);
         self.tabs[index].set_active();
-    }
-
-    fn position(&self, id: TabId) -> Option<usize> {
-        self.tabs.iter().position(|t| t.id() == id)
     }
 
     fn element_position(&self, id: TabId) -> Option<u32> {
@@ -263,8 +267,7 @@ impl TabsList {
             return None;
         };
 
-        let pos = self.position(active).unwrap();
-        Some(self.tabs[pos].dir())
+        Some(self.find(active).unwrap().dir())
     }
 
     fn switch_active_tab(&mut self, id: TabId) {
@@ -290,11 +293,8 @@ impl TabsList {
         };
 
         debug!("Switching to non-visible tab {id:?} from {:?}", active);
-        let active_index = self.position(active).unwrap();
 
-        assert_ne!(index, active_index);
-
-        let old_pane = self.tabs[active_index].take_pane();
+        let old_pane = self.find_mut(active).unwrap().take_pane();
         let (left, tab, right) = self.split_around_mut(index);
         tab.replace_pane(left, right, old_pane);
 
@@ -302,8 +302,8 @@ impl TabsList {
     }
 
     fn swap_panes(&mut self, visible: TabId, inactive: TabId) {
-        debug_assert!(self.tabs[self.position(visible).unwrap()].visible());
-        debug_assert!(!self.tabs[self.position(inactive).unwrap()].visible());
+        debug_assert!(self.find(visible).unwrap().visible());
+        debug_assert!(!self.find(inactive).unwrap().visible());
 
         if Some(visible) == self.active {
             self.switch_active_tab(inactive);
@@ -312,10 +312,9 @@ impl TabsList {
 
         info!("Swapping pane from {visible:?} to {inactive:?}");
         error!("TODO [session restore] -- haven't tested this");
-        let old_index = self.position(visible).unwrap();
         let new_index = self.position(inactive).unwrap();
 
-        let old_pane = self.tabs[old_index].take_pane();
+        let old_pane = self.find_mut(visible).unwrap().take_pane();
         let (left, tab, right) = self.split_around_mut(new_index);
         tab.replace_pane(left, right, old_pane);
     }
@@ -608,5 +607,44 @@ impl TabsList {
 
         let index = self.position(active).unwrap();
         self.tabs[index].search(query.to_owned());
+    }
+
+    pub fn reorder(&mut self, moved: TabId, dest: TabId, after: bool) {
+        let src = self.element_position(moved).unwrap();
+
+        let moved = self.tab_elements.item(src).unwrap();
+        self.tab_elements.remove(src);
+
+        let dst = self.element_position(dest).unwrap();
+        self.tab_elements.insert(if after { dst + 1 } else { dst }, &moved);
+    }
+
+    pub fn get_env(&self) -> Vec<(String, OsString)> {
+        let mut env: Vec<(String, OsString)> = Vec::new();
+
+        if let Some(active) = self.active {
+            let tab = self.find(active).unwrap();
+            tab.env_vars("AWFM_CURRENT_TAB", &mut env);
+            env.push(("AWFM_SELECTION".to_owned(), tab.selection_str()));
+
+            if let Some(index) = self.element_position(active) {
+                if index > 0 {
+                    let prev = self.element(index - 1);
+                    let prev = *prev.imp().tab.get().unwrap();
+                    self.find(prev).unwrap().env_vars("AWFM_PREV_TAB", &mut env);
+                }
+                if index + 1 < self.tab_elements.n_items() {
+                    let next = self.element(index + 1);
+                    let next = *next.imp().tab.get().unwrap();
+                    self.find(next).unwrap().env_vars("AWFM_NEXT_TAB", &mut env);
+                }
+            }
+        } else if self.tab_elements.n_items() > 0 {
+            let next = self.element(0);
+            let next = *next.imp().tab.get().unwrap();
+            self.find(next).unwrap().env_vars("AWFM_NEXT_TAB", &mut env);
+        }
+
+        env
     }
 }

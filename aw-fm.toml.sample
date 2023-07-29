@@ -70,6 +70,12 @@ shortcuts = [
 
   # {key = "F5", action = "Refresh"},
   # {key = "F5", modifiers="Control", action = "Refresh all"},
+
+  # Relative paths are relative to the working directory when you run aw-fm. Not recommended.
+  # Change these to absolute paths if you actually use them.
+  # {key= "F6", action = "Execute examples/dump-env.sh"},
+  # {key= "H", modifiers = "Control, Shift", action = "Script examples/rofi-jump-home.sh"},
+  # {key= "P", modifiers = "Alt", action = "Script examples/rofi-open-subdirs.sh"},
 ]
 
 # Bookmarks
@@ -92,7 +98,7 @@ bookmarks = [
 # All commands sharing the same named sub-menu or section will be grouped together in order.
 #
 # Example:
-# {name = "Save Page", action = "Execute /path/to/save-page.sh"},
+# {name = "Do Something", action = "Execute /path/to/do-something.sh"},
 # {name = "Sample Script", action = "Script /path/to/sample-script.sh"},
 # UNIMPLEMENTED
 context_menu = [

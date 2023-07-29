@@ -1,10 +1,11 @@
+use std::ffi::OsString;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use gtk::prelude::{CastNone, ListModelExt};
+use gtk::prelude::{Cast, CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::WidgetExt;
+use gtk::traits::{SelectionModelExt, WidgetExt};
 use gtk::{Orientation, Widget};
 use MaybePane as MP;
 
@@ -1044,6 +1045,32 @@ impl Tab {
                 search.handle_subdir_flat_mutate(&mutate);
             }
         }
+    }
+
+    pub fn env_vars(&self, prefix: &str, env: &mut Vec<(String, OsString)>) {
+        env.push((prefix.to_owned() + "_PATH", self.dir.path().as_os_str().to_owned()));
+        if let Some(search) = &self.search {
+            env.push((prefix.to_owned() + "_SEARCH", search.query().0.borrow().clone().into()));
+        }
+    }
+
+    pub fn selection_str(&self) -> OsString {
+        let selection = self
+            .search
+            .as_ref()
+            .map_or(&self.contents.selection, |s| &s.contents().selection);
+
+        let set = selection.selection();
+        let mut out = OsString::new();
+        for i in 0..set.size() {
+            let entry = selection.item(set.nth(i as u32)).and_downcast::<EntryObject>().unwrap();
+            out.push(entry.get().abs_path.as_os_str());
+            if i + 1 != set.size() {
+                out.push("\n");
+            }
+        }
+
+        out
     }
 }
 

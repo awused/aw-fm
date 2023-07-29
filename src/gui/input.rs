@@ -213,7 +213,6 @@ impl Gui {
     }
 
     fn get_env(&self) -> Vec<(String, OsString)> {
-        // vec![]
-        todo!()
+        self.tabs.borrow().get_env()
     }
 }

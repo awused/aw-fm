@@ -1,9 +1,11 @@
 use std::path::Path;
 
-use gtk::glib::GString;
+use gtk::gdk::{ContentProvider, DragAction};
+use gtk::glib::{BoxedAnyObject, GString};
+use gtk::prelude::StaticType;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{GestureSingleExt, WidgetExt};
-use gtk::{glib, GestureClick};
+use gtk::traits::{EventControllerExt, GestureSingleExt, WidgetExt};
+use gtk::{glib, DragSource, DropTarget, GestureClick, WidgetPaintable};
 
 use crate::gui::tabs::id::TabId;
 use crate::gui::tabs_run;
@@ -33,7 +35,39 @@ impl TabElement {
         });
         s.add_controller(mouse);
 
-        s.connect_destroy(move |_| trace!("Tab for {tab:?} destroyed"));
+        // Drag and drop reordering. No fancy animations or drop target indicaticators yet.
+        let drag_source = DragSource::new();
+        drag_source.connect_prepare(move |_ds, _x, _y| {
+            Some(ContentProvider::for_value(&BoxedAnyObject::new(tab).into()))
+        });
+        drag_source.connect_drag_begin(|ds, _drag| {
+            let paintable = WidgetPaintable::new(Some(&ds.widget()));
+
+            ds.set_icon(Some(&paintable), 0, 0);
+        });
+        s.add_controller(drag_source);
+
+        let drop_target = DropTarget::new(BoxedAnyObject::static_type(), DragAction::all());
+        drop_target.connect_drop(move |dt, v, _x, y| {
+            let source = *v.get::<BoxedAnyObject>().unwrap().borrow::<TabId>();
+            if source == tab {
+                debug!("Ignoring tab dropped onto itself");
+                return false;
+            }
+
+            if y > dt.widget().allocated_height() as f64 / 2.0 {
+                debug!("Reordering {source:?} after {tab:?}");
+                tabs_run(|t| t.reorder(source, tab, true));
+            } else {
+                debug!("Reordering {source:?} before {tab:?}");
+                tabs_run(|t| t.reorder(source, tab, false));
+            }
+
+            true
+        });
+
+        s.add_controller(drop_target);
+
         s
     }
 

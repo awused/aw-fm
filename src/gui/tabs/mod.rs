@@ -71,7 +71,6 @@ impl PaneState {
     fn for_jump(jump: Option<Arc<Path>>) -> Self {
         Self {
             scroll_pos: jump.map(|path| ScrollPosition { path, index: 0 }),
-            ..Self::default()
         }
     }
 }
@@ -142,19 +141,6 @@ impl NavTarget {
     // Will cause an error later if this isn't a directory.
     fn assume_dir<P: AsRef<Path> + Into<Arc<Path>>>(path: P) -> Self {
         Self { dir: path.into(), scroll: None }
-    }
-
-    // Will cause an error later if this isn't a directory.
-    fn assume_jump<P: AsRef<Path> + Into<Arc<Path>>>(path: P) -> Option<Self> {
-        assert!(path.as_ref().has_root());
-
-        let Some(parent) = path.as_ref().parent() else {
-            return None;
-        };
-        Some(Self {
-            dir: parent.into(),
-            scroll: Some(path.into()),
-        })
     }
 
     fn initial(list: &TabsList) -> Option<Self> {

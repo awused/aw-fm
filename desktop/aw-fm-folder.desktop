@@ -6,7 +6,7 @@ Comment=A basic file manager with a focus on efficiency.
 Exec=aw-fm %F
 NoDisplay=true
 # Copy the image to ~/.local/share/icons/
-# Icon=aw-man
+# Icon=aw-fm
 Terminal=false
 Type=Application
 StartupNotify=true

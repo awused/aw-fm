@@ -74,24 +74,6 @@
         </child> <!-- horizontal box -->
 
 
-        <!-- hit a crash with a misaligned button, I don't trust it with huge text -->
-        <!-- <child type="overlay"> -->
-        <!--   <object class="GtkButton" id="toast"> -->
-        <!--     <property name="visible">false</property> -->
-        <!--     <property name="halign">start</property> -->
-        <!--     <property name="halign">end</property> -->
-        <!--  -->
-        <!--  -->
-        <!--     <child> -->
-        <!--       <object class="GtkLabel" id="error_message"> -->
-        <!--         <property name="wrap">true</property> -->
-        <!--         <property name="wrap-mode">PANGO_WRAP_CHAR</property> -->
-        <!--       </object> -->
-        <!--     </child> -->
-        <!--   </object> -->
-        <!-- </child> &#60;&#33;&#45;&#45; toast overlay &#45;&#45;&#62; -->
-        <!--  -->
-
         <child type="overlay">
           <object class="GtkLabel" id="toast">
             <property name="visible">false</property>

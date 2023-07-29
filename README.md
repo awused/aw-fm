@@ -127,6 +127,18 @@ specify them.
 * `Mode icons|columns`
   * Changes the mode of the current directory.
 
+##### Other
+
+* `Execute`
+  * Requires a single string argument which will be run as an executable.
+  * Example: `Execute /path/to/some-program`
+* `Script`
+  * Like Execute but reads stdout from the executable as a series of commands to
+    run, one per line.
+  * These programs will be killed on exit from aw-fm.
+  * Example: `Script /path/to/sample-script.sh` if the script prints "Quit" the
+    program will exit.
+
 # Everything below here is unimplemented
 TODO ---------------------------------
 
@@ -136,13 +148,6 @@ TODO ---------------------------------
 * Paste
   * Pastes into the current tab.
   * Calling this from scripts would be strange.
-* Execute
-  * Requires a single string argument which will be run as an executable.
-  * Example: `Execute /path/to/save-page.sh`
-* Script
-  * Like Execute but reads stdout from the executable as a series of commands to
-    run, one per line.
-  * Example: `Script /path/to/sample-script.sh`
 
 TODO ---------------------------------
 
@@ -154,23 +159,18 @@ with no arguments and several environment variables set.
 [rofi-jump-home.sh](examples/rofi-jump-home.sh) is an example that opens rofi
 to navigate to a directory inside the user's home directory.
 
-Where relevant, tabs and panes are communicated as JSON:
-
-```json
-{
-  "path": string,
-  "search": undefined|string,
-}
-```
-
 Environment Variable | Explanation
 -------------------- | ----------
-AWFM_CURRENT_TAB | The currently selected tab, which is also the current pane. May be empty.
+AWFM_CURRENT_TAB_PATH | The currently selected tab, which is also the current pane. May be empty or absent.
+AWFM_CURRENT_TAB_SEARCH | The currently selected tab's search. May be empty or absent.
 AWFM_SELECTION | A newline-separated set of selected files. May be empty.
-AWFM_NEXT_TAB | The next tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be the first tab. May be empty.
-AWFM_PREV_TAB | The previous tab as visually seen in the tabs list on the left. May be empty.
-AWFM_NEXT_PANE | The tab open in the "next" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty.
-AWFM_PREV_PANE | The tab open in the "previous" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty.
+AWFM_NEXT_TAB_PATH | The next(lower) tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be the first tab. May be empty.
+AWFM_NEXT_TAB_SEARCH | See above.
+AWFM_PREV_TAB_PATH | The previous(higher) tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be absent. May be empty.
+AWFM_PREV_TAB_SEARCH | See above.
+
+<!-- AWFM_NEXT_PANE | The tab open in the "next" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty. -->
+<!-- AWFM_PREV_PANE | The tab open in the "previous" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty. -->
 <!-- AWFM_PID | The PID of the aw-fm process. -->
 <!-- AWFM_SOCKET | The socket used for IPC, if enabled. -->
 <!-- AWFM_WINDOW | The window ID for the primary window. Currently only on X11. -->
@@ -181,9 +181,9 @@ Not planned, good luck. Probably won't work.
 
 ## Development
 
-* RUST_LOG=Trace for spam
-* GTK_DEBUG=Interactive
-* G_MESSAGES_DEBUG=GnomeDesktop for thumbnailer issues
+* `RUST_LOG=Trace` for spam
+* `GTK_DEBUG=Interactive`
+* `G_MESSAGES_DEBUG=GnomeDesktop` for thumbnailer issues or `G_MESSAGES_DEBUG=All`
 
 ## Why
 

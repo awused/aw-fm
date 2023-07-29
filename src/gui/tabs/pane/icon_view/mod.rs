@@ -32,7 +32,6 @@ impl IconView {
             item.set_child(Some(&tile));
         });
 
-        // the bind stage is used for "binding" the data to the created widgets on the "setup" stage
         factory.connect_bind(move |_factory, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let entry = item.item().unwrap().downcast::<EntryObject>().unwrap();

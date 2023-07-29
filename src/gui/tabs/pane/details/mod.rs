@@ -154,8 +154,16 @@ impl DetailsView {
         obj
     }
 
-    pub(super) fn change_model(&self, selection: &MultiSelection) {
+    pub(super) fn change_model(&mut self, selection: &MultiSelection) {
         self.column_view.set_model(Some(selection));
+
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
+        self.column_view.set_enable_rubberband(selection.n_items() != 0);
+        let g = self.column_view.clone();
+        let signal = selection.connect_items_changed(move |sel, _, _, _| {
+            g.set_enable_rubberband(sel.n_items() != 0);
+        });
+        self._workaround_rubber = SignalHolder::new(selection, signal);
     }
 }
 
