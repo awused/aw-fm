@@ -19,6 +19,7 @@ use crate::config::CONFIG;
 use crate::database::DBCon;
 
 mod applications;
+mod file_operations;
 mod input;
 mod main_window;
 mod menu;
@@ -194,7 +195,7 @@ impl Gui {
     }
 
     fn setup(self: &Rc<Self>) {
-        self.tabs.borrow_mut().open_initial_tab();
+        self.tabs.borrow_mut().initial_setup();
         self.setup_interaction();
 
         // let g = self.clone();

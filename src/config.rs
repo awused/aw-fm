@@ -48,6 +48,24 @@ pub struct ContextMenuEntry {
     pub group: Option<ContextMenuGroup>,
 }
 
+#[derive(Debug, Default, Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum DirectoryCollision {
+    #[default]
+    _Ask,
+    Merge,
+    Skip,
+}
+
+#[derive(Debug, Default, Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum FileCollision {
+    #[default]
+    _Ask,
+    _Overwrite,
+    Skip,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
     #[serde(default, deserialize_with = "empty_path_is_none")]
@@ -77,6 +95,11 @@ pub struct Config {
 
     #[serde(default)]
     pub skip_trash: bool,
+
+    #[serde(default)]
+    pub directory_collisions: DirectoryCollision,
+    #[serde(default)]
+    pub file_collisions: FileCollision,
 
     #[serde(default)]
     pub max_thumbnailers: u8,

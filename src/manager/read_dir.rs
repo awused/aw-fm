@@ -36,7 +36,7 @@ mod constants {
     //
     // May raise to 10k+ as in practice directories are either very fast or very large and very
     // slow.
-    pub static INITIAL_BATCH: usize = 5000;
+    pub static INITIAL_BATCH: usize = 2000;
     // The timeout after which we send a completed batch as soon as no more items are immediately
     // available.
     pub static BATCH_TIMEOUT: Duration = Duration::from_millis(1000);

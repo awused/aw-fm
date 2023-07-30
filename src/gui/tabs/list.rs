@@ -16,7 +16,7 @@ use super::tab::Tab;
 use crate::com::{DirSnapshot, DisplayMode, SearchSnapshot, SearchUpdate, SortSettings, Update};
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
-use crate::gui::tabs::NavTarget;
+use crate::gui::tabs::{clipboard, NavTarget};
 use crate::gui::{gui_run, tabs_run};
 
 // For event handlers which cannot be run with the tabs lock being held.
@@ -85,8 +85,10 @@ impl TabsList {
         }
     }
 
-    pub fn open_initial_tab(&mut self) {
+    pub fn initial_setup(&mut self) {
         assert!(self.tabs.is_empty());
+
+        clipboard::register_types();
 
 
         let Some(target) = NavTarget::initial(self) else {
@@ -523,6 +525,14 @@ impl TabsList {
         };
 
         self.find(active).unwrap().set_clipboard(Operation::Cut);
+    }
+
+    pub fn active_paste(&self) {
+        let Some(active) = self.active else {
+            return;
+        };
+
+        self.find(active).unwrap().paste();
     }
 
     // Don't want to expose the Tab methods to Gui, so annoying wrapper functions.

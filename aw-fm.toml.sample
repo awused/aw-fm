@@ -104,14 +104,32 @@ context_menu = [
 # UNIMPLEMENTED
 skip_trash = false
 
+# How to handle directory collisions during file operations.
+#
+# Allowed values are ask (UNIMPLEMENTED), merge, and skip (UNIMPLEMENTED).
+#
+# ask will be the default once it is implemented.
+directory_collisions = "merge"
+
+# How to handle file collisions when moving files.
+#
+# Allowed values are ask (UNIMPLEMENTED), overwrite (UNIMPLEMENTED), skip, newer (UNIMPLEMENTED), and rename (UNIMPLEMENTED).
+# newer will overwrite if the destination is newer and skip otherwise.
+# rename will keep the existing destination file as-is but add a suffix to the file name.
+# rename is assumed when copying a file on top of itself.
+#
+# ask will be the default once it is implemented.
+file_collisions = "skip"
+
+# ------------------------------------------------------------------------------------------------
+# More advanced configuration options below. They probably do not need to be changed.
+# ------------------------------------------------------------------------------------------------
+
 # The location of the database to use for persistent data storage.
 # Currently only per-directory sort and display settings.
 # Defaults to $XDG_DATA_HOME/aw-fm/settings.db or $HOME/.local/share/aw-fm/settings.db
 # database = ''
 
-# ------------------------------------------------------------------------------------------------
-# More advanced configuration options below. They probably do not need to be changed.
-# ------------------------------------------------------------------------------------------------
 
 # How deeply to recurse for searches.
 #

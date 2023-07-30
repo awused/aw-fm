@@ -10,7 +10,7 @@ use gtk::{Orientation, Widget};
 use MaybePane as MP;
 
 use self::flat_dir::FlatDir;
-use super::clipboard::{ClipboardProvider, Operation};
+use super::clipboard::{read_clipboard, ClipboardProvider, Operation};
 use super::contents::Contents;
 use super::element::TabElement;
 use super::id::{TabId, TabUid};
@@ -1069,7 +1069,10 @@ impl Tab {
             error!("{msg}");
             gui_run(|g| g.error(&msg))
         }
-        // gtk::gdk::Clipboard::set_content(&self, provider)
+    }
+
+    pub fn paste(&self) {
+        read_clipboard(self.element.display(), self.id(), self.dir());
     }
 
     pub fn env_vars(&self, prefix: &str, env: &mut Vec<(String, OsString)>) {
