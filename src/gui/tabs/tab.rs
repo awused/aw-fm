@@ -91,40 +91,44 @@ impl MaybePane {
     }
 
     fn take_pane(&mut self, list: &Contents) -> Pane {
-        match self {
+        let old = match self {
             Self::Pane(p) => {
                 let new = Self::Closed(p.get_state(list));
-                let old = std::mem::replace(self, new);
-                let Self::Pane(pane) = old else {
-                    unreachable!()
-                };
-                pane
+                std::mem::replace(self, new)
             }
             Self::Pending(_p, state) => {
                 let state = std::mem::take(state);
-                let old = std::mem::replace(self, Self::Closed(state));
-                let Self::Pending(p, _) = old else {
-                    unreachable!()
-                };
-                p
+                std::mem::replace(self, Self::Closed(state))
             }
             Self::Closed(_) => unreachable!(),
-        }
+        };
+
+        let (Self::Pane(p) | Self::Pending(p, _)) = old else {
+            unreachable!()
+        };
+        p
+    }
+
+    fn snapshot_pane(&mut self, list: &Contents) {
+        let Self::Pane(p) = self else { return };
+        let state = p.get_state(list);
+        let old = std::mem::replace(self, Self::Closed(PaneState::default()));
+        let Self::Pane(p) = old else { unreachable!() };
+
+        *self = Self::Pending(p, state);
     }
 
     fn must_resolve_pending(&mut self) -> PaneState {
-        match self {
-            Self::Pane(_) | Self::Closed(_) => unreachable!(),
-            Self::Pending(_p, _state) => {
-                let temp = Self::Closed(PaneState::default());
-                let old = std::mem::replace(self, temp);
-                let Self::Pending(pane, state) = old else {
-                    unreachable!()
-                };
-                *self = Self::Pane(pane);
-                state
-            }
-        }
+        let Self::Pending(_p, _state) = self else {
+            unreachable!()
+        };
+        let old = std::mem::replace(self, Self::Closed(PaneState::default()));
+        let Self::Pending(pane, state) = old else {
+            unreachable!()
+        };
+
+        *self = Self::Pane(pane);
+        state
     }
 }
 
@@ -226,8 +230,7 @@ impl Tab {
 
         // Spinner will start spinning for search when pane is attached
         if !source.dir.state().loading() {
-            element.imp().spinner.stop();
-            element.imp().spinner.set_visible(false);
+            element.stop_spin();
         }
 
         let search = source.search.as_ref().map(|s| s.clone_for(&contents));
@@ -258,8 +261,7 @@ impl Tab {
                 self.element.clone_from(&t.element);
 
                 if !self.dir.state().loading() {
-                    self.element.imp().spinner.stop();
-                    self.element.imp().spinner.set_visible(false);
+                    self.element.stop_spin();
                 }
 
                 return true;
@@ -284,8 +286,7 @@ impl Tab {
         self.element.search_title(self.dir.path());
 
         search.start_load();
-        self.element.imp().spinner.start();
-        self.element.imp().spinner.set_visible(true);
+        self.element.spin();
 
         pane.flat_to_search(
             search.query(),
@@ -304,8 +305,7 @@ impl Tab {
         };
 
         if !self.loading() {
-            self.element.imp().spinner.stop();
-            self.element.imp().spinner.set_visible(false);
+            self.element.stop_spin();
         }
 
         self.element.flat_title(self.dir.path());
@@ -334,19 +334,37 @@ impl Tab {
 
     // Only make this take &mut [Self] if truly necessary
     fn load(&mut self, left: &[Self], right: &[Self]) {
-        let self_load = self.dir.start_load();
+        let self_load = self.dir.start_load(self.settings.sort);
         let search_load = self.search.as_mut().map_or(false, Search::start_load);
 
         if self_load || search_load {
-            self.element.imp().spinner.start();
-            self.element.imp().spinner.set_visible(true);
+            self.element.spin();
         }
 
         if self_load {
             for t in self.matching(left).chain(self.matching(right)) {
-                t.element.imp().spinner.start();
-                t.element.imp().spinner.set_visible(true);
+                t.element.spin();
             }
+        }
+    }
+
+    // This is the easiest implementation, but it is clumsy
+    pub fn unload_unchecked(&mut self) {
+        if let Some(search) = &mut self.search {
+            self.pane.snapshot_pane(search.contents());
+            search.unload(self.settings.sort);
+        } else {
+            self.pane.snapshot_pane(&self.contents);
+        }
+
+        self.contents.clear(self.settings.sort);
+        self.element.stop_spin();
+        self.dir.unload();
+    }
+
+    pub fn reload_visible(&mut self, left: &[Self], right: &[Self]) {
+        if self.visible() {
+            self.load(left, right);
         }
     }
 
@@ -804,9 +822,7 @@ impl Tab {
 
     fn maybe_finish_load(&mut self) {
         if self.loaded() {
-            let e = self.element.imp();
-            e.spinner.stop();
-            e.spinner.set_visible(false);
+            self.element.stop_spin();
             self.apply_pane_state();
         }
     }
@@ -1113,7 +1129,7 @@ mod flat_dir {
     use std::sync::Arc;
     use std::time::Instant;
 
-    use crate::com::{ManagerAction, SnapshotId, SnapshotKind, Update};
+    use crate::com::{ManagerAction, SnapshotId, SnapshotKind, SortSettings, Update};
     use crate::gui::gui_run;
 
     #[derive(Debug)]
@@ -1133,10 +1149,10 @@ mod flat_dir {
     }
 
     impl WatchedDir {
-        fn start(path: Arc<Path>) -> Self {
+        fn start(path: Arc<Path>, sort: SortSettings) -> Self {
             let cancel: Arc<AtomicBool> = Arc::default();
             gui_run(|g| {
-                g.send_manager(ManagerAction::Open(path.clone(), cancel.clone()));
+                g.send_manager(ManagerAction::Open(path.clone(), sort, cancel.clone()));
             });
 
             Self { path, cancel }
@@ -1230,7 +1246,9 @@ mod flat_dir {
             }
         }
 
-        pub fn start_load(&self) -> bool {
+        // sort can become stale or not match all tabs,
+        // but it's overwhelmingly going to save time in the UI thread.
+        pub fn start_load(&self, sort: SortSettings) -> bool {
             let mut sb = self.state.borrow_mut();
             let dstate = &mut *sb;
             match dstate {
@@ -1238,7 +1256,7 @@ mod flat_dir {
                 DirState::Unloaded => {
                     let start = Instant::now();
                     debug!("Opening directory for {:?}", self.path);
-                    let watch = WatchedDir::start(self.path.clone());
+                    let watch = WatchedDir::start(self.path.clone(), sort);
 
                     *dstate = DirState::Loading {
                         watch,
@@ -1248,6 +1266,10 @@ mod flat_dir {
                     true
                 }
             }
+        }
+
+        pub fn unload(&self) {
+            self.state.take();
         }
 
         pub fn take_loaded(&self) -> (Vec<Update>, Instant) {

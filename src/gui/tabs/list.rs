@@ -13,7 +13,9 @@ use super::clipboard::Operation;
 use super::element::TabElement;
 use super::id::TabId;
 use super::tab::Tab;
-use crate::com::{DirSnapshot, DisplayMode, SearchSnapshot, SearchUpdate, SortSettings, Update};
+use crate::com::{
+    DirSnapshot, DisplayMode, EntryObject, SearchSnapshot, SearchUpdate, SortSettings, Update,
+};
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::{clipboard, NavTarget};
@@ -446,6 +448,34 @@ impl TabsList {
         tab.attach_pane(left, right, |w| paned.set_end_child(Some(w)));
 
         self.set_active(new_id);
+    }
+
+    pub fn refresh(&mut self) {
+        info!("Refreshing all tabs");
+        for t in &mut self.tabs {
+            t.unload_unchecked();
+        }
+
+        // SAFETY: just unloaded every single tab.
+        unsafe {
+            // This serves two purposes:
+            //
+            // Old EntryObjects are dropped in idle callbacks, so they can survive long enough to
+            // be resurrected by searches and serve stale values.
+            //
+            // Flat tabs that open fast enough could resurrect and update old objects. This won't
+            // cause stale data to show up, unlike search, but can break scrolling because GTK.
+            EntryObject::purge();
+        }
+
+        for i in 0..self.tabs.len() {
+            if !self.tabs[i].visible() {
+                continue;
+            }
+
+            let (left, t, right) = self.split_around_mut(i);
+            t.reload_visible(left, right);
+        }
     }
 
     pub(super) fn close_tab(&mut self, id: TabId) {

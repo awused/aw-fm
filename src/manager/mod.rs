@@ -138,12 +138,11 @@ impl Manager {
         use ManagerAction::*;
 
         match ma {
-            Open(path, cancel) => {
+            Open(path, sort, cancel) => {
                 if self.watch_dir(&path) {
-                    self.start_read_dir(path, cancel);
+                    self.start_read_dir(path, sort, cancel);
                 }
             }
-            Refresh(path, cancel) => self.start_read_dir(path, cancel),
             Unwatch(path) => self.unwatch_dir(&path),
 
             Search(path, cancel) => {

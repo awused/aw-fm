@@ -49,8 +49,7 @@ pub struct SearchUpdate {
 
 #[derive(Debug)]
 pub enum ManagerAction {
-    Open(Arc<Path>, Arc<AtomicBool>),
-    Refresh(Arc<Path>, Arc<AtomicBool>),
+    Open(Arc<Path>, SortSettings, Arc<AtomicBool>),
     Unwatch(Arc<Path>),
     Search(Arc<Path>, Arc<AtomicBool>),
     EndSearch(Arc<AtomicBool>),

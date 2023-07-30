@@ -62,6 +62,7 @@ impl Manager {
             }
             false
         } else {
+            trace!("Watching {path:?}");
             true
         }
     }

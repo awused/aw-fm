@@ -244,6 +244,7 @@ impl Gui {
             "NewTab" => return tabs.new_tab(true),
             "NewBackgroundTab" => return tabs.new_tab(false),
 
+            "Refresh" => return tabs.refresh(),
             "CloseTab" => return tabs.active_close_tab(),
             "ClosePane" => return tabs.active_close_pane(),
             "CloseActive" => return tabs.active_close_both(),

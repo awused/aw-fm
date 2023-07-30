@@ -80,6 +80,10 @@ specify them.
 * `Help`
   * List current keybinds.
 * `Quit`
+* `Refresh`
+  * Refreshes all tabs.
+  * This shouldn't be necessary unless file system notifies are incomplete,
+    like over NFS.
 * `Activate`
   * The same as hitting enter or using "Open" in the menu on selected files.
   * It is not recommended to bind this as a shortcut
@@ -142,7 +146,6 @@ specify them.
   * Example: `Script /path/to/sample-script.sh` if the script prints "Quit" the
     program will exit.
 
-# Everything below here is unimplemented
 TODO ---------------------------------
 
 * Paste
@@ -150,7 +153,6 @@ TODO ---------------------------------
   * Calling this from scripts would be strange.
 
 TODO ---------------------------------
-
 
 ### External Executable Environment
 

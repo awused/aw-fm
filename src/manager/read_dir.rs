@@ -11,6 +11,7 @@ use gtk::glib;
 use ignore::{WalkBuilder, WalkState};
 use once_cell::sync::Lazy;
 use rayon::prelude::{ParallelBridge, ParallelIterator};
+use rayon::slice::ParallelSliceMut;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -19,7 +20,7 @@ use tokio::task::spawn_local;
 use tokio::time::{sleep, sleep_until, Instant};
 
 use super::Manager;
-use crate::com::{DirSnapshot, Entry, GuiAction, SearchSnapshot, SnapshotKind};
+use crate::com::{DirSnapshot, Entry, GuiAction, SearchSnapshot, SnapshotKind, SortSettings};
 use crate::config::CONFIG;
 use crate::{closing, handle_panic};
 
@@ -71,6 +72,16 @@ static READ_POOL: Lazy<ThreadPool> = Lazy::new(|| {
         .num_threads(4)
         .build()
         .expect("Error creating directory read threadpool")
+});
+
+static SORT_POOL: Lazy<ThreadPool> = Lazy::new(|| {
+    ThreadPoolBuilder::new()
+        .thread_name(|u| format!("sort-{u}"))
+        .panic_handler(handle_panic)
+        // 8 threads -> 40k items usually under 6ms
+        .num_threads(8)
+        .build()
+        .expect("Error creating directory sort threadpool")
 });
 
 #[derive(Debug)]
@@ -215,9 +226,10 @@ fn recurse_dir_sync(
     recv_done
 }
 
-async fn read_dir_sync_thread(
+async fn read_dir(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
+    sort: SortSettings,
     gui_sender: glib::Sender<GuiAction>,
 ) {
     debug!("Starting to read directory {path:?}");
@@ -227,7 +239,7 @@ async fn read_dir_sync_thread(
 
     let h = read_dir_sync(path.clone(), cancel.clone(), sender);
 
-    consume_entries(path.clone(), cancel, gui_sender, receiver, flat_snap).await;
+    consume_entries(path.clone(), cancel, gui_sender, receiver, flat_snap(sort)).await;
 
     // Technically this blocks, but it's more a formality by this point. Still want to wait so we
     // can be sure it has been cleaned up.
@@ -240,7 +252,7 @@ async fn read_dir_sync_thread(
     );
 }
 
-async fn recurse_dir_sync_thread(
+async fn recurse_dir(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
     gui_sender: glib::Sender<GuiAction>,
@@ -263,13 +275,23 @@ async fn recurse_dir_sync_thread(
     );
 }
 
-fn flat_snap(
-    path: &Arc<Path>,
-    cancel: &Arc<AtomicBool>,
-    kind: SnapshotKind,
-    entries: Vec<Entry>,
-) -> GuiAction {
-    GuiAction::Snapshot(DirSnapshot::new(kind, path, cancel, entries))
+trait SnapFn: Fn(&Arc<Path>, &Arc<AtomicBool>, SnapshotKind, Vec<Entry>) -> GuiAction {}
+impl<T: Fn(&Arc<Path>, &Arc<AtomicBool>, SnapshotKind, Vec<Entry>) -> GuiAction> SnapFn for T {}
+
+fn flat_snap(sort: SortSettings) -> impl SnapFn {
+    move |path: &Arc<Path>,
+          cancel: &Arc<AtomicBool>,
+          kind: SnapshotKind,
+          mut entries: Vec<Entry>| {
+        if kind.initial() {
+            let start = Instant::now();
+            SORT_POOL.install(|| {
+                entries.par_sort_by(|a, b| a.cmp(b, sort));
+            });
+            trace!("Optimistically sorted {} items in {:?}", entries.len(), start.elapsed());
+        }
+        GuiAction::Snapshot(DirSnapshot::new(kind, path, cancel, entries))
+    }
 }
 
 fn search_snap(
@@ -287,7 +309,7 @@ async fn consume_entries(
     cancel: Arc<AtomicBool>,
     gui_sender: glib::Sender<GuiAction>,
     mut receiver: UnboundedReceiver<ReadResult>,
-    snap: impl Fn(&Arc<Path>, &Arc<AtomicBool>, SnapshotKind, Vec<Entry>) -> GuiAction,
+    snap: impl SnapFn,
 ) {
     let start = Instant::now();
     let mut entries = Vec::new();
@@ -368,7 +390,7 @@ async fn read_slow_dir(
     cancel: Arc<AtomicBool>,
     mut receiver: UnboundedReceiver<ReadResult>,
     sender: glib::Sender<GuiAction>,
-    snap: impl Fn(&Arc<Path>, &Arc<AtomicBool>, SnapshotKind, Vec<Entry>) -> GuiAction,
+    snap: impl SnapFn,
 ) {
     #[derive(Eq, PartialEq)]
     enum SlowBatch {
@@ -559,12 +581,17 @@ async fn read_slow_dir(
 
 
 impl Manager {
-    pub(super) fn start_read_dir(&self, path: Arc<Path>, cancel: Arc<AtomicBool>) {
+    pub(super) fn start_read_dir(
+        &self,
+        path: Arc<Path>,
+        sort: SortSettings,
+        cancel: Arc<AtomicBool>,
+    ) {
         trace!("Starting to read flat directory {path:?}");
-        spawn_local(read_dir_sync_thread(path, cancel, self.gui_sender.clone()));
+        spawn_local(read_dir(path, cancel, sort, self.gui_sender.clone()));
     }
 
     pub(super) fn recurse_dir(&self, path: Arc<Path>, cancel: Arc<AtomicBool>) {
-        spawn_local(recurse_dir_sync_thread(path, cancel, self.gui_sender.clone()));
+        spawn_local(recurse_dir(path, cancel, self.gui_sender.clone()));
     }
 }

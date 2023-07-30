@@ -10,7 +10,7 @@ use super::contents::Contents;
 use super::PartiallyAppliedUpdate;
 use crate::com::{
     DirSettings, EntryObject, EntryObjectSnapshot, ManagerAction, SearchSnapshot, SearchUpdate,
-    Update,
+    SortSettings, Update,
 };
 use crate::gui::gui_run;
 
@@ -60,6 +60,11 @@ impl Search {
             }
             State::Loading(..) | State::Done(_) => false,
         }
+    }
+
+    pub fn unload(&mut self, sort: SortSettings) {
+        self.state = State::Unloaded;
+        self.contents.clear(sort);
     }
 
     pub fn query(&self) -> (Rc<RefCell<String>>, Rc<RefCell<String>>) {

@@ -128,6 +128,16 @@ impl TabElement {
             self.remove_css_class("active-tab");
         }
     }
+
+    pub fn spin(&self) {
+        self.imp().spinner.start();
+        self.imp().spinner.set_visible(true);
+    }
+
+    pub fn stop_spin(&self) {
+        self.imp().spinner.stop();
+        self.imp().spinner.set_visible(false);
+    }
 }
 
 mod imp {
@@ -144,7 +154,7 @@ mod imp {
         pub title: TemplateChild<gtk::Label>,
 
         #[template_child]
-        pub spinner: TemplateChild<gtk::Spinner>,
+        pub(super) spinner: TemplateChild<gtk::Spinner>,
 
         pub tab: OnceCell<TabId>,
     }

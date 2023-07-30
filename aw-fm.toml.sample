@@ -17,7 +17,7 @@
 idle_timeout = 600
 
 # Shortcuts
-# All shortcuts must have a key and and action, and optionally one or more modifiers.
+# All shortcuts must have a key and an action, and optionally one or more modifiers.
 # If the action is a recognized internal action, it will be performed, otherwise it will be treated
 # as the name of an executable and it will be run with several environment variables set.
 # See the readme or the example scripts for details on the commands and environment variables.
@@ -63,8 +63,7 @@ shortcuts = [
   {key = "1", modifiers = "Control", action = "Mode icons"},
   {key = "2", modifiers = "Control", action = "Mode columns"},
 
-  # {key = "F5", action = "Refresh"},
-  # {key = "F5", modifiers="Control", action = "Refresh all"},
+  {key = "F5", action = "Refresh"},
 
   # Relative paths are relative to the working directory when you run aw-fm. Not recommended.
   # Change these to absolute paths if you actually use them.
@@ -129,7 +128,6 @@ file_collisions = "skip"
 # Currently only per-directory sort and display settings.
 # Defaults to $XDG_DATA_HOME/aw-fm/settings.db or $HOME/.local/share/aw-fm/settings.db
 # database = ''
-
 
 # How deeply to recurse for searches.
 #

@@ -103,7 +103,7 @@ impl Contents {
         if self.list.n_items() == 0 {
             // Sorting a vector is faster than inserting then sorting.
             let mut entries = snap.entries;
-            // TODO -- as an optimization sort these by the assumed sort when creating the snapshot?
+            // This is extremely fast if sort settings haven't changed.
             entries.sort_by(|a, b| a.get().cmp(&b.get(), self.sort));
             self.list.extend(entries.into_iter());
         } else {

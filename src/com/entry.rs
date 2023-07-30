@@ -231,11 +231,21 @@ pub enum Thumbnail {
     Failed,
 }
 
+impl Thumbnail {
+    const fn needs_load(&self) -> bool {
+        match self {
+            Self::Nothing | Self::Loaded(_) | Self::Failed | Self::Loading => false,
+            Self::Unloaded => true,
+        }
+    }
+}
+
 
 // All the ugly GTK wrapper code below this
 
 mod internal {
     use std::cell::{Ref, RefCell};
+    use std::sync::Arc;
 
     use gtk::gdk::Texture;
     use gtk::glib;
@@ -248,11 +258,11 @@ mod internal {
     use crate::com::EntryKind;
 
     // (bound, mapped)
-    #[derive(Debug, Default, Clone, Copy)]
+    #[derive(Debug, Default, Clone)]
     struct WidgetCounter(u16, u16);
 
     impl WidgetCounter {
-        const fn priority(self) -> ThumbPriority {
+        const fn priority(&self) -> ThumbPriority {
             match (self.0, self.1) {
                 (0, 0) => ThumbPriority::Low,
                 (_, 0) => ThumbPriority::Medium,
@@ -292,7 +302,19 @@ mod internal {
             let path = &self.get().abs_path;
             // Could check the load factor and shrink the map.
             // dispose can, technically, be called multiple times, so unsafe to assert here.
-            ALL_ENTRY_OBJECTS.with(|m| m.borrow_mut().remove(path));
+            // We also purge contents during refresh.
+            ALL_ENTRY_OBJECTS.with(|m| {
+                // Remove only if the key is the same Arc<path>
+                let mut mb = m.borrow_mut();
+                let Some((k, _)) = mb.get_key_value(path) else {
+                    return;
+                };
+                if Arc::ptr_eq(k, path) {
+                    mb.remove(path);
+                } else {
+                    trace!("Not removing newer EntryObject for {path:?} after purge");
+                }
+            });
         }
     }
 
@@ -325,7 +347,7 @@ mod internal {
             // Every time there is an update, we have an opportunity to try the thumbnail again if
             // it failed.
 
-            let widgets = { self.0.borrow().as_ref().unwrap().widgets };
+            let widgets = { self.0.borrow().as_ref().unwrap().widgets.clone() };
 
             let (thumbnail, new_p) = match entry.kind {
                 EntryKind::File { .. } => (Thumbnail::Unloaded, Some(widgets.priority())),
@@ -335,6 +357,7 @@ mod internal {
 
             // Since this is used as the key in the hash map, if we use the new Arc<Path> we'll
             // double memory usage for no reason.
+            // We also rely on Arc<Path> pointer equality after refreshes.
             {
                 let old = self.0.borrow();
                 let old_arc = old.as_ref().unwrap().entry.abs_path.clone();
@@ -359,7 +382,7 @@ mod internal {
             let mut b = self.0.borrow_mut();
             let inner = &mut b.as_mut().unwrap();
 
-            if !matches!(inner.thumbnail, Thumbnail::Unloaded) {
+            if !inner.thumbnail.needs_load() {
                 return false;
             }
 
@@ -373,7 +396,8 @@ mod internal {
 
         pub(super) fn change_widgets(&self, bound: i16, mapped: i16) -> Option<ThumbPriority> {
             let mut b = self.0.borrow_mut();
-            let w = &mut b.as_mut().unwrap().widgets;
+            let inner = &mut b.as_mut().unwrap();
+            let w = &mut inner.widgets;
             let old_p = w.priority();
 
             // Should never fail, but explicitly check
@@ -381,7 +405,7 @@ mod internal {
             w.1 = w.1.checked_add_signed(mapped).unwrap();
 
             let new_p = w.priority();
-            if new_p != old_p { Some(new_p) } else { None }
+            if inner.thumbnail.needs_load() && new_p != old_p { Some(new_p) } else { None }
         }
 
         // There is a minute risk of a race where we're loading a thumbnail for a file twice at
@@ -439,6 +463,13 @@ glib::wrapper! {
 }
 
 impl EntryObject {
+    // This can ONLY be called after all tabs have been cleared of their content.
+    // If any tabs still have live references to entry objects in this map we can end up with
+    // duplicate enties or stale values.
+    pub unsafe fn purge() {
+        ALL_ENTRY_OBJECTS.with(RefCell::take);
+    }
+
     fn create(entry: Entry) -> Self {
         let obj: Self = Object::new();
         let p = obj.imp().init(entry);
@@ -524,6 +555,8 @@ impl EntryObject {
 
     fn queue_thumb(&self, p: Option<ThumbPriority>) {
         if let Some(p) = p {
+            // Very spammy
+            // trace!("Queuing thumbnail for {:?} {:?}", self.get().abs_path, p);
             queue_thumb(self.downgrade(), p)
         }
     }

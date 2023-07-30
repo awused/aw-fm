@@ -190,7 +190,7 @@ impl Thumbnailer {
             return;
         };
 
-        // Get what data we need and drop down to a weak ref.
+
         let entry = obj.get();
         let path = entry.abs_path.clone();
         let uri = gtk::gio::File::for_path(&entry.abs_path).uri();
@@ -208,8 +208,7 @@ impl Thumbnailer {
                 match Texture::from_file(&gfile) {
                     Ok(tex) => {
                         // This is just too spammy outside of debugging
-                        // trace!("Loaded existing thumbnail for {uri:?} in {:?}",
-                        // start.elapsed());
+                        // trace!("Loaded existing thumbnail for {uri:?}");
                         return Self::finish_thumbnail(factory, tex, path);
                     }
                     Err(e) => {
