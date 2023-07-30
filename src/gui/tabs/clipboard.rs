@@ -1,27 +1,19 @@
 use std::path::Path;
 use std::str::{from_utf8, FromStr};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
-use gtk::gdk::ffi::{
-    gdk_content_deserializer_return_success, gdk_content_deserializer_set_task_data,
-    GdkContentDeserializer,
-};
 use gtk::gdk::Display;
-use gtk::gio::{Cancellable, MemoryOutputStream, OutputStreamSpliceFlags};
-use gtk::glib::error::ErrorDomain;
-use gtk::glib::translate::{IntoGlibPtr, ToGlibPtr};
-use gtk::prelude::{
-    CastNone, DisplayExt, InputStreamExt, ListModelExt, ObjectExt, OutputStreamExt, StaticType,
-    StaticTypeExt,
-};
+use gtk::prelude::{CastNone, DisplayExt, FileExt, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::SelectionModelExt;
-use gtk::{gdk, glib, MultiSelection};
+use gtk::{gdk, gio, glib, MultiSelection};
 use strum_macros::{EnumString, IntoStaticStr};
+use x11_clipboard::Clipboard;
 
 use super::id::TabId;
 use crate::com::EntryObject;
-use crate::gui::gui_run;
 
 const SPECIAL: &str = "x-special/aw-fm-copied-files";
 const SPECIAL_MATE: &str = "x-special/mate-copied-files";
@@ -81,111 +73,117 @@ impl ClipboardProvider {
     }
 }
 
-glib::wrapper! {
-    pub struct SpecialClipboardReader(ObjectSubclass<imp::ClipboardReader>);
-}
 
-impl Default for SpecialClipboardReader {
-    fn default() -> Self {
-        glib::Object::new()
-    }
-}
-
-pub fn register_types() {
-    SpecialClipboardReader::ensure_type();
-
-    gdk::content_register_deserializer(
-        SPECIAL,
-        SpecialClipboardReader::static_type(),
-        |deserializer, user_data: &mut Option<SpecialClipboardReader>| {
-            println!("{deserializer:?}");
-            let reader = SpecialClipboardReader::default();
-
-            deserializer.set_value(reader.into());
-
-            deserializer.return_success();
-        },
-    );
-
-    gdk::content_register_deserializer(
-        SPECIAL_MATE,
-        SpecialClipboardReader::static_type(),
-        |d, out: &mut Option<SpecialClipboardReader>| {
-            // let text = d.input_stream().close(Cancellable::NONE);
-            // println!("{text}");
-            let outstream = MemoryOutputStream::new_resizable();
-            let stream = outstream.clone();
-            let d = d.clone();
-
-            let reader = SpecialClipboardReader::default();
-            d.set_value(reader.clone().into());
-            let a: *mut GdkContentDeserializer = d.to_glib_none().0;
-
-            unsafe {
-                gdk_content_deserializer_return_success(a);
-            }
-
-
-            outstream.splice_async(
-                &d.input_stream(),
-                OutputStreamSpliceFlags::CLOSE_SOURCE,
-                d.priority(),
-                Cancellable::NONE,
-                move |output| {
-                    stream.close(Cancellable::NONE).unwrap();
-                    // let data = stream.data(key)
-                    // println!("{:?}", d.value());
-                    println!("{:?}", reader.imp().operation.get());
-                    // d.set_value(reader.into());
-                    // let a: *mut GdkContentDeserializer = d.to_glib_none().0;
-                    //
-                    // unsafe {
-                    //     gdk_content_deserializer_return_success(a);
-                    // }
-                    // d.set_value(reader.into());
-                    // println!("{:?}", d.value());
-                    // println!("{}", out.is_some());
-                    // d.set_value(reader.into());
-                    println!("output {output:?}");
-                },
-            );
-        },
-    );
-}
-
+// This is sloppy code just so it can work at all.
 pub fn read_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
     let formats = display.clipboard().formats();
 
-    if formats.contains_type(SpecialClipboardReader::static_type()) {
-        println!("Reading");
-        display.clipboard().read_value_async(
-            SpecialClipboardReader::static_type(),
-            glib::Priority::DEFAULT,
-            Cancellable::NONE,
-            |text| {
-                println!("{text:?}");
-                let text = match text {
-                    Ok(text) => text,
-                    Err(e) => {
-                        let msg = format!("Error reading clipboard: {e}");
-                        error!("{msg}");
-                        return gui_run(|g| g.error(&msg));
-                    }
-                };
+    let mime = if formats.contain_mime_type(SPECIAL) {
+        SPECIAL
+    } else if formats.contain_mime_type(SPECIAL_MATE) {
+        SPECIAL_MATE
+    } else if formats.contain_mime_type(SPECIAL_GNOME) {
+        SPECIAL_GNOME
+    } else {
+        warn!("Paste with no recognized mimetype. Got {:?}", formats.mime_types());
+        return;
+    };
 
-                let Ok(text) = text.get::<SpecialClipboardReader>() else {
-                    return info!("Got paste but clipboard was empty");
-                };
+    let clipboard = Clipboard::new().unwrap();
+    let atom = clipboard.getter.get_atom(mime).unwrap();
+    thread::spawn(move || {
+        let Ok(res) = clipboard.load(
+            clipboard.getter.atoms.clipboard,
+            atom,
+            clipboard.getter.atoms.property,
+            Duration::from_secs(5),
+        ) else {
+            return error!("Failed to load clipboard value");
+        };
 
-                error!(
-                    "TODO remove got clipboard -- {:?}, {:?}",
-                    text.imp().operation.get(),
-                    text.imp().entries.get()
-                );
-            },
-        );
-    }
+        let Ok(text) = from_utf8(&res) else {
+            return error!("Invalid utf-8 in clipboard contents");
+        };
+
+        let mut lines = text.lines();
+        let Some(operation) = lines.next().and_then(|s| Operation::from_str(s).ok()) else {
+            return;
+        };
+
+        // for_uri can panic
+        let files: thread::Result<Option<Vec<_>>> =
+            std::panic::catch_unwind(|| lines.map(|s| gio::File::for_uri(s).path()).collect());
+        let Ok(Some(files)) = files else {
+            return error!("Got URI for file without a local path. Aborting paste.");
+        };
+
+        println!("TODO -- {operation:?} {files:?}");
+        glib::idle_add_once(move || {});
+    });
 }
+
+
+// glib::wrapper! {
+//     pub struct SpecialClipboardReader(ObjectSubclass<imp::ClipboardReader>);
+// }
+//
+// impl Default for SpecialClipboardReader {
+//     fn default() -> Self {
+//         glib::Object::new()
+//     }
+// }
+
+pub const fn register_types() {
+    //     SpecialClipboardReader::ensure_type();
+    //
+    //     gdk::content_register_deserializer(
+    //         SPECIAL,
+    //         SpecialClipboardReader::static_type(),
+    //         |deserializer, user_data: &mut Option<SpecialClipboardReader>| {},
+    //     );
+    //
+    //     gdk::content_register_deserializer(
+    //         SPECIAL_MATE,
+    //         SpecialClipboardReader::static_type(),
+    //         |d, out: &mut Option<SpecialClipboardReader>| {
+    //         },
+    //     );
+}
+
+// pub fn read_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
+//     let formats = display.clipboard().formats();
+//
+//     if formats.contains_type(SpecialClipboardReader::static_type()) {
+//         println!("Reading");
+//         let cancel = Cancellable::new();
+//         display.clipboard().read_value_async(
+//             SpecialClipboardReader::static_type(),
+//             glib::Priority::DEFAULT,
+//             Some(&cancel),
+//             move |text| {
+//                 println!("{text:?}");
+//                 let text = match text {
+//                     Ok(text) => text,
+//                     Err(e) => {
+//                         let msg = format!("Error reading clipboard: {e}");
+//                         error!("{msg}");
+//                         return gui_run(|g| g.error(&msg));
+//                     }
+//                 };
+//
+//                 let Ok(text) = text.get::<SpecialClipboardReader>() else {
+//                     return info!("Got paste but clipboard was empty");
+//                 };
+//
+//                 error!(
+//                     "TODO remove got clipboard -- {:?}, {:?}",
+//                     text.imp().operation.get(),
+//                     text.imp().entries.get()
+//                 );
+//             },
+//         );
+//     }
+// }
 
 mod imp {
     use std::ffi::OsString;
@@ -294,7 +292,6 @@ mod imp {
                     output += &gio::File::for_path(&f.get().abs_path).uri();
                 }
             }
-            output.push('\0'); // Probably unnecessary
             stream
                 .write_bytes_future(&glib::Bytes::from_owned(output.into_bytes()), priority)
                 .await
@@ -316,7 +313,6 @@ mod imp {
                     output.push(f.get().abs_path.as_os_str());
                 }
             }
-            output.push("\0"); // Probably unnecessary
             stream
                 .write_bytes_future(&glib::Bytes::from_owned(output.into_vec()), priority)
                 .await
@@ -339,7 +335,6 @@ mod imp {
                     output.extend(f.get().abs_path.to_string_lossy().escape_default());
                 }
             }
-            output.push('\0'); // Probably unnecessary
             stream
                 .write_bytes_future(&glib::Bytes::from_owned(output.into_bytes()), priority)
                 .await
@@ -347,19 +342,18 @@ mod imp {
         }
     }
 
-
-    #[derive(Default)]
-    pub struct ClipboardReader {
-        pub operation: OnceCell<Operation>,
-        pub entries: OnceCell<String>,
-    }
-
-    #[glib::object_subclass]
-    impl ObjectSubclass for ClipboardReader {
-        type Type = super::SpecialClipboardReader;
-
-        const NAME: &'static str = "ClipboardReader";
-    }
-
-    impl ObjectImpl for ClipboardReader {}
+    // #[derive(Default)]
+    // pub struct ClipboardReader {
+    //     pub operation: OnceCell<Operation>,
+    //     pub entries: OnceCell<String>,
+    // }
+    //
+    // #[glib::object_subclass]
+    // impl ObjectSubclass for ClipboardReader {
+    //     type Type = super::SpecialClipboardReader;
+    //
+    //     const NAME: &'static str = "ClipboardReader";
+    // }
+    //
+    // impl ObjectImpl for ClipboardReader {}
 }

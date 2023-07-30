@@ -236,7 +236,8 @@ impl Gui {
 
             "Copy" => return tabs.active_copy(),
             "Cut" => return tabs.active_cut(),
-            // "Paste" => return tabs.active_paste(),
+            "Paste" => return tabs.active_paste(),
+
             "Home" => {
                 return tabs.active_navigate(&home_dir().unwrap_or_default());
             }

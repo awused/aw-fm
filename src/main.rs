@@ -4,7 +4,7 @@
 extern crate log;
 
 // The tikv fork may not be easily buildable for Windows
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), not(debug_assertions)))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 

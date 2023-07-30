@@ -41,11 +41,12 @@ strum_macros = "0.25"
 tokio = { version = "1.29.1", features = ["fs", "net", "macros", "process", "rt", "sync", "time"] }
 toml = "0.7.6"
 
+# Should be temporary until GDK clipboard code works
+x11-clipboard = "0.8.1"
 
 # This is auto-generated, but pretty much left unmaintained and abandoned.
 # Local patched version to generate what I need and expose the "v42" feature.
 gnome-desktop = { git = "https://github.com/awused/gnome-desktop-rs", features = [ "v42" ] }
-# gnome-desktop = { path = "../../third_party/gnome-desktop-rs/gnome-desktop", features = [ "v42" ] }
 
 
 [target.'cfg(unix)'.dependencies]
