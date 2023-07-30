@@ -350,6 +350,10 @@ impl Tab {
 
     // This is the easiest implementation, but it is clumsy
     pub fn unload_unchecked(&mut self) {
+        if let Some(pane) = self.pane.get() {
+            pane.move_active_focus_to_text();
+        }
+
         if let Some(search) = &mut self.search {
             self.pane.snapshot_pane(search.contents());
             search.unload(self.settings.sort);

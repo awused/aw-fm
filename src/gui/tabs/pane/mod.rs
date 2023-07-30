@@ -427,6 +427,12 @@ impl Pane {
         self.element.imp().stack.set_visible_child_name("count");
     }
 
+    pub(super) fn move_active_focus_to_text(&self) {
+        if self.element.imp().active.get() {
+            self.element.imp().text_entry.grab_focus_without_selecting();
+        }
+    }
+
     pub(super) fn update_search(&self, query: &str) {
         self.element.imp().text_entry.set_text(query);
     }
