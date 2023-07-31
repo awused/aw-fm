@@ -101,7 +101,6 @@ impl Contents {
 
         let start = Instant::now();
         if self.list.n_items() == 0 {
-            // Sorting a vector is faster than inserting then sorting.
             let mut entries = snap.entries;
             // This is extremely fast if sort settings haven't changed.
             entries.sort_by(|a, b| a.get().cmp(&b.get(), self.sort));

@@ -115,7 +115,7 @@ impl Operation {
             return None;
         }
 
-        files.sort_unstable_by(|a, b| b.cmp(a));
+        // files.sort_unstable_by(|a, b| b.cmp(a));
 
         match &kind {
             Kind::Move(p) | Kind::Copy(p) => {
