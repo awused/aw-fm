@@ -1,16 +1,13 @@
 use std::cell::{OnceCell, RefCell};
-use std::cmp::Reverse;
 use std::fs::ReadDir;
-use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use gtk::gio::{self, Cancellable, FileCopyFlags};
-use gtk::glib::{self, ControlFlow, SourceId};
-use gtk::prelude::{CancellableExt, FileExt};
+use gtk::glib::{self, SourceId};
+use gtk::prelude::CancellableExt;
 
-use super::gui_run;
 use super::tabs::id::TabId;
 use crate::config::{DirectoryCollision, FileCollision, CONFIG};
 

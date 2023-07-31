@@ -18,8 +18,8 @@ use super::pane::Pane;
 use super::search::Search;
 use super::{HistoryEntry, NavTarget, PaneState, ScrollPosition};
 use crate::com::{
-    DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, SearchSnapshot,
-    SearchUpdate, SnapshotId, SortSettings,
+    DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, GetEntry,
+    SearchSnapshot, SearchUpdate, SnapshotId, SortSettings,
 };
 use crate::gui::tabs::PartiallyAppliedUpdate;
 use crate::gui::{applications, gui_run, Update};
@@ -1017,7 +1017,7 @@ impl Tab {
                 PartiallyAppliedUpdate::Insert(obj)
             }
             (Update::Entry(entry), None, None) => {
-                let new = EntryObject::new(entry);
+                let new = EntryObject::new(entry.get_entry());
 
                 self.contents.insert(&new);
                 trace!("Inserted new {:?} from event", new.get().abs_path);

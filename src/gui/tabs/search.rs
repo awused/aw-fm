@@ -9,8 +9,8 @@ use gtk::CustomFilter;
 use super::contents::Contents;
 use super::PartiallyAppliedUpdate;
 use crate::com::{
-    DirSettings, EntryObject, EntryObjectSnapshot, ManagerAction, SearchSnapshot, SearchUpdate,
-    SortSettings, Update,
+    DirSettings, EntryObject, EntryObjectSnapshot, GetEntry, ManagerAction, SearchSnapshot,
+    SearchUpdate, SortSettings, Update,
 };
 use crate::gui::gui_run;
 
@@ -185,7 +185,7 @@ impl Search {
             (_, Some(_), None) => unreachable!(),
             (Update::Entry(entry), None, None) => {
                 trace!("Inserting new item from update in search tab.");
-                let new = EntryObject::new(entry);
+                let new = EntryObject::new(entry.get_entry());
                 self.contents.insert(&new);
             }
             (Update::Entry(_), None, Some(eo)) => {

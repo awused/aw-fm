@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
 use std::collections::hash_map;
@@ -95,6 +96,25 @@ pub struct Entry {
     // pub info: String,
     pub icon: Variant,
 }
+
+pub trait GetEntry {
+    fn get_entry(self) -> Entry;
+}
+
+impl GetEntry for Entry {
+    fn get_entry(self) -> Self {
+        self
+    }
+}
+
+impl GetEntry for Arc<Entry> {
+    // In the vast majority of cases we'll only have one instance.
+    // This is to avoid needing to read the file twice for overlapping updates.
+    fn get_entry(self) -> Entry {
+        Arc::try_unwrap(self).unwrap_or_else(|e| e.clone_inner())
+    }
+}
+
 
 // Put methods in here only when they are used alongside multiple other fields on the Entry object.
 // Otherwise put them on Wrapper or EntryObject
@@ -213,6 +233,22 @@ impl Entry {
             EntryKind::File { size } => size,
             EntryKind::Directory { contents } => contents,
             EntryKind::Uninitialized => unreachable!(),
+        }
+    }
+
+    fn clone_inner(&self) -> Self {
+        warn!(
+            "Cloning an Entry, this should only ever happen if there are search tabs overlapping \
+             with flat tabs."
+        );
+        Self {
+            kind: self.kind,
+            abs_path: self.abs_path.clone(),
+            name: self.name.clone(),
+            mtime: self.mtime,
+            mime: self.mime.clone(),
+            symlink: self.symlink,
+            icon: self.icon.clone(),
         }
     }
 }
@@ -525,10 +561,10 @@ impl EntryObject {
     }
 
     // Returns the old value only if an update happened.
-    pub fn update(&self, entry: Entry) -> Option<Entry> {
+    pub fn update(&self, entry: impl GetEntry + Borrow<Entry>) -> Option<Entry> {
         let old = self.imp().get();
-        assert!(old.abs_path == entry.abs_path);
-        if *old == entry {
+        assert!(old.abs_path == entry.borrow().abs_path);
+        if *old == *entry.borrow() {
             // No change we care about (spammy)
             // trace!("Update for {:?} was unimportant", entry.abs_path);
             return None;
@@ -536,9 +572,9 @@ impl EntryObject {
 
         drop(old);
 
-        trace!("Update for {:?}", entry.abs_path);
+        trace!("Update for {:?}", entry.borrow().abs_path);
 
-        let (old, p) = self.imp().update_inner(entry);
+        let (old, p) = self.imp().update_inner(entry.get_entry());
         self.queue_thumb(p);
 
 

@@ -86,37 +86,31 @@ impl Manager {
     }
 
     fn send_update(sender: &glib::Sender<GuiAction>, path: Arc<Path>, sources: Sources) {
-        for search_id in sources.searches {
-            match Entry::new(path.clone()) {
-                Ok(entry) => {
-                    let update = Update::Entry(entry);
-                    let s_up = SearchUpdate { search_id, update };
-
-                    sender.send(GuiAction::SearchUpdate(s_up)).unwrap_or_else(|e| {
-                        error!("{e}");
-                        closing::close()
-                    })
-                }
-                Err((path, e)) => {
-                    error!("Error handling search file update for {path:?}: {e}");
-                    // For now, don't convey this error.
-                }
+        let entry = match Entry::new(path) {
+            Ok(entry) => entry,
+            Err((path, e)) => {
+                // For now, don't convey this error.
+                return error!("Error handling search file update for {path:?}: {e}");
             }
+        };
+
+        let entry = Arc::new(entry);
+
+        for search_id in sources.searches {
+            let update = Update::Entry(entry.clone());
+            let s_up = SearchUpdate { search_id, update };
+
+            sender.send(GuiAction::SearchUpdate(s_up)).unwrap_or_else(|e| {
+                error!("{e}");
+                closing::close()
+            })
         }
 
         if sources.flat {
-            match Entry::new(path) {
-                Ok(entry) => {
-                    sender.send(GuiAction::Update(Update::Entry(entry))).unwrap_or_else(|e| {
-                        error!("{e}");
-                        closing::close()
-                    })
-                }
-                Err((path, e)) => {
-                    error!("Error handling file update {path:?}, assuming it was removed: {e}");
-                    // For now, don't convey this error.
-                }
-            }
+            sender.send(GuiAction::Update(Update::Entry(entry))).unwrap_or_else(|e| {
+                error!("{e}");
+                closing::close()
+            })
         }
     }
 

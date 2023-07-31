@@ -27,7 +27,7 @@ pub enum Update {
     // We don't really care about a creation vs update here, treat them all as a potential update.
     // Races with reading the initial directory can cause us get a creation event for an entry we
     // already have.
-    Entry(Entry),
+    Entry(Arc<Entry>),
     Removed(Arc<Path>),
 }
 
