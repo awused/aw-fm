@@ -14,6 +14,7 @@ use x11_clipboard::Clipboard;
 
 use super::id::TabId;
 use crate::com::EntryObject;
+use crate::gui::{file_operations, gui_run};
 
 const SPECIAL: &str = "x-special/aw-fm-copied-files";
 const SPECIAL_MATE: &str = "x-special/mate-copied-files";
@@ -118,7 +119,14 @@ pub fn read_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
         };
 
         println!("TODO -- {operation:?} {files:?}");
-        glib::idle_add_once(move || {});
+        glib::idle_add_once(move || {
+            let kind = match operation {
+                Operation::Copy => file_operations::Kind::Copy(path),
+                Operation::Cut => file_operations::Kind::Move(path),
+            };
+
+            gui_run(|g| g.start_operation(tab, kind, files));
+        });
     });
 }
 

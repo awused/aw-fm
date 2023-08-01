@@ -10,6 +10,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib};
 use tokio::sync::mpsc::UnboundedSender;
 
+use self::file_operations::Operation;
 use self::main_window::MainWindow;
 use self::tabs::list::TabsList;
 use self::thumbnailer::Thumbnailer;
@@ -33,6 +34,16 @@ thread_local!(static GUI: OnceCell<Rc<Gui>> = OnceCell::default());
 
 fn gui_run<R, F: FnOnce(&Rc<Gui>) -> R>(f: F) -> R {
     GUI.with(|g| f(g.get().unwrap()))
+}
+
+fn show_warning(msg: &str) {
+    warn!("{msg}");
+    gui_run(|g| g.warning(msg))
+}
+
+fn show_error(msg: &str) {
+    error!("{msg}");
+    gui_run(|g| g.error(msg))
 }
 
 fn tabs_run<R, F: FnOnce(&mut TabsList) -> R>(f: F) -> R {
@@ -78,6 +89,8 @@ struct Gui {
 
     open_dialogs: RefCell<input::OpenDialogs>,
     shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, String>>,
+
+    ongoing_operations: RefCell<Vec<Rc<Operation>>>,
 
     manager_sender: UnboundedSender<ManagerAction>,
 
@@ -159,12 +172,14 @@ impl Gui {
             database: DBCon::connect(),
             thumbnailer: Thumbnailer::new(),
 
-            warning_timeout: DebugIgnore::default(),
-
             open_dialogs: RefCell::default(),
             shortcuts: Self::parse_shortcuts(),
 
+            ongoing_operations: RefCell::default(),
+
             manager_sender,
+
+            warning_timeout: DebugIgnore::default(),
         });
 
         let g = rc.clone();

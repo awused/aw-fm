@@ -8,9 +8,9 @@ use gtk::traits::SelectionModelExt;
 use gtk::{glib, MultiSelection};
 
 use super::tabs::id::TabId;
-use super::tabs_run;
+use super::{show_error, show_warning, tabs_run};
 use crate::com::EntryObject;
-use crate::gui::gui_run;
+
 
 static DIR_OPEN_LIMIT: usize = 10;
 
@@ -45,9 +45,7 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
 
         let Some(app) = cached_lookup(&entry.mime) else {
             if !sent_error {
-                gui_run(|g| {
-                    g.warning(&format!("Couldn't find application for mimetype: {}", entry.mime))
-                });
+                show_warning(&format!("Couldn't find application for mimetype: {}", entry.mime));
                 sent_error = true;
             }
             continue;
@@ -67,8 +65,7 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
 
     for (app, files) in apps {
         if let Err(e) = app.launch(&files, Some(&context)) {
-            error!("Application launch error: {app:?} {e:?}");
-            gui_run(|g| g.error(&format!("Failed to launch application {:?} {e}", app.name())))
+            show_error(&format!("Application launch error: {app:?} {e:?}"));
         }
     }
 }
@@ -96,22 +93,16 @@ pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
         }
 
         if !files.is_empty() && !directories.is_empty() {
-            error!("{BOTH_ERROR}");
-            gui_run(|g| g.warning(BOTH_ERROR));
-            return;
+            return show_warning(BOTH_ERROR);
         }
     }
 
     if !files.is_empty() {
-        partition_and_launch(display, &files);
-        return;
+        return partition_and_launch(display, &files);
     }
 
     if directories.len() > DIR_OPEN_LIMIT {
-        gui_run(|g| {
-            g.warning(&format!("Can't load more than {DIR_OPEN_LIMIT} directories at once"))
-        });
-        return;
+        return show_warning(&format!("Can't load more than {DIR_OPEN_LIMIT} directories at once"));
     }
 
     // Can be called while the TabsList lock is held.

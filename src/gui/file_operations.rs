@@ -1,3 +1,4 @@
+use std::borrow::BorrowMut;
 use std::cell::{OnceCell, RefCell};
 use std::fs::ReadDir;
 use std::path::{Path, PathBuf};
@@ -6,26 +7,27 @@ use std::sync::Arc;
 
 use gtk::gio::{self, Cancellable, FileCopyFlags};
 use gtk::glib::{self, SourceId};
-use gtk::prelude::CancellableExt;
+use gtk::prelude::{CancellableExt, FileExt, FileExtManual};
 
 use super::tabs::id::TabId;
+use super::{gui_run, Gui};
 use crate::config::{DirectoryCollision, FileCollision, CONFIG};
+use crate::gui::{show_error, show_warning};
 
-// Only needs to be stored to allow for undo operations later.
-// #[derive(Debug, Clone, Copy)]
-// enum Outcome {
-//     Move,
-//     Copy,
-//     Trash,
-//     Delete,
-//     Skip,
-// }
+#[derive(Debug)]
+enum Undoable {
+    Move { source: PathBuf, dest: PathBuf },
+    Copy(PathBuf),
+    Trash { source: PathBuf, dest: PathBuf },
+    RemoveSourceDir(PathBuf),
+    CreateDestDir(PathBuf),
+}
 
 #[derive(Debug)]
 pub enum Kind {
     Move(Arc<Path>),
     Copy(Arc<Path>),
-    Delete(bool),
+    Delete { trash: bool },
 }
 
 impl Kind {
@@ -33,7 +35,7 @@ impl Kind {
         match self {
             Self::Move(_) => "move",
             Self::Copy(_) => "copy",
-            Self::Delete(_) => "delete",
+            Self::Delete { .. } => "delete",
         }
     }
 }
@@ -45,12 +47,12 @@ impl Kind {
 // Push the directory onto the stack.
 // Enter a directory-> process all its files -> exit a directory.
 // We DFS and when we finish with a directory we process that directory.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Directory {
     rel_path: PathBuf,
     dest_path: PathBuf,
     // We'll open at most one directory at a time for each level of depth.
-    iter: OnceCell<ReadDir>,
+    iter: ReadDir,
 }
 
 #[derive(Debug)]
@@ -59,6 +61,9 @@ pub struct Progress {
     // finished: usize,
     dirs: Vec<Directory>,
     files: Vec<PathBuf>,
+
+    // undo_log: Vec<Undoable>,
+
     // For Ask
     pending_pair: Option<(PathBuf, PathBuf)>,
 
@@ -69,8 +74,14 @@ pub struct Progress {
     update_timeout: Option<SourceId>,
 }
 
+#[derive(Debug)]
+enum Next {
+    FinishedDir(PathBuf),
+    Files(PathBuf, PathBuf),
+}
+
 impl Progress {
-    fn next_file_pair(&mut self, dest_dir: &Path) -> Option<(PathBuf, PathBuf)> {
+    fn next_pair(&mut self, dest_dir: &Path) -> Option<Next> {
         if let Some(dir) = self.dirs.last() {
             todo!();
         }
@@ -85,13 +96,19 @@ impl Progress {
         let name = src.file_name().unwrap();
         let dest = dest_dir.to_path_buf().join(name);
 
-        Some((src, dest))
+        Some(Next::Files(src, dest))
     }
 }
 
 impl Drop for Progress {
     fn drop(&mut self) {
-        self.update_timeout.take().unwrap().remove();
+        // if let Some(s) = self.process_callback.take() {
+        //     s.remove();
+        // }
+
+        if let Some(s) = self.update_timeout.take() {
+            s.remove();
+        }
     }
 }
 
@@ -106,35 +123,34 @@ pub struct Operation {
 }
 
 impl Operation {
-    pub fn new(tab: TabId, kind: Kind, mut files: Vec<PathBuf>) -> Option<Rc<Self>> {
+    fn new(tab: TabId, kind: Kind, files: Vec<PathBuf>) -> Option<Rc<Self>> {
         if files.is_empty() {
             warn!("Got empty file operation {}, ignoring.", kind.str());
             return None;
         }
 
-        // files.sort_unstable_by(|a, b| b.cmp(a));
-
+        // Abort if any of them are strictly invalid.
+        // Moves into the same dir will be skipped later.
         match &kind {
             Kind::Move(p) | Kind::Copy(p) => {
-                if p.starts_with(&files[0]) {
-                    warn!("Cannot {} ancestor {:?} into {p:?}, ignoring.", kind.str(), files[0]);
+                if let Some(invalid) = files.iter().find(|f| p.starts_with(f)) {
+                    show_warning(&format!("Invalid {} of {invalid:?} into {p:?}", kind.str()));
                     return None;
                 }
             }
-            Kind::Delete(_) => todo!(),
+            Kind::Delete { .. } => todo!(),
         }
 
         // TODO -- when updating progress, do not allow for ref cycles
         let rc = Rc::new_cyclic(|weak: &Weak<Self>| {
-            // let w = weak.clone();
-
             // Start with no timeout.
             let w = weak.clone();
             let update_timeout = glib::idle_add_local_once(move || {
-                let Some(_op) = w.upgrade() else {
+                let Some(op) = w.upgrade() else {
                     return;
                 };
 
+                op.progress.borrow_mut().update_timeout.take();
                 error!("TODO -- update progress bar");
             });
 
@@ -145,8 +161,8 @@ impl Operation {
                 pending_pair: None,
                 directory_collisions: CONFIG.directory_collisions,
                 file_collisions: CONFIG.file_collisions,
-                update_timeout: Some(update_timeout),
                 // process_callback: Some(process_callback),
+                update_timeout: Some(update_timeout),
             };
 
             Self {
@@ -157,77 +173,210 @@ impl Operation {
             }
         });
 
+
+        let o = rc.clone();
+        glib::idle_add_local_once(move || o.process_one());
+
         Some(rc)
     }
 
-    fn process_one(weak: &Weak<Self>) {
-        let Some(op) = weak.upgrade() else {
-            return;
-        };
+    fn process_one(self: Rc<Self>) {
+        if self.cancel.is_cancelled() {
+            info!("Cancelled operation {:?}", self.kind);
 
-        if op.cancel.is_cancelled() {
-            // gui_run(|g| g.finish_operation(op));
-            return;
+            return gui_run(|g| g.finish_operation(self));
         }
 
-        let done = match &op.kind {
-            Kind::Move(p) => op.process_next_move(p),
-            Kind::Copy(_) => todo!(),
-            Kind::Delete(_) => todo!(),
+        let done = match &self.kind {
+            Kind::Move(p) => self.process_next_move(p),
+            Kind::Copy(p) => self.process_next_copy(p),
+            Kind::Delete { .. } => todo!(),
         };
 
         if done {
-            op.cancel.cancel();
-            // gui_run(|g| g.finish_operation(op));
-            return;
+            return gui_run(|g| g.finish_operation(self));
         }
 
-        let weak = weak.clone();
-        glib::idle_add_local_once(move || {
-            error!("TODO -- remove logging callback, it's wrong");
-            Self::process_one(&weak);
-        });
-        // op.process_next();
-        // op.process()
-        // ControlFlow::Continue
+        //     glib::idle_add_local_once(move || {
+        //         self.process_one();
+        //     });
     }
 
-    // Returns true when all processing is done.
     fn process_next_move(self: &Rc<Self>, dest: &Path) -> bool {
         let mut progress = self.progress.borrow_mut();
 
-        loop {
-            let Some((src, dst)) = progress.next_file_pair(dest) else {
-                return true;
+        let (src, dst) = loop {
+            let (src, dst) = match progress.next_pair(dest) {
+                Some(Next::Files(src, dst)) => (src, dst),
+                Some(Next::FinishedDir(_dir)) => todo!(),
+                None => return true,
             };
-            // if let Some(dir) = &progress.stack.last() {
-            //     todo!()
-            // }
+
+            if src == dst {
+                info!("Skipping no-op move for {src:?}");
+                continue;
+            }
 
             if !src.exists() {
                 error!("Could not {} {:?} as it no longer exists", self.kind.str(), src);
                 continue;
-                // } else if path.is_dir() && !path.is_symlink() {
-                // todo!()
+            } else if src.is_dir() && !src.is_symlink() {
+                todo!("move directory");
             }
 
-            if dst.exists() {
-                if !dst.is_file() {
-                    todo!("Handle collision");
+            break (src, dst);
+        };
+
+        let source = gio::File::for_path(&src);
+        let dest = gio::File::for_path(&dst);
+
+        let mut flags = FileCopyFlags::NOFOLLOW_SYMLINKS | FileCopyFlags::ALL_METADATA;
+
+        if dst.exists() {
+            if !dst.is_file() {
+                // Probably just warn and fail
+                todo!("Handle file onto non-file collision");
+            }
+
+            match progress.file_collisions {
+                FileCollision::_Ask => todo!(),
+                FileCollision::_Overwrite => {
+                    trace!("Overwriting target file {dst:?}");
+                    flags |= FileCopyFlags::OVERWRITE;
                 }
-                todo!("Handle collision");
+                FileCollision::Skip => {
+                    info!("Skipping moving {src:?} since {dst:?} exists");
+                    let s = self.clone();
+                    // We did enough IO to justify a new task
+                    glib::idle_add_local_once(move || s.process_one());
+                    return false;
+                }
             }
-
-            let file = gio::File::for_path(&src);
-
-            let mut flags = FileCopyFlags::NOFOLLOW_SYMLINKS | FileCopyFlags::ALL_METADATA;
-
-            error!("Would move from {:?} to {:?}", src, dst);
-            // For Ask
-            // progress.pending_pair = Some((src, dst));
-            break;
         }
 
+        error!("Would move from {:?} to {:?}", src, dst);
+        return false;
+        let s = self.clone();
+        source.move_async(
+            &dest,
+            flags,
+            glib::Priority::LOW,
+            Some(&self.cancel),
+            None,
+            move |result| {
+                if let Err(e) = result {
+                    if !s.cancel.is_cancelled() {
+                        show_error(&format!(
+                            "Failed to move file {src:?} to {dst:?}, aborting operation: {e}"
+                        ));
+
+                        s.cancel.cancel();
+                    }
+                } else {
+                    trace!("Finished moving {src:?} to {dst:?}");
+                }
+
+                s.process_one()
+            },
+        );
+
         false
+    }
+
+    fn process_next_copy(self: &Rc<Self>, dest: &Path) -> bool {
+        let mut progress = self.progress.borrow_mut();
+
+        let (src, dst) = loop {
+            let (src, dst) = match progress.next_pair(dest) {
+                Some(Next::Files(src, dst)) => (src, dst),
+                Some(Next::FinishedDir(_dir)) => todo!(),
+                None => return true,
+            };
+
+            if src == dst {
+                info!("Finding new name for copy onto self for {src:?}");
+                todo!()
+            }
+
+            if !src.exists() {
+                error!("Could not copy {:?} as it no longer exists", src);
+                continue;
+            } else if src.is_dir() && !src.is_symlink() {
+                todo!("copy directory");
+            }
+
+            break (src, dst);
+        };
+
+        let source = gio::File::for_path(&src);
+        let dest = gio::File::for_path(&dst);
+
+        let mut flags = FileCopyFlags::NOFOLLOW_SYMLINKS;
+
+        if dst.exists() {
+            if !dst.is_file() {
+                // Probably just warn and fail
+                todo!("Handle file onto non-file collision");
+            }
+
+            match progress.file_collisions {
+                FileCollision::_Ask => todo!(),
+                FileCollision::_Overwrite => {
+                    trace!("Overwriting target file {dst:?}");
+                    flags |= FileCopyFlags::OVERWRITE;
+                }
+                FileCollision::Skip => {
+                    info!("Skipping copying {src:?} since {dst:?} exists");
+                    let s = self.clone();
+                    // We did enough IO to justify a new task
+                    glib::idle_add_local_once(move || s.process_one());
+                    return false;
+                }
+            }
+        }
+
+        error!("Would copy from {:?} to {:?}", src, dst);
+        return false;
+        let s = self.clone();
+        source.copy_async(
+            &dest,
+            flags,
+            glib::Priority::LOW,
+            Some(&self.cancel),
+            None,
+            move |result| {
+                if let Err(e) = result {
+                    if !s.cancel.is_cancelled() {
+                        show_error(&format!(
+                            "Failed to copy file {src:?} to {dst:?}, aborting operation: {e}"
+                        ));
+                        s.cancel.cancel();
+                    }
+                } else {
+                    trace!("Finished copying {src:?} to {dst:?}");
+                }
+
+                s.process_one();
+            },
+        );
+
+        false
+    }
+}
+
+impl Gui {
+    fn finish_operation(self: &Rc<Self>, finished: Rc<Operation>) {
+        let mut ops = self.ongoing_operations.borrow_mut();
+        if let Some(index) = ops.iter().position(|o| Rc::ptr_eq(o, &finished)) {
+            ops.swap_remove(index);
+        }
+    }
+
+    pub(super) fn start_operation(self: &Rc<Self>, tab: TabId, kind: Kind, files: Vec<PathBuf>) {
+        let Some(op) = Operation::new(tab, kind, files) else {
+            return error!("Failed to start operation");
+        };
+
+        self.ongoing_operations.borrow_mut().push(op);
     }
 }

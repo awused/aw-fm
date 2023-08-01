@@ -65,6 +65,9 @@ shortcuts = [
 
   {key = "F5", action = "Refresh"},
 
+  {key = "Delete", action = "Trash"},
+  {key = "Delete", modifiers = "Shift", action = "Delete"},
+
   # Relative paths are relative to the working directory when you run aw-fm. Not recommended.
   # Change these to absolute paths if you actually use them.
   # {key= "F6", action = "Execute examples/dump-env.sh"},
@@ -97,12 +100,6 @@ bookmarks = [
 context_menu = [
 ]
 
-# Whether to entirely skip the trash or not when deleting files.
-#
-# aw-fm doesn't really deal with trash and can't empty it for you.
-# UNIMPLEMENTED
-skip_trash = false
-
 # How to handle directory collisions during file operations.
 #
 # Allowed values are ask (UNIMPLEMENTED), merge, and skip (UNIMPLEMENTED).
@@ -119,6 +116,13 @@ directory_collisions = "merge"
 #
 # ask will be the default once it is implemented.
 file_collisions = "skip"
+
+# Custom actions directory.
+# All executable contents with proper headers (see examples/sample-action.sh) are added as context
+# menu entries.
+#
+# Defaults to ~/.config/aw-fm/actions/, or ${XDG_CONFIG_HOME}/aw-fm/actions/
+actions_directory = ""
 
 # ------------------------------------------------------------------------------------------------
 # More advanced configuration options below. They probably do not need to be changed.

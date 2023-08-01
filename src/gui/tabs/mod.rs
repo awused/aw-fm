@@ -6,9 +6,9 @@ use path_clean::PathClean;
 
 use self::contents::Contents;
 use self::list::TabsList;
-use super::gui_run;
 use crate::com::{Entry, EntryObject};
 use crate::config::OPTIONS;
+use crate::gui::show_warning;
 
 mod clipboard;
 mod contents;
@@ -93,13 +93,13 @@ impl NavTarget {
         debug_assert!(*target == *target.clean());
 
         if !target.exists() {
-            gui_run(|g| g.warning(&format!("Could not locate {target:?}")));
+            show_warning(&format!("Could not locate {target:?}"));
             None
         } else if target.is_dir() {
             Some(Self { dir: target, scroll: None })
         } else if let Some(parent) = target.parent() {
             if !parent.is_dir() {
-                gui_run(|g| g.warning(&format!("Could not open {target:?}")));
+                show_warning(&format!("Could not open {target:?}"));
                 return None;
             }
 
@@ -108,7 +108,7 @@ impl NavTarget {
 
             Some(Self { dir, scroll })
         } else {
-            gui_run(|g| g.warning(&format!("Could not locate {target:?}")));
+            show_warning(&format!("Could not locate {target:?}"));
             None
         }
     }
@@ -118,11 +118,11 @@ impl NavTarget {
         let target = Self::cleaned_abs(p, list)?;
 
         if !target.exists() {
-            gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
+            show_warning(&format!("Could not locate {p:?}"));
             None
         } else if let Some(parent) = target.parent() {
             if !parent.is_dir() {
-                gui_run(|g| g.warning(&format!("Could not open {p:?}")));
+                show_warning(&format!("Could not open {p:?}"));
                 return None;
             }
 
@@ -131,7 +131,7 @@ impl NavTarget {
 
             Some(Self { dir, scroll })
         } else {
-            gui_run(|g| g.warning(&format!("Could not locate {p:?}")));
+            show_warning(&format!("Could not locate {p:?}"));
             None
         }
     }
@@ -163,8 +163,7 @@ impl NavTarget {
             cur.push(p);
             cur.clean()
         } else {
-            error!("Could not make {p:?} absolute");
-            gui_run(|g| g.warning("Could not open {p:?}"));
+            show_warning(&format!("Could not make {p:?} absolute"));
             return None;
         })
     }

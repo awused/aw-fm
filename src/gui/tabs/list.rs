@@ -19,7 +19,7 @@ use crate::com::{
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::{clipboard, NavTarget};
-use crate::gui::{gui_run, tabs_run};
+use crate::gui::{gui_run, show_error, show_warning, tabs_run};
 
 // For event handlers which cannot be run with the tabs lock being held.
 // Assumes the tab still exists since GTK notifies are run synchronously.
@@ -195,12 +195,9 @@ impl TabsList {
                 i += j;
                 let (left, tab, right) = self.split_around_mut(i);
                 if !tab.handle_directory_deleted(left, right) {
-                    error!("Loading {path:?} and all parent directories failed.");
-                    gui_run(|g| {
-                        g.error(&format!(
-                            "Unexpected failure loading {path:?} and all parent directories"
-                        ))
-                    });
+                    show_error(&format!(
+                        "Unexpected failure loading {path:?} and all parent directories"
+                    ));
                     let id = tab.id();
                     self.close_tab(id);
                     continue;
@@ -243,12 +240,9 @@ impl TabsList {
             i += j;
             let (left, tab, right) = self.split_around_mut(i);
             if !tab.handle_directory_deleted(left, right) {
-                error!("Loading {path:?} and all parent directories failed.");
-                gui_run(|g| {
-                    g.error(&format!(
-                        "Unexpected failure loading {path:?} and all parent directories"
-                    ))
-                });
+                show_error(&format!(
+                    "Unexpected failure loading {path:?} and all parent directories"
+                ));
                 let id = tab.id();
                 self.close_tab(id);
                 continue;
@@ -416,8 +410,8 @@ impl TabsList {
         }
 
         let Some(paned) = self.tabs[first].split(orient) else {
-            warn!("Called split {orient} but pane was too small to split");
-            gui_run(|g| g.warning("Could not restore session: window was too small"));
+            info!("Called split {orient} but pane was too small to split");
+            show_warning("Could not restore session: window was too small");
             return false;
         };
 
@@ -429,18 +423,14 @@ impl TabsList {
 
     pub fn active_split(&mut self, orient: Orientation) {
         let Some(active) = self.active else {
-            warn!("Called split {orient} with no panes to split, opening new tab instead");
-            gui_run(|g| g.warning("Split called with no panes to split"));
-            self.new_tab(true);
-            return;
+            show_warning("Split called with no panes to split");
+            return self.new_tab(true);
         };
 
         let active_pos = self.position(active).unwrap();
 
         let Some(paned) = self.tabs[active_pos].split(orient) else {
-            warn!("Called split {orient} but pane was too small to split");
-            gui_run(|g| g.warning("Pane is too small to split"));
-            return;
+            return show_warning("Pane is too small to split");
         };
 
         let (new_id, new_index) = self.clone_active().unwrap();
@@ -620,8 +610,7 @@ impl TabsList {
     // active.
     pub fn active_close_pane(&mut self) {
         let Some(active) = self.active else {
-            warn!("ClosePane called with no open panes");
-            return;
+            return warn!("ClosePane called with no open panes");
         };
 
         let index = self.position(active).unwrap();
@@ -637,8 +626,7 @@ impl TabsList {
 
     pub fn active_close_both(&mut self) {
         let Some(old_active) = self.active else {
-            warn!("CloseActive called with no open panes");
-            return;
+            return warn!("CloseActive called with no open panes");
         };
 
         self.active_close_pane();
@@ -652,8 +640,7 @@ impl TabsList {
 
     pub fn active_display_mode(&mut self, mode: DisplayMode) {
         let Some(active) = self.active else {
-            warn!("Mode called with no open panes");
-            return;
+            return warn!("Mode called with no open panes");
         };
 
         let index = self.position(active).unwrap();
@@ -662,8 +649,7 @@ impl TabsList {
 
     pub fn active_search(&mut self, query: &str) {
         let Some(active) = self.active else {
-            warn!("Search called with no open panes");
-            return;
+            return warn!("Search called with no open panes");
         };
 
         let index = self.position(active).unwrap();

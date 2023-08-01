@@ -22,7 +22,7 @@ use crate::com::{
     SearchSnapshot, SearchUpdate, SnapshotId, SortSettings,
 };
 use crate::gui::tabs::PartiallyAppliedUpdate;
-use crate::gui::{applications, gui_run, Update};
+use crate::gui::{applications, gui_run, show_error, Update};
 
 /* This efficiently supports multiple tabs being open to the same directory with different
  * settings.
@@ -1085,9 +1085,7 @@ impl Tab {
         }
 
         if let Err(e) = self.element.clipboard().set_content(Some(&provider)) {
-            let msg = format!("Failed to set clipboard: {e}");
-            error!("{msg}");
-            gui_run(|g| g.error(&msg))
+            show_error(&format!("Failed to set clipboard: {e}"));
         }
     }
 

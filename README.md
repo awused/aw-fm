@@ -165,7 +165,7 @@ Environment Variable | Explanation
 -------------------- | ----------
 AWFM_CURRENT_TAB_PATH | The currently selected tab, which is also the current pane. May be empty or absent.
 AWFM_CURRENT_TAB_SEARCH | The currently selected tab's search. May be empty or absent.
-AWFM_SELECTION | A newline-separated set of selected files. May be empty.
+AWFM_SELECTION | A newline-separated list of selected files in the current displayed sort order. May be empty.
 AWFM_NEXT_TAB_PATH | The next(lower) tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be the first tab. May be empty.
 AWFM_NEXT_TAB_SEARCH | See above.
 AWFM_PREV_TAB_PATH | The previous(higher) tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be absent. May be empty.

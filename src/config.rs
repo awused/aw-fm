@@ -3,8 +3,10 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use clap::Parser;
+use dirs::config_dir;
 use gtk::gdk;
 use once_cell::sync::Lazy;
 use serde::{de, Deserialize, Deserializer};
@@ -68,9 +70,8 @@ pub enum FileCollision {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
-    #[serde(default, deserialize_with = "empty_path_is_none")]
-    pub temp_directory: Option<PathBuf>,
-
+    // #[serde(default, deserialize_with = "empty_path_is_none")]
+    // pub temp_directory: Option<PathBuf>,
     #[serde(default)]
     pub unique: bool,
 
@@ -79,9 +80,6 @@ pub struct Config {
 
     #[serde(default, deserialize_with = "zero_is_none")]
     pub idle_timeout: Option<NonZeroU64>,
-
-    #[serde(default, deserialize_with = "empty_path_is_none")]
-    pub action_directory: Option<PathBuf>,
 
     #[serde(default, deserialize_with = "empty_path_is_none")]
     pub database: Option<PathBuf>,
@@ -100,6 +98,9 @@ pub struct Config {
     pub directory_collisions: DirectoryCollision,
     #[serde(default)]
     pub file_collisions: FileCollision,
+
+    #[serde(default, deserialize_with = "empty_path_is_none")]
+    pub actions_directory: Option<Arc<PathBuf>>,
 
     #[serde(default)]
     pub max_thumbnailers: u8,
@@ -157,6 +158,15 @@ where
 }
 
 pub static OPTIONS: Lazy<Opt> = Lazy::new(Opt::parse);
+pub static ACTIONS_DIR: Lazy<Arc<PathBuf>> = Lazy::new(|| {
+    CONFIG.actions_directory.clone().unwrap_or_else(|| {
+        config_dir()
+            .unwrap_or_else(|| {
+                panic!("Could not read default config directory, set actions_directory manually.")
+            })
+            .into()
+    })
+});
 
 static DEFAULT_CONFIG: &str = include_str!("../aw-fm.toml.sample");
 
@@ -188,4 +198,5 @@ pub static CONFIG: Lazy<Config> =
 pub fn init() {
     Lazy::force(&OPTIONS);
     Lazy::force(&CONFIG);
+    Lazy::force(&ACTIONS_DIR);
 }
