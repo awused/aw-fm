@@ -19,7 +19,7 @@ use super::search::Search;
 use super::{HistoryEntry, NavTarget, PaneState, ScrollPosition};
 use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, GetEntry,
-    SearchSnapshot, SearchUpdate, SnapshotId, SortSettings,
+    SearchSnapshot, SearchUpdate, SnapshotId, SortDir, SortMode, SortSettings,
 };
 use crate::gui::tabs::PartiallyAppliedUpdate;
 use crate::gui::{applications, gui_run, show_error, Update};
@@ -526,6 +526,8 @@ impl Tab {
     }
 
     fn update_settings(&mut self) {
+        self.contents.sort(self.settings.sort);
+
         if let Some(search) = &mut self.search {
             search.update_settings(self.settings);
 
@@ -538,14 +540,23 @@ impl Tab {
         self.save_settings();
     }
 
-    pub fn update_sort(&mut self, sort: SortSettings) {
-        self.settings.sort = sort;
-        self.contents.sort(sort);
+    pub fn update_display_mode(&mut self, mode: DisplayMode) {
+        self.settings.display_mode = mode;
         self.update_settings();
     }
 
-    pub fn update_display_mode(&mut self, mode: DisplayMode) {
-        self.settings.display_mode = mode;
+    pub fn update_sort(&mut self, sort: SortSettings) {
+        self.settings.sort = sort;
+        self.update_settings();
+    }
+
+    pub fn update_sort_mode(&mut self, mode: SortMode) {
+        self.settings.sort.mode = mode;
+        self.update_settings();
+    }
+
+    pub fn update_sort_dir(&mut self, dir: SortDir) {
+        self.settings.sort.direction = dir;
         self.update_settings();
     }
 
@@ -560,7 +571,7 @@ impl Tab {
     ) -> Option<NavTarget> {
         let was_search = self.search.is_some();
 
-        if **self.dir.path() == *target.dir {
+        if *self.dir.path() == target.dir {
             if was_search {
                 self.close_search();
                 return None;

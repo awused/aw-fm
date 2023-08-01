@@ -116,7 +116,7 @@ specify them.
 
 ##### Tabs
 
-* `NewTab [directory/file]` and `NewBackgroundTab [directory/file]`
+* `NewTab [directory|file]` and `NewBackgroundTab [directory/file]`
   * Opens a new tab in the foreground or background.
   * If directory or file is set, it will behave like `Navigate`.
   * By default it will clone the current tab or the user's home directory.
@@ -129,10 +129,13 @@ specify them.
   * The new tab is on the right or bottom of the split.
   * If no tabs are visible, opens a new on.
 
-##### Settings
+##### Display Settings
 
-* `Mode icons|columns`
-  * Changes the mode of the current directory.
+* `Display icons|columns`
+  * Changes the display mode of the current directory.
+* `SortBy name|mtime|size`
+* `SortDir ascending|descending`
+  * Change how the current directory is sorted.
 
 ##### Other
 

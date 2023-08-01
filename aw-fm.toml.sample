@@ -17,14 +17,14 @@
 idle_timeout = 600
 
 # Shortcuts
+#
 # All shortcuts must have a key and an action, and optionally one or more modifiers.
-# If the action is a recognized internal action, it will be performed, otherwise it will be treated
-# as the name of an executable and it will be run with several environment variables set.
 # See the readme or the example scripts for details on the commands and environment variables.
 # Valid modifiers are Control, Shift, Alt, Super, and Command.
 # See https://gitlab.gnome.org/GNOME/gtk/blob/master/gdk/gdkkeysyms.h for names of keys.
 #
 # "Activate" probably should not be bound, but you can if you want.
+# Some keybinds will be bound by the existing GTK components and will not work.
 #
 # Binding letters without modifiers is not recommended either.
 #
@@ -60,19 +60,25 @@ shortcuts = [
   {key = "Right", modifiers = "Alt", action = "Forward"},
   {key = "Left", modifiers = "Alt", action = "Back"},
 
-  {key = "1", modifiers = "Control", action = "Mode icons"},
-  {key = "2", modifiers = "Control", action = "Mode columns"},
+  {key = "1", modifiers = "Control", action = "Display icons"},
+  {key = "2", modifiers = "Control", action = "Display columns"},
+
+  {key = "1", modifiers = "Alt", action = "SortBy name"},
+  {key = "2", modifiers = "Alt", action = "SortBy mtime"},
+  {key = "3", modifiers = "Alt", action = "SortBy size"},
+  {key = "Page_Up", modifiers = "Alt", action = "SortDir ascending"},
+  {key = "Page_Down", modifiers = "Alt", action = "SortDir descending"},
 
   {key = "F5", action = "Refresh"},
 
-  {key = "Delete", action = "Trash"},
-  {key = "Delete", modifiers = "Shift", action = "Delete"},
+  # {key = "Delete", action = "Trash"},
+  # {key = "Delete", modifiers = "Shift", action = "Delete"},
 
-  # Relative paths are relative to the working directory when you run aw-fm. Not recommended.
-  # Change these to absolute paths if you actually use them.
-  # {key= "F6", action = "Execute examples/dump-env.sh"},
-  # {key= "H", modifiers = "Control, Shift", action = "Script examples/rofi-jump-home.sh"},
-  # {key= "P", modifiers = "Alt", action = "Script examples/rofi-open-subdirs.sh"},
+  # Relative paths are not allowed.
+  # Change these to correct paths if you actually use them.
+  # {key= "F6", action = "Execute /path/to/examples/dump-env.sh"},
+  # {key= "H", modifiers = "Control, Shift", action = "Script /path/to/examples/rofi-jump-home.sh"},
+  # {key= "P", modifiers = "Alt", action = "Script /path/to/examples/rofi-open-subdirs.sh"},
 ]
 
 # Bookmarks

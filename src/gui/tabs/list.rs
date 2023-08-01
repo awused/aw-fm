@@ -14,7 +14,8 @@ use super::element::TabElement;
 use super::id::TabId;
 use super::tab::Tab;
 use crate::com::{
-    DirSnapshot, DisplayMode, EntryObject, SearchSnapshot, SearchUpdate, SortSettings, Update,
+    DirSnapshot, DisplayMode, EntryObject, SearchSnapshot, SearchUpdate, SortDir, SortMode,
+    SortSettings, Update,
 };
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
@@ -640,11 +641,26 @@ impl TabsList {
 
     pub fn active_display_mode(&mut self, mode: DisplayMode) {
         let Some(active) = self.active else {
-            return warn!("Mode called with no open panes");
+            return warn!("Display called with no open panes");
         };
 
-        let index = self.position(active).unwrap();
-        self.tabs[index].update_display_mode(mode);
+        self.find_mut(active).unwrap().update_display_mode(mode);
+    }
+
+    pub fn active_sort_mode(&mut self, mode: SortMode) {
+        let Some(active) = self.active else {
+            return warn!("SortBy called with no open panes");
+        };
+
+        self.find_mut(active).unwrap().update_sort_mode(mode);
+    }
+
+    pub fn active_sort_dir(&mut self, dir: SortDir) {
+        let Some(active) = self.active else {
+            return warn!("SortDir called with no open panes");
+        };
+
+        self.find_mut(active).unwrap().update_sort_dir(dir);
     }
 
     pub fn active_search(&mut self, query: &str) {

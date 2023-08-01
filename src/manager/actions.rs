@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::path::Path;
 use std::time::Duration;
 
 use gtk::glib;
@@ -28,6 +29,24 @@ async fn execute(
     gui_chan: glib::Sender<GuiAction>,
     run_output: bool,
 ) {
+    let p: &Path = Path::new(cmdstr.as_str());
+    let mut comp = p.components();
+    if comp.next().is_some() && comp.next().is_some() {
+        if let Ok(canon) = p.canonicalize() {
+            if !canon.is_absolute() {
+                let msg = format!("Relative paths are not allowed, got: {cmdstr}");
+                error!("{msg}");
+                drop(gui_chan.send(GuiAction::ConveyError(msg)));
+                return;
+            }
+        } else {
+            let msg = format!("Could not get canonical path for {cmdstr}");
+            error!("{msg}");
+            drop(gui_chan.send(GuiAction::ConveyError(msg)));
+            return;
+        }
+    }
+
     let mut cmd = tokio::process::Command::new(cmdstr.clone());
 
     #[cfg(target_family = "windows")]

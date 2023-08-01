@@ -16,7 +16,7 @@ use gtk::Orientation;
 
 use super::Gui;
 use crate::closing;
-use crate::com::{DisplayMode, ManagerAction};
+use crate::com::{DisplayMode, ManagerAction, SortDir, SortMode};
 use crate::config::CONFIG;
 
 mod help;
@@ -181,10 +181,19 @@ impl Gui {
             let arg = arg.trim_start();
 
             let _ = match cmd {
-                "Mode" => match DisplayMode::from_str(arg) {
+                "Display" => match DisplayMode::from_str(arg) {
                     Ok(m) => return tabs.active_display_mode(m),
                     Err(_e) => true,
                 },
+                "SortBy" => match SortMode::from_str(arg) {
+                    Ok(m) => return tabs.active_sort_mode(m),
+                    Err(_e) => true,
+                },
+                "SortDir" => match SortDir::from_str(arg) {
+                    Ok(d) => return tabs.active_sort_dir(d),
+                    Err(_e) => true,
+                },
+
                 "Navigate" => return tabs.active_navigate(Path::new(arg)),
                 "JumpTo" => return tabs.active_jump(Path::new(arg)),
                 "NewTab" => return tabs.open_tab(Path::new(arg), true),
