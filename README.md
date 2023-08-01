@@ -90,6 +90,9 @@ specify them.
 * `Cut`/`Copy`
   * Cuts or copies the current selection.
   * Will set the clipboard even if nothing is selected.
+* `Paste` -- partially implemented
+  * Pastes into the active tab.
+  * Can receive cuts and copies from aw-fm, caja, or nautilus.
 
 ##### Navigation Commands
 
