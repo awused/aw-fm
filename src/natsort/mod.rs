@@ -227,6 +227,12 @@ mod tests {
     }
 
     #[test]
+    fn copy() {
+        lt("a.png", "a (copy 1).png");
+        lt("a (copy 1).png", "a (copy 2).png");
+    }
+
+    #[test]
     fn int_fail_case() {
         // This case fails when integer based tokenization is used.
         lt("16:", "16.5:");
