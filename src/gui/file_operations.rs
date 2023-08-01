@@ -11,7 +11,7 @@ use gtk::gio::{self, Cancellable, FileCopyFlags, FileInfo, FileQueryInfoFlags};
 use gtk::glib::{self, SourceId};
 use gtk::prelude::{CancellableExt, FileExt, FileExtManual};
 use once_cell::unsync::Lazy;
-use regex::bytes::{Match, Regex};
+use regex::bytes::Regex;
 
 use super::tabs::id::TabId;
 use super::{gui_run, Gui};

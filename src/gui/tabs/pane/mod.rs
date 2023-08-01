@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use gtk::gdk::Key;
-use gtk::glib::{ControlFlow, WeakRef};
+use gtk::glib::{Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
@@ -197,17 +197,16 @@ impl Pane {
         let weak = element.downgrade();
         key.connect_key_pressed(move |c, k, _b, m| {
             if !m.is_empty() {
-                // https://github.com/gtk-rs/gtk4-rs/issues/1435
-                return ControlFlow::Break;
+                return Propagation::Proceed;
             }
 
             if Key::Escape == k {
                 let w = c.widget().downcast::<gtk::Entry>().unwrap();
                 w.set_text(&weak.upgrade().unwrap().imp().original_text.borrow());
+                Propagation::Stop
+            } else {
+                Propagation::Proceed
             }
-
-            // https://github.com/gtk-rs/gtk4-rs/issues/1435
-            ControlFlow::Break
         });
         element.imp().text_entry.add_controller(key);
 

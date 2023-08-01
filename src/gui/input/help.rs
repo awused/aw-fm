@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use gtk::gdk::Key;
 use gtk::glib::prelude::*;
-use gtk::glib::{BoxedAnyObject, ControlFlow};
+use gtk::glib::{BoxedAnyObject, Propagation};
 use gtk::prelude::*;
 
 use crate::config::{Shortcut, CONFIG};
@@ -107,8 +107,7 @@ impl Gui {
         dialog.connect_close_request(move |d| {
             g.open_dialogs.borrow_mut().help.take();
             d.destroy();
-            // https://github.com/gtk-rs/gtk4-rs/issues/1435
-            ControlFlow::Break
+            Propagation::Proceed
         });
 
 

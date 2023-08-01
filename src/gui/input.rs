@@ -7,7 +7,7 @@ use std::str::FromStr;
 use ahash::AHashMap;
 use dirs::home_dir;
 use gtk::gdk::{Key, ModifierType};
-use gtk::glib::ControlFlow;
+use gtk::glib::Propagation;
 use gtk::pango::EllipsizeMode;
 use gtk::prelude::Cast;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -49,9 +49,7 @@ impl Gui {
             if let Some(s) = g.shortcut_from_key(a, c) {
                 g.run_command(s);
             }
-            // Inhibit(false) -> ControlFlow::Break
-            // https://github.com/gtk-rs/gtk4-rs/issues/1435
-            ControlFlow::Break
+            Propagation::Proceed
         });
 
         self.window.add_controller(key);
@@ -118,8 +116,7 @@ impl Gui {
                 }
                 _ => (),
             }
-            // https://github.com/gtk-rs/gtk4-rs/issues/1435
-            ControlFlow::Break
+            Propagation::Proceed
         });
 
         w.add_controller(key);
