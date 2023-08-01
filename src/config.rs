@@ -64,7 +64,7 @@ pub enum DirectoryCollision {
 pub enum FileCollision {
     #[default]
     _Ask,
-    _Overwrite,
+    Overwrite,
     Skip,
 }
 

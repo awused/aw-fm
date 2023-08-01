@@ -13,14 +13,14 @@ use super::{gui_run, Gui};
 use crate::config::{DirectoryCollision, FileCollision, CONFIG};
 use crate::gui::{show_error, show_warning};
 
-#[derive(Debug)]
-enum Undoable {
-    Move { source: PathBuf, dest: PathBuf },
-    Copy(PathBuf),
-    Trash { source: PathBuf, dest: PathBuf },
-    RemoveSourceDir(PathBuf),
-    CreateDestDir(PathBuf),
-}
+// #[derive(Debug)]
+// enum Undoable {
+//     Move { source: PathBuf, dest: PathBuf },
+//     Create(PathBuf), // Does not include overwrite copies
+//     Trash { source: PathBuf, dest: PathBuf },
+//     RemoveSourceDir(PathBuf),
+//     CreateDestDir(PathBuf),
+// }
 
 #[derive(Debug)]
 pub enum Kind {
@@ -89,8 +89,6 @@ enum Asking {
 
 #[derive(Debug)]
 pub struct Progress {
-    // progress: Vec<Outcome>,
-    // finished: usize,
     dirs: Vec<Directory>,
     files: Vec<PathBuf>,
 
@@ -199,7 +197,7 @@ impl Operation {
                     return None;
                 }
             }
-            Kind::Delete { .. } => todo!(),
+            Kind::Delete { .. } => {}
         }
 
         // TODO -- when updating progress, do not allow for ref cycles
@@ -216,13 +214,11 @@ impl Operation {
             });
 
             let progress = Progress {
-                // finished: 0,
                 files,
                 dirs: Vec::new(),
                 pending_pair: None,
                 directory_collisions: CONFIG.directory_collisions,
                 file_collisions: CONFIG.file_collisions,
-                // process_callback: Some(process_callback),
                 update_timeout: Some(update_timeout),
             };
 
@@ -235,8 +231,8 @@ impl Operation {
         });
 
 
-        let o = rc.clone();
-        glib::idle_add_local_once(move || o.process_next());
+        let s = rc.clone();
+        glib::idle_add_local_once(move || s.process_next());
 
         Some(rc)
     }
@@ -418,7 +414,7 @@ impl Operation {
 
             match progress.file_collisions {
                 FileCollision::_Ask => todo!(),
-                FileCollision::_Overwrite => {
+                FileCollision::Overwrite => {
                     trace!("Overwriting target file {dst:?}");
                     overwrite = true;
                 }
