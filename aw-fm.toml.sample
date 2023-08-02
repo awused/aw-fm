@@ -99,13 +99,12 @@ bookmarks = [
 # Sub-menus and sections can be specified by name.
 # All commands sharing the same named sub-menu or section will be grouped together in order.
 #
-# mimetypes is a simple set of ;-separated prefixes, like in custom actions.
-# The option will only appear when all selected files (at least one) match the given prefix.
+# For more control over when actions appear, use custom action scripts which allow for
+# fine-grained filtering on mimetypes or paths.
 #
 # Example:
 # {name = "Do Something", action = "Execute /path/to/do-something.sh"},
 # {name = "Sample Script", action = "Script /path/to/sample-script.sh"},
-# {name = "Open With xarchiver", action = "OpenWith xarchiver", mimetypes = "application/x-rar;application/x-7z-compressed;application/x-zip;application/x-cb7;application/x-ext-cb7;application/x-cbr;application/x-ext-cbr;application/x-cbz;application/x-ext-cbz" },
 # UNIMPLEMENTED
 context_menu = [
 ]

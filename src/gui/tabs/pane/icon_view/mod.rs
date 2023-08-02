@@ -1,6 +1,6 @@
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{glib, GridView, MultiSelection, ScrolledWindow};
+use gtk::{glib, GestureClick, GridView, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
 use super::{get_last_visible_child, setup_item_controllers, Bound};
@@ -56,16 +56,33 @@ impl IconView {
         grid.set_enable_rubberband(true);
         grid.set_vexpand(true);
 
-        grid.connect_destroy(|_| error!("TODO -- remove me: grid confirmed destroyed"));
-        scroller.set_child(Some(&grid));
-
-
         grid.connect_activate(move |gv, _a| {
             let display = gv.display();
             let model = gv.model().and_downcast::<MultiSelection>().unwrap();
 
             applications::activate(tab, &display, &model)
         });
+
+
+        let focus_click = GestureClick::new();
+        focus_click.set_button(0);
+        focus_click.connect_pressed(move |gc, n, x, y| {
+            if !gc.widget().allocation().contains_point(x as i32, y as i32) {
+                // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+                error!("Workaround -- ignoring junk mouse event in {tab:?}");
+                return;
+            }
+
+            // This part is not a workaround.
+            if gc.button() <= 3 && n == 1 {
+                println!("Grab focus {x} {y}");
+                gc.widget().grab_focus();
+            }
+        });
+        grid.add_controller(focus_click);
+
+        scroller.set_child(Some(&grid));
+
 
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
         grid.set_enable_rubberband(selection.n_items() != 0);

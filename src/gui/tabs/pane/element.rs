@@ -42,7 +42,13 @@ impl PaneElement {
         // Maps forward/back on a mouse to Forward/Backward
         let forward_back_mouse = GestureClick::new();
         forward_back_mouse.set_button(0);
-        forward_back_mouse.connect_pressed(move |c, _n, _x, _y| {
+        forward_back_mouse.connect_pressed(move |c, _n, x, y| {
+            if !c.widget().allocation().contains_point(x as i32, y as i32) {
+                // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+                error!("Workaround -- ignoring junk mouse event in {tab:?}");
+                return;
+            }
+
             trace!("Mouse button {} in pane {:?}", c.current_button(), tab);
             match c.current_button() {
                 3 => {

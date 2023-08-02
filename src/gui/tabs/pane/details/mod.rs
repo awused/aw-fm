@@ -4,8 +4,8 @@ use std::rc::Rc;
 use gtk::glib::Object;
 use gtk::prelude::*;
 use gtk::{
-    glib, ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, MultiSelection,
-    ScrolledWindow, SignalListItemFactory, Widget,
+    glib, ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, GestureClick,
+    MultiSelection, ScrolledWindow, SignalListItemFactory, Widget,
 };
 
 use self::icon_cell::IconCell;
@@ -75,14 +75,30 @@ impl DetailsView {
             }
         });
 
-        column_view.connect_destroy(|_| error!("TODO -- remove me: details confirmed destroyed"));
-
         column_view.connect_activate(move |cv, _a| {
             let display = cv.display();
             let model = cv.model().and_downcast::<MultiSelection>().unwrap();
 
             applications::activate(tab, &display, &model)
         });
+
+        let focus_click = GestureClick::new();
+        focus_click.set_button(0);
+        focus_click.connect_pressed(move |gc, n, x, y| {
+            if !gc.widget().allocation().contains_point(x as i32, y as i32) {
+                // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+                error!("Workaround -- ignoring junk mouse event in {tab:?}");
+                return;
+            }
+
+
+            // This part is not a workaround.
+            if gc.button() <= 3 && n == 1 {
+                println!("Grab focus {x} {y}");
+                gc.widget().grab_focus();
+            }
+        });
+        column_view.add_controller(focus_click);
 
         scroller.set_child(Some(&column_view));
 

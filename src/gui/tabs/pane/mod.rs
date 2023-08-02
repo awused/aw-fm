@@ -89,7 +89,12 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
     let click = GestureClick::new();
     click.set_button(0);
 
-    click.connect_pressed(move |c, _n, _x, _y| {
+    click.connect_pressed(move |c, _n, x, y| {
+        if !c.widget().allocation().contains_point(x as i32, y as i32) {
+            error!("Workaround -- ignoring junk mouse event in {tab:?}");
+            return;
+        }
+
         let ele = bound.upgrade().unwrap();
         let eo = ele.bound_object().unwrap();
 
