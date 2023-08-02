@@ -86,6 +86,9 @@ impl Manager {
     }
 
     fn send_update(sender: &glib::Sender<GuiAction>, path: Arc<Path>, sources: Sources) {
+        // It's probably true that sources.flat means any search updates are wasted.
+        // But the flat tab could have been closed.
+
         let entry = match Entry::new(path) {
             Ok(entry) => entry,
             Err((path, e)) => {

@@ -21,8 +21,9 @@ use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, GetEntry,
     SearchSnapshot, SearchUpdate, SnapshotId, SortDir, SortMode, SortSettings,
 };
+use crate::config::CONFIG;
 use crate::gui::tabs::PartiallyAppliedUpdate;
-use crate::gui::{applications, gui_run, show_error, Update};
+use crate::gui::{applications, gui_run, show_error, show_warning, Update};
 
 /* This efficiently supports multiple tabs being open to the same directory with different
  * settings.
@@ -1101,6 +1102,9 @@ impl Tab {
     }
 
     pub fn paste(&self) {
+        if self.search.is_some() && !CONFIG.paste_into_search {
+            return show_warning("Cannot paste here");
+        }
         read_clipboard(self.element.display(), self.id(), self.dir());
     }
 

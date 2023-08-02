@@ -7,6 +7,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
+use ahash::AHashMap;
 use gtk::gio::{self, Cancellable, FileCopyFlags, FileInfo, FileQueryInfoFlags};
 use gtk::glib::{self, SourceId};
 use gtk::prelude::{CancellableExt, FileExt, FileExtManual};
@@ -34,6 +35,7 @@ enum Outcome {
     CopyOverwrite(PathBuf),
     Trash { source: PathBuf, dest: PathBuf },
     // FileInfo needs to be restored after we populate the contents, which is awkward.
+    // Could unconditionally store FileInfo to restore it, probably not worth it.
     RemoveSourceDir(PathBuf, Option<FileInfo>),
     CreateDestDir(PathBuf),
     Skip,
@@ -73,6 +75,16 @@ impl Kind {
             Self::Rename(_) => "rename",
             Self::Undo { .. } => "undo",
             Self::Delete { .. } => "delete",
+        }
+    }
+
+    const fn past_tense(&self) -> &'static str {
+        match self {
+            Kind::Move(_) => "moved",
+            Kind::Copy(_) => "copied",
+            Kind::Rename(_) => "renamed",
+            Kind::Undo { .. } => "undone",
+            Kind::Delete { .. } => "deleted",
         }
     }
 }
@@ -128,7 +140,7 @@ pub struct Progress {
     log: Vec<Outcome>,
 
     finished: usize,
-    // TODO -- would be nice to compute this more eagerly so it gets ahead of the processing
+    // Would be nice to compute this more eagerly so it gets ahead of the processing
     total: usize,
 
     // For Ask
@@ -138,7 +150,7 @@ pub struct Progress {
     file_collisions: FileCollision,
 
     // Maps prefix + to last highest existing number
-    // collision_cache: AHashMap<(PathBuf, OsString), usize>,
+    collision_cache: AHashMap<(OsString, OsString), usize>,
 
     // process_callback: Option<SourceId>,
     update_timeout: Option<SourceId>,
@@ -201,14 +213,76 @@ impl Progress {
 
         self.log.push(action);
     }
+
+    fn new_name_for(&mut self, path: &Path, fragment: &str) -> Option<PathBuf> {
+        trace!("Finding new name for copy onto self for {path:?}");
+
+        let Some(name) = path.file_name() else {
+            show_warning(&format!("Can't make new name for {path:?}"));
+            return None;
+        };
+
+        let Some(parent) = path.parent() else {
+            show_warning(&format!("Can't make new name for {path:?}"));
+            return None;
+        };
+
+        let (prefix, suffix, mut n) =
+            if let Some(cap) = COPY_REGEX.with(|r| r.captures(name.as_bytes())) {
+                let n: usize = OsStr::from_bytes(&cap[3]).to_string_lossy().parse().unwrap_or(0);
+                let prefix = cap.get(1).unwrap().as_bytes();
+                let suffix = cap.get(4).map_or(&[][..], |m| m.as_bytes());
+
+                (OsStr::from_bytes(prefix), OsStr::from_bytes(suffix), n)
+            } else if let Some(prefix) = path.file_stem() {
+                let suffix = path.file_name().unwrap();
+                let suffix = &suffix.as_bytes()[prefix.as_bytes().len()..];
+                let suffix = OsStr::from_bytes(suffix);
+
+                (prefix, suffix, 0)
+            } else {
+                (name, OsStr::new(""), 0)
+            };
+
+        let target = parent.join(prefix);
+        let mut target = target.into_os_string();
+        target.push(" (");
+        target.push(fragment);
+
+
+        // Wasteful allocations, but by this point we're already doing I/O
+        if let Some(old_n) = self.collision_cache.get(&(target.clone(), suffix.to_os_string())) {
+            n = *old_n;
+        }
+
+
+        let mut target = target.into_vec();
+        let length = target.len();
+
+        static MAX_LOOPS: usize = 2000;
+        for _ in 0..MAX_LOOPS {
+            n += 1;
+
+            target.truncate(length);
+            target.extend_from_slice(format!(" {n})").as_bytes());
+            target.extend_from_slice(suffix.as_bytes());
+
+            let new_path: &Path = Path::new(OsStr::from_bytes(&target));
+            if !new_path.exists() {
+                debug!("Found new name {new_path:?} for {path:?}");
+
+                self.collision_cache
+                    .insert((OsStr::from_bytes(&target[0..length]).into(), suffix.into()), n);
+                return Some(OsString::from_vec(target).into());
+            }
+        }
+
+        None
+    }
 }
 
 impl Drop for Progress {
     fn drop(&mut self) {
-        // if let Some(s) = self.process_callback.take() {
-        //     s.remove();
-        // }
-
         if let Some(s) = self.update_timeout.take() {
             s.remove();
         }
@@ -222,17 +296,23 @@ pub struct Operation {
     kind: Kind,
     cancel: Cancellable,
     // Fast operations don't live long enough to display on-screen
-    fast: Cell<bool>,
+    slow: Cell<bool>,
     // Just clone the paths directly instead of needing to convert everything to an Rc up front.
     progress: RefCell<Progress>,
 }
 
-struct CopyMovePrep {
+struct ReadyCopyMove {
     src: PathBuf,
     dst: PathBuf,
     overwrite: bool,
 }
 
+enum CopyMovePrep {
+    Asking,
+    Ready(ReadyCopyMove),
+    Abort(String),
+    CallAgain,
+}
 
 enum Status {
     AsyncScheduled,
@@ -271,7 +351,7 @@ impl Operation {
             Kind::Delete { .. } => {}
         }
 
-        // TODO -- when updating progress, do not allow for ref cycles
+
         let rc = Rc::new_cyclic(|weak: &Weak<Self>| {
             // Start with no timeout.
             let w = weak.clone();
@@ -280,10 +360,10 @@ impl Operation {
                     return;
                 };
 
-                op.fast.set(true);
+                op.slow.set(true);
 
                 op.progress.borrow_mut().update_timeout.take();
-                error!("TODO -- update progress bar");
+                error!("TODO -- show progress bar");
             });
 
             let progress = Progress {
@@ -299,13 +379,15 @@ impl Operation {
                 directory_collisions: CONFIG.directory_collisions,
                 file_collisions: CONFIG.file_collisions,
 
+                collision_cache: AHashMap::default(),
+
                 update_timeout: Some(update_timeout),
             };
 
             Self {
                 tab,
                 cancel: Cancellable::new(),
-                fast: Cell::default(),
+                slow: Cell::default(),
                 kind,
                 progress: RefCell::new(progress),
             }
@@ -378,20 +460,42 @@ impl Operation {
             break (src, dst);
         };
 
-        let Some(CopyMovePrep { src, dst, overwrite }) = self.prepare_copymove(src, dst) else {
-            return Status::CallAgain;
+
+        let prep = match self.prepare_copymove(src, dst) {
+            CopyMovePrep::Asking => return Status::AsyncScheduled,
+            CopyMovePrep::Ready(prep) => prep,
+            CopyMovePrep::Abort(e) => {
+                show_error(&e);
+                self.cancel();
+                return Status::Done;
+            }
+            CopyMovePrep::CallAgain => return Status::CallAgain,
         };
 
-        let mut flags = FileCopyFlags::NOFOLLOW_SYMLINKS | FileCopyFlags::ALL_METADATA;
+
+        #[cfg(feature = "debug-forced-slow")]
+        {
+            let s = self.clone();
+            glib::timeout_add_local_once(Duration::from_secs(1), move || s.do_move(prep));
+        }
+        #[cfg(not(feature = "debug-forced-slow"))]
+        self.do_move(prep);
+
+        Status::AsyncScheduled
+    }
+
+    fn do_move(self: &Rc<Self>, prep: ReadyCopyMove) {
+        let ReadyCopyMove { dst, src, overwrite } = prep;
+
+        let source = gio::File::for_path(&src);
+        let dest = gio::File::for_path(&dst);
+        let s = self.clone();
+
+        let mut flags = FileCopyFlags::NOFOLLOW_SYMLINKS;
         if overwrite {
             flags |= FileCopyFlags::OVERWRITE;
         }
 
-        // trace!("Move from {:?} to {:?} with {flags}", src, dst);
-        let source = gio::File::for_path(&src);
-        let dest = gio::File::for_path(&dst);
-
-        let s = self.clone();
         source.move_async(
             &dest,
             flags,
@@ -415,8 +519,6 @@ impl Operation {
                 s.process_next()
             },
         );
-
-        Status::AsyncScheduled
     }
 
     fn process_next_copy(self: &Rc<Self>, dest: &Path) -> Status {
@@ -431,7 +533,7 @@ impl Operation {
             };
 
             if src == dst {
-                let Some(new) = Self::new_name_for(&dst) else {
+                let Some(new) = self.progress.borrow_mut().new_name_for(&dst, "copy") else {
                     return Status::Done;
                 };
                 dst = new;
@@ -447,21 +549,41 @@ impl Operation {
         };
 
 
-        let Some(CopyMovePrep { src, dst, overwrite }) = self.prepare_copymove(src, dst) else {
-            return Status::CallAgain;
+        let prep = match self.prepare_copymove(src, dst) {
+            CopyMovePrep::Asking => return Status::AsyncScheduled,
+            CopyMovePrep::Ready(prep) => prep,
+            CopyMovePrep::Abort(e) => {
+                show_error(&e);
+                self.cancel();
+                return Status::Done;
+            }
+            CopyMovePrep::CallAgain => return Status::CallAgain,
         };
+
+
+        #[cfg(feature = "debug-forced-slow")]
+        {
+            let s = self.clone();
+            glib::timeout_add_local_once(Duration::from_secs(1), move || s.do_copy(prep));
+        }
+        #[cfg(not(feature = "debug-forced-slow"))]
+        self.do_copy(prep);
+
+        Status::AsyncScheduled
+    }
+
+    fn do_copy(self: &Rc<Self>, prep: ReadyCopyMove) {
+        let ReadyCopyMove { dst, src, overwrite } = prep;
+
+        let source = gio::File::for_path(&src);
+        let dest = gio::File::for_path(&dst);
+        let s = self.clone();
 
         let mut flags = FileCopyFlags::NOFOLLOW_SYMLINKS;
         if overwrite {
             flags |= FileCopyFlags::OVERWRITE;
         }
 
-        // trace!("Copy from {:?} to {:?} with {flags}", src, dst);
-        let source = gio::File::for_path(&src);
-        let dest = gio::File::for_path(&dst);
-
-
-        let s = self.clone();
         source.copy_async(
             &dest,
             flags,
@@ -488,23 +610,23 @@ impl Operation {
                 s.process_next();
             },
         );
-
-        Status::AsyncScheduled
     }
 
-    fn prepare_copymove(self: &Rc<Self>, src: PathBuf, dst: PathBuf) -> Option<CopyMovePrep> {
+    fn prepare_copymove(self: &Rc<Self>, src: PathBuf, mut dst: PathBuf) -> CopyMovePrep {
         if src.is_dir() && !src.is_symlink() {
-            self.prepare_dest_dir(src, dst);
-            return None;
+            return self.prepare_dest_dir(src, dst);
         }
 
-        let progress = self.progress.borrow_mut();
+        let mut progress = self.progress.borrow_mut();
         let mut overwrite = false;
 
         if dst.exists() {
             if !dst.is_file() {
-                // Probably just warn and fail
-                todo!("Handle file onto non-file collision");
+                // Could potentially allow more nuance here.
+                return CopyMovePrep::Abort(format!(
+                    "Tried to {} {src:?} onto non-file {dst:?}, aborting",
+                    self.kind
+                ));
             }
 
             match progress.file_collisions {
@@ -513,23 +635,56 @@ impl Operation {
                     trace!("Overwriting target file {dst:?}");
                     overwrite = true;
                 }
+                FileCollision::Rename => {
+                    let Some(new) = progress.new_name_for(&dst, self.kind.past_tense()) else {
+                        return CopyMovePrep::Abort(format!("Failed to find new name for {src:?}"));
+                    };
+                    dst = new;
+                }
+                FileCollision::Newer => {
+                    let Ok(src_m) = src.metadata() else {
+                        info!("Skipping {} of {src:?}, couldn't get mtime", self.kind);
+                        progress.push_outcome(Outcome::Skip);
+                        return CopyMovePrep::CallAgain;
+                    };
+                    let Ok(dst_m) = dst.metadata() else {
+                        info!("Skipping {} of {src:?}, couldn't get destination mtime", self.kind);
+                        progress.push_outcome(Outcome::Skip);
+                        return CopyMovePrep::CallAgain;
+                    };
+                    match (src_m.modified(), dst_m.modified()) {
+                        (Ok(s), Ok(d)) if s > d => {
+                            info!("Overwriting older destination file {dst:?}");
+                            overwrite = true;
+                        }
+                        _ => {
+                            info!("Skipping {} of {src:?}, {dst:?} is newer", self.kind);
+                            progress.push_outcome(Outcome::Skip);
+                            return CopyMovePrep::CallAgain;
+                        }
+                    }
+                }
                 FileCollision::Skip => {
                     info!("Skipping {} of {src:?} to existing {dst:?}", self.kind.str());
-                    return None;
+                    progress.push_outcome(Outcome::Skip);
+                    return CopyMovePrep::CallAgain;
                 }
             }
         }
 
-        Some(CopyMovePrep { src, dst, overwrite })
+        CopyMovePrep::Ready(ReadyCopyMove { src, dst, overwrite })
     }
 
-    fn prepare_dest_dir(self: &Rc<Self>, src: PathBuf, dst: PathBuf) {
+    fn prepare_dest_dir(self: &Rc<Self>, src: PathBuf, dst: PathBuf) -> CopyMovePrep {
         let mut progress = self.progress.borrow_mut();
 
         let original_info = if dst.exists() {
             if !dst.is_dir() {
-                // Probably just warn and fail
-                todo!("Handle directory onto non-directory");
+                // Could potentially allow more nuance here.
+                return CopyMovePrep::Abort(format!(
+                    "Tried to {} {src:?} onto non-folder {dst:?}, aborting",
+                    self.kind
+                ));
             }
 
             match progress.directory_collisions {
@@ -539,7 +694,8 @@ impl Operation {
                 }
                 DirectoryCollision::Skip => {
                     debug!("Skipping {} of directory {src:?} since {dst:?} exists", self.kind);
-                    return;
+                    progress.push_outcome(Outcome::Skip);
+                    return CopyMovePrep::CallAgain;
                 }
             }
 
@@ -557,8 +713,9 @@ impl Operation {
             ) {
                 Ok(attr) => attr,
                 Err(e) => {
-                    show_error(&format!("Failed to read source directory {src:?}: {e}"));
-                    return self.cancel.cancel();
+                    return CopyMovePrep::Abort(format!(
+                        "Failed to read source directory {src:?}: {e}"
+                    ));
                 }
             };
 
@@ -569,14 +726,15 @@ impl Operation {
             ) {
                 Ok(info) => info,
                 Err(e) => {
-                    show_error(&format!("Failed to create destination directory {dst:?}: {e}"));
-                    return self.cancel.cancel();
+                    return CopyMovePrep::Abort(format!(
+                        "Failed to create destination directory {dst:?}: {e}"
+                    ));
                 }
             };
 
             if let Err(e) = std::fs::create_dir(&dst) {
                 show_error(&format!("Failed to create destination directory {dst:?}: {e}"));
-                return self.cancel.cancel();
+                return CopyMovePrep::CallAgain;
             }
 
             progress.push_outcome(Outcome::CreateDestDir(dst.clone()));
@@ -588,8 +746,10 @@ impl Operation {
         let read_dir = match std::fs::read_dir(&src) {
             Ok(read_dir) => read_dir,
             Err(e) => {
-                show_error(&format!("Failed to {} directory {src:?}: {e}", self.kind));
-                return self.cancel.cancel();
+                return CopyMovePrep::Abort(format!(
+                    "Failed to {} directory {src:?}: {e}",
+                    self.kind
+                ));
             }
         };
 
@@ -599,64 +759,12 @@ impl Operation {
             iter: read_dir,
             original_info,
         });
+        CopyMovePrep::CallAgain
     }
 
-    fn new_name_for(path: &Path) -> Option<PathBuf> {
-        trace!("Finding new name for copy onto self for {path:?}");
-
-        let Some(name) = path.file_name() else {
-            show_warning(&format!("Can't make new name for {path:?}"));
-            return None;
-        };
-
-        let Some(parent) = path.parent() else {
-            show_warning(&format!("Can't make new name for {path:?}"));
-            return None;
-        };
-
-        let (prefix, suffix, mut n) =
-            if let Some(cap) = COPY_REGEX.with(|r| r.captures(name.as_bytes())) {
-                let n: usize = OsStr::from_bytes(&cap[3]).to_string_lossy().parse().unwrap_or(0);
-                let prefix = cap.get(1).unwrap().as_bytes();
-                let suffix = cap.get(4).map_or(&[][..], |m| m.as_bytes());
-
-                (OsStr::from_bytes(prefix), OsStr::from_bytes(suffix), n)
-            } else if let Some(prefix) = path.file_stem() {
-                let suffix = path.file_name().unwrap();
-
-                (prefix, suffix, 0)
-            } else {
-                (name, OsStr::new(""), 0)
-            };
-
-        let target = parent.join(prefix);
-        let mut target = target.into_os_string();
-        target.push(" (copy");
-        let mut target = target.into_vec();
-        let length = target.len();
-
-        println!("Got prefix: {:?}, suffix: {suffix:?}, n: {n}", OsStr::from_bytes(&target));
-
-        // TODO -- this isn't amazing.
-        static MAX_LOOPS: usize = 1000;
-        for _ in 0..MAX_LOOPS {
-            n += 1;
-
-            target.truncate(length);
-            target.extend_from_slice(format!("{n})").as_bytes());
-            target.extend_from_slice(suffix.as_bytes());
-
-            println!("Trying {:?}", OsStr::from_bytes(&target));
-
-            let new_path: &Path = Path::new(OsStr::from_bytes(&target));
-            if !new_path.exists() {
-                debug!("Found new name {new_path:?} for {path:?}");
-                return Some(OsString::from_vec(target).into());
-            }
-        }
-
-        show_warning(&format!("Failed to find new name for within {MAX_LOOPS} checks {path:?}"));
-        None
+    fn cancel(&self) {
+        info!("Cancelling operation {:?}", self.kind,);
+        self.cancel.cancel();
     }
 }
 
@@ -681,5 +789,9 @@ impl Gui {
         };
 
         self.ongoing_operations.borrow_mut().push(op);
+    }
+
+    pub(super) fn cancel_operations(&self) {
+        self.ongoing_operations.take().into_iter().for_each(|op| op.cancel());
     }
 }

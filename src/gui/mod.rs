@@ -225,17 +225,18 @@ impl Gui {
         // });
 
         // TODO -- state cache - less necessary than aw-man
-        // let g = self.clone();
-        // self.window.connect_close_request(move |w| {
-        //     let s = g.win_state.get();
-        //     let size = if s.maximized || s.fullscreen {
-        //         s.memorized_size
-        //     } else {
-        //         (w.width(), w.height()).into()
-        //     };
-        //     save_settings(State { size, maximized: w.is_maximized() });
-        //     gtk::Inhibit(false)
-        // });
+        let g = self.clone();
+        self.window.connect_close_request(move |w| {
+            g.cancel_operations();
+            //     let s = g.win_state.get();
+            //     let size = if s.maximized || s.fullscreen {
+            //         s.memorized_size
+            //     } else {
+            //         (w.width(), w.height()).into()
+            //     };
+            //     save_settings(State { size, maximized: w.is_maximized() });
+            glib::Propagation::Proceed
+        });
 
         let g = self.clone();
         self.window.connect_maximized_notify(move |_w| {
@@ -290,6 +291,7 @@ impl Gui {
             Quit => {
                 self.window.close();
                 closing::close();
+                self.cancel_operations();
                 return ControlFlow::Break;
             }
         }

@@ -65,6 +65,8 @@ pub enum FileCollision {
     #[default]
     _Ask,
     Overwrite,
+    Rename,
+    Newer,
     Skip,
 }
 
@@ -80,9 +82,6 @@ pub struct Config {
 
     #[serde(default, deserialize_with = "zero_is_none")]
     pub idle_timeout: Option<NonZeroU64>,
-
-    #[serde(default, deserialize_with = "empty_path_is_none")]
-    pub database: Option<PathBuf>,
 
     #[serde(default)]
     pub shortcuts: Vec<Shortcut>,
@@ -102,15 +101,20 @@ pub struct Config {
     #[serde(default, deserialize_with = "empty_path_is_none")]
     pub actions_directory: Option<Arc<PathBuf>>,
 
-    #[serde(default)]
-    pub max_thumbnailers: u8,
-    #[serde(default)]
-    pub background_thumbnailers: u8,
+    #[serde(default, deserialize_with = "empty_path_is_none")]
+    pub database: Option<PathBuf>,
 
     #[serde(default)]
     pub search_max_depth: Option<u8>,
     #[serde(default)]
     pub search_show_all: bool,
+    #[serde(default)]
+    pub paste_into_search: bool,
+
+    #[serde(default)]
+    pub max_thumbnailers: u8,
+    #[serde(default)]
+    pub background_thumbnailers: u8,
 }
 
 // Serde seems broken with OsString for some reason

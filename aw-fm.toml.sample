@@ -119,13 +119,13 @@ directory_collisions = "merge"
 
 # How to handle file collisions when moving files.
 #
-# Allowed values are ask (UNIMPLEMENTED), overwrite, skip, newer (UNIMPLEMENTED), and rename (UNIMPLEMENTED).
-# newer will overwrite if the destination is newer and skip otherwise.
+# Allowed values are ask (UNIMPLEMENTED), overwrite, skip, newer, and rename.
+# newer will overwrite if the destination is strictly older and skip otherwise.
 # rename will keep the existing destination file as-is but add a suffix to the file name.
 # rename is assumed when copying a file on top of itself.
 #
 # ask will be the default once it is implemented.
-file_collisions = "overwrite"
+file_collisions = "skip"
 
 # Custom actions directory.
 # All executable contents with proper headers (see examples/sample-action.sh) are added as context
@@ -154,6 +154,11 @@ search_max_depth = 8
 # The default behaviour is to respect .gitignore files and ignore hidden files and directories for
 # recursive searching, but to show everything within the current directory unconditionally.
 search_show_all = false
+
+# Whether to allow pastine files into a search tab.
+#
+# This might cause confusing or surprising file operations.
+paste_into_search = false
 
 
 # Thread Settings --------------------------------------------------------------------------------
