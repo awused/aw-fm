@@ -382,7 +382,7 @@ impl ExactSizeIterator for Selected<'_> {
 
 impl Selected<'_> {
     fn get(&self, i: u32) -> EntryObject {
-        let index = self.selected.nth(self.pos);
+        let index = self.selected.nth(i);
         self.selection.item(index).unwrap().downcast().unwrap()
     }
 }

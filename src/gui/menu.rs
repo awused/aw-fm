@@ -11,7 +11,6 @@ use gtk::{PopoverMenu, PositionType};
 use super::Gui;
 use crate::com::{DirSettings, EntryObject};
 use crate::config::{ContextMenuGroup, CONFIG};
-use crate::gui::gui_run;
 
 
 #[derive(Debug)]
@@ -19,9 +18,11 @@ pub(super) struct GuiMenu {
     // Checkboxes
 
     // Radio buttons
-    pub display: SimpleAction,
-    pub sort_mode: SimpleAction,
-    pub sort_dir: SimpleAction,
+    display: SimpleAction,
+    sort_mode: SimpleAction,
+    sort_dir: SimpleAction,
+
+    menu: PopoverMenu,
 }
 
 
@@ -108,15 +109,15 @@ impl GuiMenu {
 
         gui.window.insert_action_group("context-menu", Some(&action_group));
 
-        Self { display, sort_mode, sort_dir }
+        Self {
+            display,
+            sort_mode,
+            sort_dir,
+            menu: Self::rebuild_menu(gui),
+        }
     }
 
-    // For now, construct everything on the fly
-    pub fn prepare(&self, settings: DirSettings, _entries: Vec<EntryObject>) -> PopoverMenu {
-        self.display.change_state(&settings.display_mode.as_ref().to_variant());
-        self.sort_mode.change_state(&settings.sort.mode.as_ref().to_variant());
-        self.sort_dir.change_state(&settings.sort.direction.as_ref().to_variant());
-
+    fn rebuild_menu(gui: &Rc<Gui>) -> PopoverMenu {
         let menu = Menu::new();
 
         let mut submenus = AHashMap::new();
@@ -151,41 +152,33 @@ impl GuiMenu {
                 None => &menu,
             };
 
+            // menuitem.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
             menu.append_item(&menuitem);
         }
 
-        // This operation alone takes ~20ms with few items
         let menu = PopoverMenu::from_model_full(&menu, gtk::PopoverMenuFlags::NESTED);
         menu.set_has_arrow(false);
         menu.set_position(PositionType::Right);
         menu.set_valign(gtk::Align::Start);
+        menu.set_parent(&gui.window);
 
-        gui_run(|g| {
-            menu.set_parent(&g.window);
-            let g = g.clone();
-            // When this dies, return focus to where it was before.
-            if let Some(fc) = g.window.focus_widget() {
-                menu.connect_closed(move |_| {
-                    // Hack around GTK PopoverMenus taking focus to the grave with them.
-                    g.window.set_focus(Some(&fc));
-                });
-            }
-        });
+        let g = gui.clone();
+        // When this dies, return focus to where it was before.
+        if let Some(fc) = g.window.focus_widget() {
+            menu.connect_closed(move |_| {
+                // Hack around GTK PopoverMenus taking focus to the grave with them.
+                g.window.set_focus(Some(&fc));
+            });
+        }
 
         menu
-        //
-        // let right_click = GestureClick::new();
-        // right_click.set_button(3);
-        //
-        // right_click.connect_pressed(move |e, _clicked, x, y| {
-        //     let ev = e.current_event().unwrap();
-        //     if ev.triggers_context_menu() {
-        //         let rect = Rectangle::new(x as i32, y as i32, 1, 1);
-        //         menu.set_pointing_to(Some(&rect));
-        //         menu.popup();
-        //     }
-        // });
-        //
-        // gui.window.add_controller(right_click);
+    }
+
+    pub fn prepare(&self, settings: DirSettings, _entries: Vec<EntryObject>) -> PopoverMenu {
+        self.display.change_state(&settings.display_mode.as_ref().to_variant());
+        self.sort_mode.change_state(&settings.sort.mode.as_ref().to_variant());
+        self.sort_dir.change_state(&settings.sort.direction.as_ref().to_variant());
+
+        self.menu.clone()
     }
 }

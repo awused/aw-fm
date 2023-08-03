@@ -124,7 +124,6 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
             let rect = Rectangle::new(x as i32, y as i32, 1, 1);
             menu.set_pointing_to(Some(&rect));
             menu.popup();
-            println!("TODO -- right click context menu")
         }
     });
 

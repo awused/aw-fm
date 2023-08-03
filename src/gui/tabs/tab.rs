@@ -1105,6 +1105,7 @@ impl Tab {
 
         let provider = ClipboardProvider::new(operation, selection);
         let text = provider.display_string();
+
         info!("Setting clipboard as: {text}");
         if let Some(pane) = self.pane.get() {
             pane.set_clipboard_text(&provider.display_string())

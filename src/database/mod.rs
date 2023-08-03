@@ -53,15 +53,11 @@ impl DBCon {
         }
 
         let mut con = Connection::open(path).unwrap();
-
         con.pragma_update(None, "foreign_keys", "ON").unwrap();
-
         update_to_current(&mut con);
 
         let (sender, receiver) = std::sync::mpsc::sync_channel(2);
-        let h = spawn_thread("databse", move || {
-            Con(con).run(receiver);
-        });
+        let h = spawn_thread("databse", move || Con(con).run(receiver));
 
         trace!("Opened database in {:?}", start.elapsed());
 
