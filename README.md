@@ -93,6 +93,11 @@ specify them.
 * `Paste` -- partially implemented
   * Pastes into the active tab.
   * Can receive cuts and copies from aw-fm, caja, or nautilus.
+* `Trash`
+  * Moves the selected items to trash.
+  * aw-fm doesn't have utilities to manage trash.
+* `Delete`
+  * Spawns a confirmation dialog before permanently deleting the selected items.
 
 ##### Navigation Commands
 

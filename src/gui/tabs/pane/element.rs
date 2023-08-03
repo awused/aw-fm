@@ -43,8 +43,9 @@ impl PaneElement {
         let forward_back_mouse = GestureClick::new();
         forward_back_mouse.set_button(0);
         forward_back_mouse.connect_pressed(move |c, _n, x, y| {
-            if !c.widget().allocation().contains_point(x as i32, y as i32) {
-                // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+            // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+            let alloc = c.widget().allocation();
+            if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
                 error!("Workaround -- ignoring junk mouse event in {tab:?}");
                 return;
             }

@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
-use gtk::gdk::Key;
+use gtk::gdk::{Key, Rectangle};
 use gtk::glib::{Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
-    AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, GestureSingleExt,
-    WidgetExt,
+    AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, GestureExt,
+    GestureSingleExt, PopoverExt, WidgetExt,
 };
 use gtk::{
     CustomFilter, EventControllerKey, FilterChange, FilterListModel, GestureClick, MultiSelection,
@@ -23,7 +23,7 @@ use super::id::TabId;
 use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
 use crate::gui::tabs::NavTarget;
-use crate::gui::tabs_run;
+use crate::gui::{gui_run, tabs_run};
 
 mod details;
 mod element;
@@ -90,27 +90,41 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
     click.set_button(0);
 
     click.connect_pressed(move |c, _n, x, y| {
-        if !c.widget().allocation().contains_point(x as i32, y as i32) {
-            error!("Workaround -- ignoring junk mouse event in {tab:?}");
+        let eo = bound.upgrade().unwrap().bound_object().unwrap();
+
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+        let alloc = c.widget().allocation();
+        if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
+            error!(
+                "Workaround -- ignoring junk mouse event in {tab:?} on item {:?}",
+                &*eo.get().name
+            );
             return;
         }
 
-        let ele = bound.upgrade().unwrap();
-        let eo = ele.bound_object().unwrap();
+        debug!("Click {} for {:?} in {tab:?}", c.current_button(), &*eo.get().name);
 
-        debug!("Click {} for {eo:?} in {tab:?}", c.current_button());
+        if c.current_button() == 2 {
+            if let Some(nav) = NavTarget::open_or_jump_abs(eo.get().abs_path.clone()) {
+                tabs_run(|t| t.create_tab(Some(tab), nav, false));
+            }
+        } else if c.current_event().unwrap().triggers_context_menu() {
+            let w = c.widget();
 
-        match c.current_button() {
-            2 => {
-                if let Some(nav) = NavTarget::open_or_jump_abs(eo.get().abs_path.clone()) {
-                    tabs_run(|t| t.create_tab(Some(tab), nav, false));
-                }
-            }
-            3 => {
-                tabs_run(|t| t.set_active(tab));
-                println!("TODO -- right click context menu")
-            }
-            _ => {}
+            c.set_state(gtk::EventSequenceState::Claimed);
+            let menu = tabs_run(|tlist| {
+                tlist.set_active(tab);
+                let t = tlist.find(tab).unwrap();
+                t.select_if_not(eo);
+                t.context_menu()
+            });
+
+            let (x, y) = gui_run(|g| w.translate_coordinates(&g.window, x, y)).unwrap();
+
+            let rect = Rectangle::new(x as i32, y as i32, 1, 1);
+            menu.set_pointing_to(Some(&rect));
+            menu.popup();
+            println!("TODO -- right click context menu")
         }
     });
 

@@ -55,6 +55,7 @@ impl DBCon {
         self.0.borrow_mut().take().unwrap().close().unwrap();
     }
 
+    // Reading is fast enough to do blocking.
     pub fn get(&self, path: &Path) -> DirSettings {
         let start = Instant::now();
 
@@ -88,6 +89,7 @@ impl DBCon {
         settings
     }
 
+    // Writing is slow enough 16-17ms to want to do off the main thread
     pub fn store(&self, path: &Path, settings: DirSettings) {
         let start = Instant::now();
 

@@ -67,8 +67,9 @@ impl IconView {
         let focus_click = GestureClick::new();
         focus_click.set_button(0);
         focus_click.connect_pressed(move |gc, n, x, y| {
-            if !gc.widget().allocation().contains_point(x as i32, y as i32) {
-                // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+            // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+            let alloc = gc.widget().allocation();
+            if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
                 error!("Workaround -- ignoring junk mouse event in {tab:?}");
                 return;
             }

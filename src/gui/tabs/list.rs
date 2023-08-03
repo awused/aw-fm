@@ -110,11 +110,11 @@ impl TabsList {
         self.tabs.iter().position(|t| t.id() == id)
     }
 
-    fn find(&self, id: TabId) -> Option<&Tab> {
+    pub(super) fn find(&self, id: TabId) -> Option<&Tab> {
         self.tabs.iter().find(|t| t.id() == id)
     }
 
-    fn find_mut(&mut self, id: TabId) -> Option<&mut Tab> {
+    pub(super) fn find_mut(&mut self, id: TabId) -> Option<&mut Tab> {
         self.tabs.iter_mut().find(|t| t.id() == id)
     }
 

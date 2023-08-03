@@ -7,7 +7,7 @@ use gtk::gio::Cancellable;
 use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{SelectionModelExt, WidgetExt};
-use gtk::{AlertDialog, Orientation, Widget};
+use gtk::{AlertDialog, Orientation, PopoverMenu, Widget};
 use MaybePane as MP;
 
 use self::flat_dir::FlatDir;
@@ -646,6 +646,18 @@ impl Tab {
         applications::activate(self.id(), &display, selection);
     }
 
+    pub fn select_if_not(&self, eo: EntryObject) {
+        let contents =
+            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+
+        // Should not be possible to call this with an item not in this tab.
+        let pos = contents.filtered_position_by_sorted(&eo.get()).unwrap();
+        if !contents.selection.is_selected(pos) {
+            info!("Updating selection to clicked item {:?}", &*eo.get().name);
+            contents.selection.select_item(pos, true);
+        }
+    }
+
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: NavTarget) {
         info!("Navigating {:?} from {:?} to {:?}", self.id, self.dir.path(), target);
 
@@ -1163,6 +1175,15 @@ impl Tab {
                 Self::run_deletion(tab, files, Kind::Delete);
             }
         });
+    }
+
+    pub fn context_menu(&self) -> PopoverMenu {
+        info!("Spawning context menu for {:?}", self.id());
+        let contents =
+            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+        let sel: Vec<EntryObject> = Selected::from(&contents.selection).collect();
+
+        gui_run(|g| g.menu.get().unwrap().prepare(self.settings, sel))
     }
 
     pub fn env_vars(&self, prefix: &str, env: &mut Vec<(String, OsString)>) {

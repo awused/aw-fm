@@ -145,10 +145,7 @@ impl Gui {
             window.remove_css_class("background");
             window.add_css_class("main-nobg");
 
-            provider.load_from_data(
-                &(include_str!("style.css").to_string()
-                    + &format!("\n window {{ background: {bg}; }}")),
-            );
+            provider.load_from_data(&format!("{style}\n window {{ background: {bg}; }}"));
         } else {
             provider.load_from_data(style);
         }

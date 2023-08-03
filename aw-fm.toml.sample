@@ -88,7 +88,7 @@ shortcuts = [
 # rofi script wouldn't be a better option.
 # Defined as { name = "Name", action = "Command" },
 bookmarks = [
-  { name = "Home", action = "Home" },
+  {name = "Home", action = "Home"},
 ]
 
 # Context Menu
@@ -105,8 +105,16 @@ bookmarks = [
 # Example:
 # {name = "Do Something", action = "Execute /path/to/do-something.sh"},
 # {name = "Sample Script", action = "Script /path/to/sample-script.sh"},
-# UNIMPLEMENTED
 context_menu = [
+  {name = "Icons", submenu = "Display", action = "Display icons"},
+  {name = "Columns", submenu = "Display", action = "Display columns"},
+
+  {name = "Name", submenu = "Sort", action = "SortBy name"},
+  {name = "Date modified", submenu = "Sort", action = "SortBy mtime"},
+  {name = "Size", submenu = "Sort", action = "SortBy size"},
+
+  {name = "Ascending", submenu = "Sort", action = "SortDir ascending"},
+  {name = "Descending", submenu = "Sort", action = "SortDir descending"},
 ]
 
 # How to handle directory collisions during file operations.
