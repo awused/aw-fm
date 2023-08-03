@@ -54,7 +54,9 @@ The defaults should make some level of sense. Hit `?` for a popup containing all
 customizable keybinds.
 
 Mouse controls are not customizable but should work as expected. Middle clicking
-on a file or directory is the same as the `NewBackgroundTab` command below.
+on a file or directory is the same as the `NewBackgroundTab` command below. Shift
+clicking on a tab will open it in a horizontal split, control clicking in a vertical
+split.
 
 ### Customization
 
@@ -93,6 +95,7 @@ specify them.
 * `Paste` -- partially implemented
   * Pastes into the active tab.
   * Can receive cuts and copies from aw-fm, caja, or nautilus.
+  * Using this in scripts would be odd.
 * `Trash`
   * Moves the selected items to trash.
   * aw-fm doesn't have utilities to manage trash.
@@ -157,14 +160,6 @@ specify them.
   * Example: `Script /path/to/sample-script.sh` if the script prints "Quit" the
     program will exit.
 
-TODO ---------------------------------
-
-* Paste
-  * Pastes into the current tab.
-  * Calling this from scripts would be strange.
-
-TODO ---------------------------------
-
 ### External Executable Environment
 
 The executables from `Execute`, `Script`, and custom actions will be called
@@ -202,5 +197,6 @@ Not planned, good luck. Probably won't work.
 
 Gui file managers on Linux are almost all descended from Nautilus and have
 similar characteristics including performance traps and a lack of
-customization. They do, however, support things I won't, like udev.
+customization. They do, however, support things I probably won't,
+like automount and udev.
 

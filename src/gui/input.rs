@@ -200,10 +200,10 @@ impl Gui {
 
                 "Split" => match arg {
                     "horizontal" => {
-                        return tabs.active_split(Orientation::Horizontal);
+                        return tabs.active_split(Orientation::Horizontal, None);
                     }
                     "vertical" => {
-                        return tabs.active_split(Orientation::Vertical);
+                        return tabs.active_split(Orientation::Vertical, None);
                     }
                     _ => true,
                 },

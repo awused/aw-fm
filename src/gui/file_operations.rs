@@ -15,7 +15,7 @@ use gtk::gio::{self, Cancellable, FileCopyFlags, FileInfo, FileQueryInfoFlags};
 use gtk::glib::{self, SourceId};
 use gtk::prelude::{CancellableExt, FileExt, FileExtManual};
 use once_cell::unsync::Lazy;
-use regex::bytes::Regex;
+use regex::bytes::{Captures, Match, Regex};
 
 use super::tabs::id::TabId;
 use super::{gui_run, Gui};
@@ -24,6 +24,34 @@ use crate::gui::{show_error, show_warning};
 
 thread_local! {
     static COPY_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"^(.*)( \(copy (\d+)\))(\.[^/]+)?$").unwrap());
+    static COPIED_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"^(.*)( \(copied (\d+)\))(\.[^/]+)?$").unwrap());
+    static MOVED_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"^(.*)( \(moved (\d+)\))(\.[^/]+)?$").unwrap());
+}
+
+// Whatever we add to a name to resolve collisions
+#[derive(Debug, Clone, Copy)]
+enum Fragment {
+    Copy,
+    Copied,
+    Moved,
+}
+
+impl Fragment {
+    fn captures(self, bytes: &[u8]) -> Option<Captures<'_>> {
+        match self {
+            Self::Copy => COPY_REGEX.with(|r| r.captures(bytes)),
+            Self::Copied => COPIED_REGEX.with(|r| r.captures(bytes)),
+            Self::Moved => MOVED_REGEX.with(|r| r.captures(bytes)),
+        }
+    }
+
+    const fn str(self) -> &'static str {
+        match self {
+            Self::Copy => "copy",
+            Self::Copied => "copied",
+            Self::Moved => "moved",
+        }
+    }
 }
 
 // It should be possible to undo (best-effort) a file operation by reversing each completed action
@@ -83,14 +111,11 @@ impl Kind {
         }
     }
 
-    const fn past_tense(&self) -> &'static str {
+    const fn rename_fragment(&self) -> Fragment {
         match self {
-            Self::Move(_) => "moved",
-            Self::Copy(_) => "copied",
-            Self::Rename(_) => "renamed",
-            Self::Undo { .. } => "undone",
-            Self::Trash => "trashed",
-            Self::Delete => "deleted",
+            Self::Move(_) => Fragment::Moved,
+            Self::Copy(_) => Fragment::Copied,
+            Self::Rename(_) | Self::Undo { .. } | Self::Trash | Self::Delete => unreachable!(),
         }
     }
 }
@@ -251,7 +276,7 @@ impl Progress {
         self.log.push(action);
     }
 
-    fn new_name_for(&mut self, path: &Path, fragment: &str) -> Option<PathBuf> {
+    fn new_name_for(&mut self, path: &Path, fragment: Fragment) -> Option<PathBuf> {
         trace!("Finding new name for copy onto self for {path:?}");
 
         let Some(name) = path.file_name() else {
@@ -264,27 +289,26 @@ impl Progress {
             return None;
         };
 
-        let (prefix, suffix, mut n) =
-            if let Some(cap) = COPY_REGEX.with(|r| r.captures(name.as_bytes())) {
-                let n: usize = OsStr::from_bytes(&cap[3]).to_string_lossy().parse().unwrap_or(0);
-                let prefix = cap.get(1).unwrap().as_bytes();
-                let suffix = cap.get(4).map_or(&[][..], |m| m.as_bytes());
+        let (prefix, suffix, mut n) = if let Some(cap) = fragment.captures(name.as_bytes()) {
+            let n: usize = OsStr::from_bytes(&cap[3]).to_string_lossy().parse().unwrap_or(0);
+            let prefix = cap.get(1).unwrap().as_bytes();
+            let suffix = cap.get(4).map_or(&[][..], |m| m.as_bytes());
 
-                (OsStr::from_bytes(prefix), OsStr::from_bytes(suffix), n)
-            } else if let Some(prefix) = path.file_stem() {
-                let suffix = path.file_name().unwrap();
-                let suffix = &suffix.as_bytes()[prefix.as_bytes().len()..];
-                let suffix = OsStr::from_bytes(suffix);
+            (OsStr::from_bytes(prefix), OsStr::from_bytes(suffix), n)
+        } else if let Some(prefix) = path.file_stem() {
+            let suffix = path.file_name().unwrap();
+            let suffix = &suffix.as_bytes()[prefix.as_bytes().len()..];
+            let suffix = OsStr::from_bytes(suffix);
 
-                (prefix, suffix, 0)
-            } else {
-                (name, OsStr::new(""), 0)
-            };
+            (prefix, suffix, 0)
+        } else {
+            (name, OsStr::new(""), 0)
+        };
 
         let target = parent.join(prefix);
         let mut target = target.into_os_string();
         target.push(" (");
-        target.push(fragment);
+        target.push(fragment.str());
 
 
         // Wasteful allocations, but by this point we're already doing I/O
@@ -569,7 +593,8 @@ impl Operation {
             };
 
             if src == dst {
-                let Some(new) = self.progress.borrow_mut().new_name_for(&dst, "copy") else {
+                let Some(new) = self.progress.borrow_mut().new_name_for(&dst, Fragment::Copy)
+                else {
                     return Status::Done;
                 };
                 dst = new;
@@ -670,7 +695,7 @@ impl Operation {
                     overwrite = true;
                 }
                 FileCollision::Rename => {
-                    let Some(new) = progress.new_name_for(&dst, self.kind.past_tense()) else {
+                    let Some(new) = progress.new_name_for(&dst, self.kind.rename_fragment()) else {
                         return CopyMovePrep::Abort(format!("Failed to find new name for {src:?}"));
                     };
                     dst = new;

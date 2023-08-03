@@ -273,6 +273,7 @@ impl Tab {
         false
     }
 
+    #[must_use]
     pub fn split(&mut self, orient: Orientation) -> Option<gtk::Paned> {
         self.pane.get().unwrap().split(orient)
     }

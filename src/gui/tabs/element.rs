@@ -1,11 +1,11 @@
 use std::path::Path;
 
-use gtk::gdk::{ContentProvider, DragAction};
+use gtk::gdk::{ContentProvider, DragAction, ModifierType};
 use gtk::glib::{BoxedAnyObject, GString};
 use gtk::prelude::StaticType;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{EventControllerExt, GestureSingleExt, WidgetExt};
-use gtk::{glib, DragSource, DropTarget, GestureClick, WidgetPaintable};
+use gtk::traits::{EventControllerExt, GestureExt, GestureSingleExt, WidgetExt};
+use gtk::{glib, DragSource, DropTarget, GestureClick, Orientation, WidgetPaintable};
 
 use crate::gui::tabs::id::TabId;
 use crate::gui::tabs_run;
@@ -26,11 +26,37 @@ impl TabElement {
         s.flat_title(path);
 
         let mouse = GestureClick::new();
-        mouse.set_button(2);
-        mouse.connect_pressed(move |_c, n, _x, _y| {
-            if n == 1 {
-                debug!("Closing {tab:?} from middle click");
-                tabs_run(|t| t.close_tab(tab));
+        mouse.set_button(0);
+        mouse.connect_pressed(move |c, n, x, y| {
+            // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+            let alloc = c.widget().allocation();
+            if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
+                error!("Workaround -- ignoring junk mouse event on {tab:?} element",);
+                return;
+            }
+
+            if n != 1 {
+                return;
+            }
+            match c.current_button() {
+                1 => {
+                    let mods = c.current_event().unwrap().modifier_state();
+                    let orient = if mods.difference(ModifierType::SHIFT_MASK).is_empty() {
+                        Orientation::Horizontal
+                    } else if mods.difference(ModifierType::CONTROL_MASK).is_empty() {
+                        Orientation::Vertical
+                    } else {
+                        return;
+                    };
+
+                    c.set_state(gtk::EventSequenceState::Claimed);
+                    tabs_run(|tl| tl.active_split(orient, Some(tab)));
+                }
+                2 => {
+                    debug!("Closing {tab:?} from middle click");
+                    tabs_run(|tl| tl.close_tab(tab));
+                }
+                _ => {}
             }
         });
         s.add_controller(mouse);

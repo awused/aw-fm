@@ -118,12 +118,6 @@ impl TabsList {
         self.tabs.iter_mut().find(|t| t.id() == id)
     }
 
-    fn update_display_mode(&mut self, id: TabId, mode: DisplayMode) {
-        if let Some(t) = self.find_mut(id) {
-            t.update_display_mode(mode)
-        }
-    }
-
     pub fn update_sort(&mut self, id: TabId, settings: SortSettings) {
         if let Some(t) = self.find_mut(id) {
             t.update_sort(settings)
@@ -392,7 +386,7 @@ impl TabsList {
     // Splits based on index in self.tabs.
     // Used as an implementation detail for session loading
     // returns false if it fails, and session loading should stop if it happens.
-    fn split_existing(&mut self, first: usize, second: usize, orient: Orientation) -> bool {
+    fn restore_split(&mut self, first: usize, second: usize, orient: Orientation) -> bool {
         if first >= self.tabs.len()
             || second >= self.tabs.len()
             || first == second
@@ -422,10 +416,21 @@ impl TabsList {
         true
     }
 
-    pub fn active_split(&mut self, orient: Orientation) {
+    pub fn active_split(&mut self, orient: Orientation, tab: Option<TabId>) {
         let Some(active) = self.active else {
             show_warning("Split called with no panes to split");
             return self.new_tab(true);
+        };
+
+        let existing = if let Some(tab) = tab {
+            // Called synchronously from a click.
+            let index = self.position(tab).unwrap();
+            if self.tabs[index].visible() {
+                return self.set_active(tab);
+            }
+            Some((tab, index))
+        } else {
+            None
         };
 
         let active_pos = self.position(active).unwrap();
@@ -434,11 +439,12 @@ impl TabsList {
             return show_warning("Pane is too small to split");
         };
 
-        let (new_id, new_index) = self.clone_active().unwrap();
-        let (left, tab, right) = self.split_around_mut(new_index);
+        let (id, index) = existing.unwrap_or_else(|| self.clone_active().unwrap());
+
+        let (left, tab, right) = self.split_around_mut(index);
         tab.attach_pane(left, right, |w| paned.set_end_child(Some(w)));
 
-        self.set_active(new_id);
+        self.set_active(id);
     }
 
     pub fn refresh(&mut self) {
