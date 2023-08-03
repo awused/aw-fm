@@ -1,18 +1,31 @@
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
+use std::sync::mpsc::{Receiver, SyncSender};
+use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::Instant;
 
 use dirs::data_dir;
 use rusqlite::types::{FromSql, FromSqlError};
 use rusqlite::{params, Connection, ToSql};
+use tokio::sync::oneshot;
 
-use crate::com::{DirSettings, DisplayHidden, DisplayMode, SortDir, SortMode, SortSettings};
+use crate::com::{
+    DebugIgnore, DirSettings, DisplayHidden, DisplayMode, SortDir, SortMode, SortSettings,
+};
 use crate::config::CONFIG;
+use crate::{closing, spawn_thread};
 
+
+enum DBAction {
+    Get(Arc<Path>, oneshot::Sender<DirSettings>),
+    Store(Arc<Path>, DirSettings),
+    Teardown,
+}
 
 #[derive(Debug)]
-pub struct DBCon(RefCell<Option<Connection>>);
+pub struct DBCon(SyncSender<DBAction>, DebugIgnore<Cell<Option<JoinHandle<()>>>>);
 
 impl DBCon {
     // If we fail to connect, just panic and die.
@@ -45,22 +58,65 @@ impl DBCon {
 
         update_to_current(&mut con);
 
+        let (sender, receiver) = std::sync::mpsc::sync_channel(2);
+        let h = spawn_thread("databse", move || {
+            Con(con).run(receiver);
+        });
+
         trace!("Opened database in {:?}", start.elapsed());
 
-        Self(Some(con).into())
+        Self(sender, DebugIgnore::from(Cell::new(Some(h))))
     }
 
     pub fn destroy(&self) {
         debug!("Tearing down database connection");
-        self.0.borrow_mut().take().unwrap().close().unwrap();
+        self.0.send(DBAction::Teardown).unwrap();
+        self.1.take().unwrap().join().unwrap();
     }
 
-    // Reading is fast enough to do blocking.
-    pub fn get(&self, path: &Path) -> DirSettings {
+    // Reading is fast enough to block on
+    pub fn get(&self, path: Arc<Path>) -> DirSettings {
         let start = Instant::now();
 
-        let b = self.0.borrow();
-        let con = b.as_ref().unwrap();
+        let (send, recv) = oneshot::channel();
+
+        self.0.send(DBAction::Get(path, send)).unwrap();
+
+        // This should swallow all DB errors so should not fail
+        let settings = recv.blocking_recv().unwrap();
+
+        trace!("Fetched settings in {:?}", start.elapsed());
+        settings
+    }
+
+    // Writing is slow enough 16-17ms to want to do off the main thread
+    pub fn store(&self, path: Arc<Path>, settings: DirSettings) {
+        self.0.send(DBAction::Store(path, settings)).unwrap();
+    }
+}
+
+
+struct Con(Connection);
+
+impl Con {
+    fn run(&self, receiver: Receiver<DBAction>) {
+        while let Ok(a) = receiver.recv() {
+            match a {
+                DBAction::Get(path, resp) => drop(resp.send(self.get(&path))),
+                DBAction::Store(path, settings) => self.store(&path, settings),
+                DBAction::Teardown => {
+                    return;
+                }
+            }
+        }
+
+        if !closing::closed() {
+            error!("Gui->Database connection unexpectedly closed.")
+        }
+    }
+
+    fn get(&self, path: &Path) -> DirSettings {
+        let con = &self.0;
 
         let settings = con
             .query_row(
@@ -85,16 +141,12 @@ impl DBCon {
                 DirSettings::default()
             });
 
-        trace!("Fetched settings for {path:?} in {:?}", start.elapsed());
         settings
     }
 
-    // Writing is slow enough 16-17ms to want to do off the main thread
-    pub fn store(&self, path: &Path, settings: DirSettings) {
+    fn store(&self, path: &Path, settings: DirSettings) {
         let start = Instant::now();
-
-        let b = self.0.borrow();
-        let con = b.as_ref().unwrap();
+        let con = &self.0;
 
         if settings == DirSettings::default() {
             con.execute("DELETE FROM dir_settings WHERE path = ?;", [path.as_os_str().as_bytes()])

@@ -197,7 +197,7 @@ impl Tab {
     pub fn new(id: TabUid, target: NavTarget, existing_tabs: &[Self]) -> (Self, TabElement) {
         debug!("Opening tab {id:?} to {target:?}");
         // fetch metatada synchronously, even with a donor
-        let settings = gui_run(|g| g.database.get(&target.dir));
+        let settings = gui_run(|g| g.database.get(target.dir.clone()));
 
         let element = TabElement::new(id.copy(), &target.dir);
         let dir = FlatDir::new(target.dir);
@@ -596,7 +596,7 @@ impl Tab {
             // We couldn't find any state to steal, so we know we're the only matching tab.
 
             let old_settings = self.settings;
-            self.settings = gui_run(|g| g.database.get(self.dir.path()));
+            self.settings = gui_run(|g| g.database.get(self.dir.path().clone()));
 
             // Deliberately do not clear or update self.contents here, not yet.
             // This allows us to keep something visible just a tiny bit longer.
@@ -984,7 +984,7 @@ impl Tab {
 
     fn save_settings(&self) {
         gui_run(|g| {
-            g.database.store(self.dir.path(), self.settings);
+            g.database.store(self.dir.path().clone(), self.settings);
         });
     }
 

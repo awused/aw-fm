@@ -2,9 +2,6 @@ use std::env::current_dir;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gtk::prelude::{Cast, ListModelExt};
-use gtk::traits::SelectionModelExt;
-use gtk::{Bitset, MultiSelection};
 use path_clean::PathClean;
 
 use self::contents::Contents;
@@ -121,7 +118,7 @@ impl NavTarget {
         let target = Self::cleaned_abs(p, list)?;
 
         if !target.exists() {
-            show_warning(&format!("Could not locate {p:?}"));
+            show_warning(format!("Could not locate {p:?}"));
             None
         } else if let Some(parent) = target.parent() {
             if !parent.is_dir() {

@@ -1,6 +1,5 @@
 use std::collections::hash_map;
 use std::rc::Rc;
-use std::time::Instant;
 
 use ahash::AHashMap;
 use gtk::gio::{Menu, MenuItem, SimpleAction, SimpleActionGroup};
@@ -38,7 +37,6 @@ impl From<&str> for GC {
         if let Some((cmd, arg)) = command.split_once(' ') {
             let arg = arg.trim_start();
 
-            println!("{cmd} {arg}");
             match cmd {
                 "Display" => return Self::Display(arg.to_variant()),
                 "SortBy" => return Self::SortMode(arg.to_variant()),

@@ -225,7 +225,7 @@ impl Gui {
 
         // TODO -- state cache - less necessary than aw-man
         let g = self.clone();
-        self.window.connect_close_request(move |w| {
+        self.window.connect_close_request(move |_w| {
             g.cancel_operations();
             //     let s = g.win_state.get();
             //     let size = if s.maximized || s.fullscreen {
