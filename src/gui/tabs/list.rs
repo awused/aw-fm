@@ -668,8 +668,23 @@ impl TabsList {
             return warn!("Search called with no open panes");
         };
 
-        let index = self.position(active).unwrap();
-        self.tabs[index].search(query.to_owned());
+        self.find_mut(active).unwrap().search(query.to_owned());
+    }
+
+    pub fn active_trash(&self) {
+        let Some(active) = self.active else {
+            return warn!("Trash called with no open panes");
+        };
+
+        self.find(active).unwrap().trash();
+    }
+
+    pub fn active_delete(&self) {
+        let Some(active) = self.active else {
+            return warn!("Delete called with no open panes");
+        };
+
+        self.find(active).unwrap().delete();
     }
 
     pub fn reorder(&mut self, moved: TabId, dest: TabId, after: bool) {
@@ -688,7 +703,7 @@ impl TabsList {
         if let Some(active) = self.active {
             let tab = self.find(active).unwrap();
             tab.env_vars("AWFM_CURRENT_TAB", &mut env);
-            env.push(("AWFM_SELECTION".to_owned(), tab.selection_str()));
+            env.push(("AWFM_SELECTION".to_owned(), tab.selection_env_str()));
 
             if let Some(index) = self.element_position(active) {
                 if index > 0 {

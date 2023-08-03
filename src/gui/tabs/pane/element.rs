@@ -5,13 +5,13 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
     EditableExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
 };
-use gtk::{glib, Bitset, EventControllerFocus, GestureClick, MultiSelection};
+use gtk::{glib, EventControllerFocus, GestureClick, MultiSelection};
 
-use crate::com::{EntryObject, SignalHolder};
+use crate::com::SignalHolder;
 use crate::gui::tabs::id::TabId;
 use crate::gui::tabs::list::event_run_tab;
 use crate::gui::tabs::tab::Tab;
-use crate::gui::tabs_run;
+use crate::gui::{tabs_run, Selected};
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
@@ -96,8 +96,8 @@ impl PaneElement {
         let selected = selection_label.clone();
         let stk = stack.clone();
         let update_selected = move |selection: &MultiSelection, _p: u32, _n: u32| {
-            let set = selection.selection();
-            let len = set.size();
+            let mut sel = Selected::from(selection);
+            let len = sel.len();
             if len == 0 && stk.visible_child_name().map_or(false, |n| n != "count") {
                 stk.set_visible_child_name("count");
                 return;
@@ -105,8 +105,8 @@ impl PaneElement {
 
 
             let text = if len == 1 {
-                let obj = selection.item(set.nth(0)).unwrap().downcast::<EntryObject>().unwrap();
-                let entry = obj.get();
+                let eo = sel.next().unwrap();
+                let entry = eo.get();
 
                 format!(
                     "\"{}\" selected ({}{})",
@@ -116,7 +116,7 @@ impl PaneElement {
                 )
             } else {
                 // Costly, but not unbearably slow at <20ms for 100k items.
-                selected_string(selection, &set)
+                selected_string(sel)
             };
 
             selected.set_text(&text);
@@ -204,15 +204,12 @@ mod imp {
 }
 
 
-fn selected_string(selection: &MultiSelection, set: &Bitset) -> String {
-    let len = set.size();
+fn selected_string(selected: Selected) -> String {
+    let len = selected.len();
     let mut dirs = 0;
-    let mut i = 0;
     let mut bytes = 0;
     let mut contents = 0;
-    while i < len {
-        let idx = set.nth(i as u32);
-        let obj = selection.item(idx).unwrap().downcast::<EntryObject>().unwrap();
+    for obj in selected {
         let entry = obj.get();
 
         if entry.dir() {
@@ -221,8 +218,6 @@ fn selected_string(selection: &MultiSelection, set: &Bitset) -> String {
         } else {
             bytes += entry.raw_size();
         }
-
-        i += 1;
     }
 
     let mut label = String::new();

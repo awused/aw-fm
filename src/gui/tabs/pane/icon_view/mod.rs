@@ -75,7 +75,6 @@ impl IconView {
 
             // This part is not a workaround.
             if gc.button() <= 3 && n == 1 {
-                println!("Grab focus {x} {y}");
                 gc.widget().grab_focus();
             }
         });

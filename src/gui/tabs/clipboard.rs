@@ -5,16 +5,14 @@ use std::thread;
 use std::time::Duration;
 
 use gtk::gdk::Display;
-use gtk::prelude::{CastNone, DisplayExt, FileExt, ListModelExt};
+use gtk::prelude::{DisplayExt, FileExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::SelectionModelExt;
 use gtk::{gdk, gio, glib, MultiSelection};
 use strum_macros::{EnumString, IntoStaticStr};
 use x11_clipboard::Clipboard;
 
 use super::id::TabId;
-use crate::com::EntryObject;
-use crate::gui::{file_operations, gui_run};
+use crate::gui::{file_operations, gui_run, Selected};
 
 const SPECIAL: &str = "x-special/aw-fm-copied-files";
 const SPECIAL_MATE: &str = "x-special/mate-copied-files";
@@ -46,13 +44,8 @@ impl ClipboardProvider {
     // It's fine if the selection is empty.
     pub fn new(operation: Operation, selection: &MultiSelection) -> Self {
         let s: Self = glib::Object::new();
-        let selected = selection.selection();
 
-        let mut files = Vec::with_capacity(selected.size() as usize);
-        for i in 0..selected.size() as u32 {
-            let file = selection.item(selected.nth(i)).and_downcast::<EntryObject>().unwrap();
-            files.push(file);
-        }
+        let files: Vec<_> = Selected::from(selection).collect();
 
         s.imp().operation.set(operation).unwrap();
         s.imp().entries.set(files.into()).unwrap();

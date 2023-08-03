@@ -2,6 +2,9 @@ use std::env::current_dir;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use gtk::prelude::{Cast, ListModelExt};
+use gtk::traits::SelectionModelExt;
+use gtk::{Bitset, MultiSelection};
 use path_clean::PathClean;
 
 use self::contents::Contents;
@@ -93,13 +96,13 @@ impl NavTarget {
         debug_assert!(*target == *target.clean());
 
         if !target.exists() {
-            show_warning(&format!("Could not locate {target:?}"));
+            show_warning(format!("Could not locate {target:?}"));
             None
         } else if target.is_dir() {
             Some(Self { dir: target, scroll: None })
         } else if let Some(parent) = target.parent() {
             if !parent.is_dir() {
-                show_warning(&format!("Could not open {target:?}"));
+                show_warning(format!("Could not open {target:?}"));
                 return None;
             }
 
@@ -108,7 +111,7 @@ impl NavTarget {
 
             Some(Self { dir, scroll })
         } else {
-            show_warning(&format!("Could not locate {target:?}"));
+            show_warning(format!("Could not locate {target:?}"));
             None
         }
     }
@@ -122,7 +125,7 @@ impl NavTarget {
             None
         } else if let Some(parent) = target.parent() {
             if !parent.is_dir() {
-                show_warning(&format!("Could not open {p:?}"));
+                show_warning(format!("Could not open {p:?}"));
                 return None;
             }
 
@@ -131,7 +134,7 @@ impl NavTarget {
 
             Some(Self { dir, scroll })
         } else {
-            show_warning(&format!("Could not locate {p:?}"));
+            show_warning(format!("Could not locate {p:?}"));
             None
         }
     }
@@ -163,7 +166,7 @@ impl NavTarget {
             cur.push(p);
             cur.clean()
         } else {
-            show_warning(&format!("Could not make {p:?} absolute"));
+            show_warning(format!("Could not make {p:?} absolute"));
             return None;
         })
     }

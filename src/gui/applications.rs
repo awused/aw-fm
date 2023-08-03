@@ -8,7 +8,7 @@ use gtk::traits::SelectionModelExt;
 use gtk::{glib, MultiSelection};
 
 use super::tabs::id::TabId;
-use super::{show_error, show_warning, tabs_run};
+use super::{show_error, show_warning, tabs_run, Selected};
 use crate::com::EntryObject;
 
 
@@ -82,10 +82,7 @@ pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
     let mut directories = Vec::new();
     let mut files = Vec::new();
 
-    for i in 0..selected.size() {
-        let eo = selection.item(selected.nth(i as u32)).unwrap();
-        let eo = eo.downcast::<EntryObject>().unwrap();
-
+    for eo in Selected::from(selection) {
         if eo.get().dir() {
             directories.push(eo.get().abs_path.clone());
         } else {
@@ -102,7 +99,7 @@ pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
     }
 
     if directories.len() > DIR_OPEN_LIMIT {
-        return show_warning(&format!("Can't load more than {DIR_OPEN_LIMIT} directories at once"));
+        return show_warning(format!("Can't load more than {DIR_OPEN_LIMIT} directories at once"));
     }
 
     // Can be called while the TabsList lock is held.

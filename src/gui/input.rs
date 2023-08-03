@@ -260,6 +260,9 @@ impl Gui {
             "Parent" => return tabs.active_parent(),
             "Child" => return tabs.active_child(),
 
+            "Trash" => return tabs.active_trash(),
+            "Delete" => return tabs.active_delete(),
+
             "Search" => return tabs.active_search(""),
             _ => true,
         };

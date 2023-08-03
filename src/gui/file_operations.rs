@@ -1,3 +1,6 @@
+// Until all the rest are implemented
+#![allow(unused)]
+
 use std::cell::{Cell, RefCell};
 use std::ffi::{OsStr, OsString};
 use std::fs::{remove_dir, ReadDir};
@@ -33,13 +36,15 @@ enum Outcome {
     Create(PathBuf),
     // Only overwrites from copy, undo -> delete with confirmation
     CopyOverwrite(PathBuf),
-    Trash { source: PathBuf, dest: PathBuf },
     // FileInfo needs to be restored after we populate the contents, which is awkward.
     // Could unconditionally store FileInfo to restore it, probably not worth it.
     RemoveSourceDir(PathBuf, Option<FileInfo>),
     CreateDestDir(PathBuf),
     Skip,
     Delete,
+    DeleteDir,
+    // Not undoable without dumb hacks: https://gitlab.gnome.org/GNOME/glib/-/issues/845
+    Trash,
 }
 
 #[derive(Debug)]
@@ -52,13 +57,12 @@ pub enum Kind {
     // Probably won't support this, but keep the skeleton intact.
     Undo {
         prev: Box<Self>,
-        prev_progress: RefCell<Progress>,
+        prev_progress: Box<RefCell<Progress>>,
         // These should be processed FILO, just like outcomes from progress.log
-        pending_info: RefCell<Vec<(PathBuf, FileInfo)>>,
+        pending_dir_info: RefCell<Vec<(PathBuf, FileInfo)>>,
     },
-    Delete {
-        trash: bool,
-    },
+    Trash,
+    Delete,
 }
 
 impl std::fmt::Display for Kind {
@@ -74,17 +78,19 @@ impl Kind {
             Self::Copy(_) => "copy",
             Self::Rename(_) => "rename",
             Self::Undo { .. } => "undo",
-            Self::Delete { .. } => "delete",
+            Self::Trash => "trash",
+            Self::Delete => "delete",
         }
     }
 
     const fn past_tense(&self) -> &'static str {
         match self {
-            Kind::Move(_) => "moved",
-            Kind::Copy(_) => "copied",
-            Kind::Rename(_) => "renamed",
-            Kind::Undo { .. } => "undone",
-            Kind::Delete { .. } => "deleted",
+            Self::Move(_) => "moved",
+            Self::Copy(_) => "copied",
+            Self::Rename(_) => "renamed",
+            Self::Undo { .. } => "undone",
+            Self::Trash => "trashed",
+            Self::Delete => "deleted",
         }
     }
 }
@@ -99,6 +105,7 @@ impl Kind {
 #[derive(Debug)]
 struct Directory {
     abs_path: PathBuf,
+    // Only set for copy/move
     dest: PathBuf,
     // We'll open at most one directory at a time for each level of depth.
     iter: ReadDir,
@@ -134,7 +141,7 @@ enum Asking {
 #[derive(Debug)]
 pub struct Progress {
     dirs: Vec<Directory>,
-    // Set for every operation except undo
+    // Set for every operation except undo, which plays back outcomes instead.
     files: Vec<PathBuf>,
 
     log: Vec<Outcome>,
@@ -157,13 +164,19 @@ pub struct Progress {
 }
 
 #[derive(Debug)]
-enum Next {
+enum NextCopyMove {
     FinishedDir(Directory),
     Files(PathBuf, PathBuf),
 }
 
+#[derive(Debug)]
+enum NextRemove {
+    FinishedDir(Directory),
+    File(PathBuf),
+}
+
 impl Progress {
-    fn next_pair(&mut self, dest_root: &Path) -> Option<Next> {
+    fn next_copymove_pair(&mut self, dest_root: &Path) -> Option<NextCopyMove> {
         if let Some(dir) = &mut self.dirs.last_mut() {
             for next in dir.iter.by_ref() {
                 let name = match next {
@@ -177,10 +190,10 @@ impl Progress {
                     }
                 };
 
-                return Some(Next::Files(dir.abs_path.join(&name), dir.dest.join(name)));
+                return Some(NextCopyMove::Files(dir.abs_path.join(&name), dir.dest.join(name)));
             }
 
-            return Some(Next::FinishedDir(self.dirs.pop().unwrap()));
+            return Some(NextCopyMove::FinishedDir(self.dirs.pop().unwrap()));
         }
 
         let mut src = self.files.pop()?;
@@ -193,7 +206,30 @@ impl Progress {
         let name = src.file_name().unwrap();
         let dest = dest_root.to_path_buf().join(name);
 
-        Some(Next::Files(src, dest))
+        Some(NextCopyMove::Files(src, dest))
+    }
+
+    fn next_remove(&mut self) -> Option<NextRemove> {
+        if let Some(dir) = &mut self.dirs.last_mut() {
+            for next in dir.iter.by_ref() {
+                let path = match next {
+                    Ok(de) => de.path(),
+                    Err(e) => {
+                        show_warning(&format!(
+                            "Failed to read contents of directory {:?}: {e}",
+                            dir.abs_path
+                        ));
+                        continue;
+                    }
+                };
+
+                return Some(NextRemove::File(path));
+            }
+
+            return Some(NextRemove::FinishedDir(self.dirs.pop().unwrap()));
+        }
+
+        Some(NextRemove::File(self.files.pop()?))
     }
 
     fn push_outcome(&mut self, action: Outcome) {
@@ -201,9 +237,10 @@ impl Progress {
             Outcome::Move { .. }
             | Outcome::Create(_)
             | Outcome::CopyOverwrite(_)
-            | Outcome::Trash { .. }
+            | Outcome::Trash
             | Outcome::CreateDestDir(_)
-            | Outcome::Delete => {
+            | Outcome::Delete
+            | Outcome::DeleteDir => {
                 self.total += 1;
                 self.finished += 1
             }
@@ -218,12 +255,12 @@ impl Progress {
         trace!("Finding new name for copy onto self for {path:?}");
 
         let Some(name) = path.file_name() else {
-            show_warning(&format!("Can't make new name for {path:?}"));
+            show_warning(format!("Can't make new name for {path:?}"));
             return None;
         };
 
         let Some(parent) = path.parent() else {
-            show_warning(&format!("Can't make new name for {path:?}"));
+            show_warning(format!("Can't make new name for {path:?}"));
             return None;
         };
 
@@ -259,6 +296,8 @@ impl Progress {
         let mut target = target.into_vec();
         let length = target.len();
 
+        // Could do a gallop search here to avoid the worst case, at the cost of potentially
+        // missing gaps we could have used. Probably an unrealistic use case.
         static MAX_LOOPS: usize = 2000;
         for _ in 0..MAX_LOOPS {
             n += 1;
@@ -294,7 +333,7 @@ pub struct Operation {
     // May become dangling while this is ongoing.
     tab: TabId,
     kind: Kind,
-    cancel: Cancellable,
+    cancellable: Cancellable,
     // Fast operations don't live long enough to display on-screen
     slow: Cell<bool>,
     // Just clone the paths directly instead of needing to convert everything to an Rc up front.
@@ -332,13 +371,13 @@ impl Operation {
         match &kind {
             Kind::Move(p) | Kind::Copy(p) => {
                 if let Some(invalid) = files.iter().find(|f| p.starts_with(f)) {
-                    show_warning(&format!("Invalid {kind} of {invalid:?} into {p:?}"));
+                    show_warning(format!("Invalid {kind} of {invalid:?} into {p:?}"));
                     return None;
                 }
             }
             Kind::Rename(p) => {
                 if files.len() != 1 {
-                    show_warning(&format!("Got invalid rename of {} files", files.len()));
+                    show_warning(format!("Got invalid rename of {} files", files.len()));
                     return None;
                 }
 
@@ -347,8 +386,7 @@ impl Operation {
                     return None;
                 }
             }
-            Kind::Undo { .. } => {}
-            Kind::Delete { .. } => {}
+            Kind::Undo { .. } | Kind::Trash | Kind::Delete => {}
         }
 
 
@@ -386,7 +424,7 @@ impl Operation {
 
             Self {
                 tab,
-                cancel: Cancellable::new(),
+                cancellable: Cancellable::new(),
                 slow: Cell::default(),
                 kind,
                 progress: RefCell::new(progress),
@@ -401,7 +439,7 @@ impl Operation {
     }
 
     fn process_next(self: Rc<Self>) {
-        if self.cancel.is_cancelled() {
+        if self.cancellable.is_cancelled() {
             info!("Cancelled operation {:?}", self.kind);
 
             return gui_run(|g| g.finish_operation(self));
@@ -412,7 +450,8 @@ impl Operation {
             Kind::Copy(p) => self.process_next_copy(p),
             Kind::Rename(_p) => todo!(),
             Kind::Undo { .. } => todo!(),
-            Kind::Delete { .. } => todo!(),
+            Kind::Trash => self.process_next_trash(),
+            Kind::Delete => self.process_next_delete(),
         };
 
         match status {
@@ -426,9 +465,9 @@ impl Operation {
 
     fn process_next_move(self: &Rc<Self>, dest: &Path) -> Status {
         let (src, dst) = loop {
-            let (src, dst) = match self.progress.borrow_mut().next_pair(dest) {
-                Some(Next::Files(src, dst)) => (src, dst),
-                Some(Next::FinishedDir(dir)) => {
+            let (src, dst) = match self.progress.borrow_mut().next_copymove_pair(dest) {
+                Some(NextCopyMove::Files(src, dst)) => (src, dst),
+                Some(NextCopyMove::FinishedDir(dir)) => {
                     dir.apply_info();
 
                     info!("Removing source directory {dir:?}");
@@ -465,7 +504,7 @@ impl Operation {
             CopyMovePrep::Asking => return Status::AsyncScheduled,
             CopyMovePrep::Ready(prep) => prep,
             CopyMovePrep::Abort(e) => {
-                show_error(&e);
+                show_error(e);
                 self.cancel();
                 return Status::Done;
             }
@@ -500,16 +539,13 @@ impl Operation {
             &dest,
             flags,
             glib::Priority::LOW,
-            Some(&self.cancel),
+            Some(&self.cancellable),
             None,
             move |result| {
                 if let Err(e) = result {
-                    if !s.cancel.is_cancelled() {
-                        show_error(&format!(
-                            "Failed to move file {src:?} to {dst:?}, aborting operation: {e}"
-                        ));
-
-                        s.cancel.cancel();
+                    if !s.cancellable.is_cancelled() {
+                        show_error(format!("{e}, aborting operation"));
+                        s.cancel();
                     }
                 } else {
                     trace!("Finished moving {src:?} to {dst:?}");
@@ -523,9 +559,9 @@ impl Operation {
 
     fn process_next_copy(self: &Rc<Self>, dest: &Path) -> Status {
         let (src, dst) = loop {
-            let (src, mut dst) = match self.progress.borrow_mut().next_pair(dest) {
-                Some(Next::Files(src, dst)) => (src, dst),
-                Some(Next::FinishedDir(dir)) => {
+            let (src, mut dst) = match self.progress.borrow_mut().next_copymove_pair(dest) {
+                Some(NextCopyMove::Files(src, dst)) => (src, dst),
+                Some(NextCopyMove::FinishedDir(dir)) => {
                     dir.apply_info();
                     return Status::CallAgain;
                 }
@@ -553,7 +589,7 @@ impl Operation {
             CopyMovePrep::Asking => return Status::AsyncScheduled,
             CopyMovePrep::Ready(prep) => prep,
             CopyMovePrep::Abort(e) => {
-                show_error(&e);
+                show_error(e);
                 self.cancel();
                 return Status::Done;
             }
@@ -588,15 +624,13 @@ impl Operation {
             &dest,
             flags,
             glib::Priority::LOW,
-            Some(&self.cancel),
+            Some(&self.cancellable),
             None,
             move |result| {
                 if let Err(e) = result {
-                    if !s.cancel.is_cancelled() {
-                        show_error(&format!(
-                            "Failed to copy file {src:?} to {dst:?}, aborting operation: {e}"
-                        ));
-                        s.cancel.cancel();
+                    if !s.cancellable.is_cancelled() {
+                        show_error(format!("{e}, aborting operation"));
+                        s.cancel();
                     }
                 } else {
                     trace!("Finished copying {src:?} to {dst:?}");
@@ -733,7 +767,7 @@ impl Operation {
             };
 
             if let Err(e) = std::fs::create_dir(&dst) {
-                show_error(&format!("Failed to create destination directory {dst:?}: {e}"));
+                show_error(format!("Failed to create destination directory {dst:?}: {e}"));
                 return CopyMovePrep::CallAgain;
             }
 
@@ -762,9 +796,118 @@ impl Operation {
         CopyMovePrep::CallAgain
     }
 
+    fn process_next_trash(self: &Rc<Self>) -> Status {
+        let mut progress = self.progress.borrow_mut();
+        let next = match progress.next_remove() {
+            Some(NextRemove::File(p)) => p,
+            Some(NextRemove::FinishedDir(_dir)) => unreachable!(),
+            None => return Status::Done,
+        };
+
+        #[cfg(feature = "debug-forced-slow")]
+        {
+            let s = self.clone();
+            glib::timeout_add_local_once(Duration::from_secs(1), move || s.do_trash(next));
+        }
+        #[cfg(not(feature = "debug-forced-slow"))]
+        self.do_trash(next);
+
+        Status::AsyncScheduled
+    }
+
+    fn do_trash(self: &Rc<Self>, path: PathBuf) {
+        let s = self.clone();
+        gio::File::for_path(&path).trash_async(
+            glib::Priority::LOW,
+            Some(&self.cancellable),
+            move |result| {
+                if let Err(e) = result {
+                    if !s.cancellable.is_cancelled() {
+                        show_warning(format!("{e}"));
+                        // Could choose to keep going, but probably too niche
+                        s.cancel();
+                    }
+                } else {
+                    trace!("Finished trashing {path:?}");
+                    s.progress.borrow_mut().push_outcome(Outcome::Trash);
+                }
+                s.process_next();
+            },
+        );
+    }
+
+    fn process_next_delete(self: &Rc<Self>) -> Status {
+        let mut progress = self.progress.borrow_mut();
+        let (next, was_dir) = match progress.next_remove() {
+            Some(NextRemove::File(p)) => {
+                if p.is_dir() && !p.is_symlink() {
+                    let iter = match std::fs::read_dir(&p) {
+                        Ok(iter) => iter,
+                        Err(e) => {
+                            show_error(format!(
+                                "Could not read directory {p:?}, aborting delete: {e}"
+                            ));
+                            self.cancel();
+                            return Status::Done;
+                        }
+                    };
+                    progress.dirs.push(Directory {
+                        abs_path: p,
+                        dest: PathBuf::new(),
+                        iter,
+                        original_info: None,
+                    });
+                    return Status::CallAgain;
+                }
+
+                (p, false)
+            }
+            Some(NextRemove::FinishedDir(dir)) => (dir.abs_path, true),
+            None => return Status::Done,
+        };
+
+
+        #[cfg(feature = "debug-forced-slow")]
+        {
+            let s = self.clone();
+            glib::timeout_add_local_once(Duration::from_secs(1), move || {
+                s.do_delete(next, was_dir)
+            });
+        }
+        #[cfg(not(feature = "debug-forced-slow"))]
+        self.do_delete(next, was_dir);
+
+        Status::AsyncScheduled
+    }
+
+    fn do_delete(self: &Rc<Self>, path: PathBuf, was_dir: bool) {
+        let s = self.clone();
+        gio::File::for_path(&path).delete_async(
+            glib::Priority::LOW,
+            Some(&self.cancellable),
+            move |result| {
+                if let Err(e) = result {
+                    if !s.cancellable.is_cancelled() {
+                        show_warning(format!("{e}"));
+                        // Could choose to keep going, but probably too niche
+                        s.cancel();
+                    }
+                } else {
+                    trace!("Finished deleting {path:?}");
+                    s.progress.borrow_mut().push_outcome(if was_dir {
+                        Outcome::DeleteDir
+                    } else {
+                        Outcome::Delete
+                    });
+                }
+                s.process_next();
+            },
+        );
+    }
+
     fn cancel(&self) {
         info!("Cancelling operation {:?}", self.kind,);
-        self.cancel.cancel();
+        self.cancellable.cancel();
     }
 }
 

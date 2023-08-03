@@ -7,7 +7,7 @@ use gtk::gdk::ModifierType;
 use gtk::glib::{ControlFlow, SourceId, WeakRef};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{gdk, gio, glib};
+use gtk::{gdk, gio, glib, Bitset, MultiSelection};
 use tokio::sync::mpsc::UnboundedSender;
 
 use self::file_operations::Operation;
@@ -36,12 +36,14 @@ fn gui_run<R, F: FnOnce(&Rc<Gui>) -> R>(f: F) -> R {
     GUI.with(|g| f(g.get().unwrap()))
 }
 
-fn show_warning(msg: &str) {
+fn show_warning(msg: impl AsRef<str>) {
+    let msg = msg.as_ref();
     warn!("{msg}");
     gui_run(|g| g.warning(msg))
 }
 
-fn show_error(msg: &str) {
+fn show_error(msg: impl AsRef<str>) {
+    let msg = msg.as_ref();
     error!("{msg}");
     gui_run(|g| g.error(msg))
 }
@@ -343,5 +345,47 @@ impl Gui {
 
         self.window.imp().toast.set_text(msg);
         self.window.imp().toast.set_visible(true);
+    }
+}
+
+
+struct Selected<'a> {
+    selection: &'a MultiSelection,
+    selected: Bitset,
+    pos: u32,
+}
+
+impl<'a> From<&'a MultiSelection> for Selected<'a> {
+    fn from(selection: &'a MultiSelection) -> Self {
+        let selected = selection.selection();
+        Self { selection, selected, pos: 0 }
+    }
+}
+
+impl<'a> Iterator for Selected<'a> {
+    type Item = EntryObject;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if (self.pos as u64) < self.selected.size() {
+            let index = self.selected.nth(self.pos);
+            let obj = self.selection.item(index).unwrap();
+            self.pos += 1;
+            Some(obj.downcast().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+impl ExactSizeIterator for Selected<'_> {
+    fn len(&self) -> usize {
+        self.selected.size() as usize
+    }
+}
+
+impl Selected<'_> {
+    fn get(&self, i: u32) -> EntryObject {
+        let index = self.selected.nth(self.pos);
+        self.selection.item(index).unwrap().downcast().unwrap()
     }
 }

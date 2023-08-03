@@ -71,8 +71,8 @@ shortcuts = [
 
   {key = "F5", action = "Refresh"},
 
-  # {key = "Delete", action = "Trash"},
-  # {key = "Delete", modifiers = "Shift", action = "Delete"},
+  {key = "Delete", action = "Trash"},
+  {key = "Delete", modifiers = "Shift", action = "Delete"},
 
   # Relative paths are not allowed.
   # Change these to correct paths if you actually use them.

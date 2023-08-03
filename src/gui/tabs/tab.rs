@@ -1,12 +1,13 @@
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use gtk::gio::Cancellable;
 use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{SelectionModelExt, WidgetExt};
-use gtk::{Orientation, Widget};
+use gtk::{AlertDialog, Orientation, Widget};
 use MaybePane as MP;
 
 use self::flat_dir::FlatDir;
@@ -22,8 +23,9 @@ use crate::com::{
     SearchSnapshot, SearchUpdate, SnapshotId, SortDir, SortMode, SortSettings,
 };
 use crate::config::CONFIG;
+use crate::gui::file_operations::Kind;
 use crate::gui::tabs::PartiallyAppliedUpdate;
-use crate::gui::{applications, gui_run, show_error, show_warning, Update};
+use crate::gui::{applications, gui_run, show_error, show_warning, Selected, Update};
 
 /* This efficiently supports multiple tabs being open to the same directory with different
  * settings.
@@ -1097,7 +1099,7 @@ impl Tab {
         }
 
         if let Err(e) = self.element.clipboard().set_content(Some(&provider)) {
-            show_error(&format!("Failed to set clipboard: {e}"));
+            show_error(format!("Failed to set clipboard: {e}"));
         }
     }
 
@@ -1108,6 +1110,61 @@ impl Tab {
         read_clipboard(self.element.display(), self.id(), self.dir());
     }
 
+    fn run_deletion(tab: TabId, files: Vec<PathBuf>, kind: Kind) {
+        gui_run(|g| g.start_operation(tab, kind, files))
+    }
+
+    pub fn trash(&self) {
+        info!("Trashing selected files in {:?}", self.id);
+        let sel = if let Some(search) = &self.search {
+            &search.contents().selection
+        } else {
+            &self.contents.selection
+        };
+
+        let files = Selected::from(sel).map(|eo| eo.get().abs_path.to_path_buf()).collect();
+        Self::run_deletion(self.id(), files, Kind::Trash);
+    }
+
+    pub fn delete(&self) {
+        info!("Spawning deletion confirmation dialog in {:?}", self.id);
+        let sel = if let Some(search) = &self.search {
+            &search.contents().selection
+        } else {
+            &self.contents.selection
+        };
+
+        let files = Selected::from(sel);
+        let query = if files.len() == 0 {
+            return;
+        } else if files.len() == 1 {
+            format!("Permanently delete {:?}?", &*files.get(0).get().name)
+        } else {
+            format!(
+                "Permanently delete {} selected items in {}?",
+                files.len(),
+                self.element.imp().title.text()
+            )
+        };
+
+        let files: Vec<_> = files.map(|eo| eo.get().abs_path.to_path_buf()).collect();
+
+        let alert = AlertDialog::builder()
+            .buttons(["Cancel", "Delete"])
+            .cancel_button(0)
+            .default_button(1)
+            .message(query)
+            .build();
+
+        let tab = self.id();
+        alert.choose(Some(&gui_run(|g| g.window.clone())), Cancellable::NONE, move |button| {
+            if button == Ok(1) {
+                debug!("Confirmed deletion for {} items in {:?}", files.len(), tab);
+                Self::run_deletion(tab, files, Kind::Delete);
+            }
+        });
+    }
+
     pub fn env_vars(&self, prefix: &str, env: &mut Vec<(String, OsString)>) {
         env.push((prefix.to_owned() + "_PATH", self.dir.path().as_os_str().to_owned()));
         if let Some(search) = &self.search {
@@ -1115,7 +1172,7 @@ impl Tab {
         }
     }
 
-    pub fn selection_str(&self) -> OsString {
+    pub fn selection_env_str(&self) -> OsString {
         let selection = self
             .search
             .as_ref()
