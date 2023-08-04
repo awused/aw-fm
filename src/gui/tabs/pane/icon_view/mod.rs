@@ -136,4 +136,14 @@ impl IconView {
         });
         self._workaround_rubber = SignalHolder::new(selection, signal);
     }
+
+    pub(super) fn workaround_enable_rubberband(&self) {
+        if self.selection.n_items() != 0 {
+            self.grid.set_enable_rubberband(true);
+        }
+    }
+
+    pub(super) fn workaround_disable_rubberband(&self) {
+        self.grid.set_enable_rubberband(false);
+    }
 }

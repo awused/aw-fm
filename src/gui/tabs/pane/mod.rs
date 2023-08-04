@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
-use gtk::gdk::{Key, Rectangle};
+use gtk::gdk::{ContentProvider, Key, Rectangle};
 use gtk::glib::{Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -12,14 +12,16 @@ use gtk::traits::{
     GestureSingleExt, PopoverExt, WidgetExt,
 };
 use gtk::{
-    CustomFilter, EventControllerKey, FilterChange, FilterListModel, GestureClick, MultiSelection,
-    Orientation, ScrolledWindow, Widget,
+    CustomFilter, DragSource, EventControllerKey, FilterChange, FilterListModel, GestureClick,
+    MultiSelection, Orientation, ScrolledWindow, Widget, WidgetPaintable,
 };
 
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
+use super::clipboard::Operation;
 use super::id::TabId;
+use super::tab::Tab;
 use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
 use crate::gui::tabs::NavTarget;
@@ -75,60 +77,6 @@ fn get_last_visible_child(parent: &Widget) -> Option<Widget> {
     }
 }
 
-trait Bound {
-    fn bind(&self, eo: &EntryObject);
-    fn unbind(&self, eo: &EntryObject);
-    fn bound_object(&self) -> Option<EntryObject>;
-}
-
-fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
-    tab: TabId,
-    widget: &W,
-    bound: WeakRef<B>,
-) {
-    let click = GestureClick::new();
-    click.set_button(0);
-
-    click.connect_pressed(move |c, _n, x, y| {
-        let eo = bound.upgrade().unwrap().bound_object().unwrap();
-
-        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-        let alloc = c.widget().allocation();
-        if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
-            error!(
-                "Workaround -- ignoring junk mouse event in {tab:?} on item {:?}",
-                &*eo.get().name
-            );
-            return;
-        }
-
-        debug!("Click {} for {:?} in {tab:?}", c.current_button(), &*eo.get().name);
-
-        if c.current_button() == 2 {
-            if let Some(nav) = NavTarget::open_or_jump_abs(eo.get().abs_path.clone()) {
-                tabs_run(|t| t.create_tab(Some(tab), nav, false));
-            }
-        } else if c.current_event().unwrap().triggers_context_menu() {
-            let w = c.widget();
-
-            c.set_state(gtk::EventSequenceState::Claimed);
-            let menu = tabs_run(|tlist| {
-                tlist.set_active(tab);
-                let t = tlist.find(tab).unwrap();
-                t.select_if_not(eo);
-                t.context_menu()
-            });
-
-            let (x, y) = gui_run(|g| w.translate_coordinates(&g.window, x, y)).unwrap();
-
-            let rect = Rectangle::new(x as i32, y as i32, 1, 1);
-            menu.set_pointing_to(Some(&rect));
-            menu.popup();
-        }
-    });
-
-    widget.add_controller(click);
-}
 
 #[derive(Debug)]
 pub(super) struct Pane {
@@ -599,6 +547,20 @@ impl Pane {
 
         Some(kin)
     }
+
+    pub fn workaround_disable_rubberband(&self) {
+        match &self.view {
+            View::Icons(v) => v.workaround_disable_rubberband(),
+            View::Columns(v) => v.workaround_disable_rubberband(),
+        }
+    }
+
+    pub fn workaround_enable_rubberband(&self) {
+        match &self.view {
+            View::Icons(v) => v.workaround_enable_rubberband(),
+            View::Columns(v) => v.workaround_enable_rubberband(),
+        }
+    }
 }
 
 fn firstmost_descendent(mut widget: Widget) -> TabId {
@@ -615,4 +577,97 @@ fn lastmost_descendent(mut widget: Widget) -> TabId {
     }
 
     *widget.downcast::<PaneElement>().unwrap().imp().tab.get().unwrap()
+}
+
+
+trait Bound {
+    fn bind(&self, eo: &EntryObject);
+    fn unbind(&self, eo: &EntryObject);
+    fn bound_object(&self) -> Option<EntryObject>;
+}
+
+// Sets up various controllers that should be set only on items, and not on dead space around
+// items.
+fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
+    tab: TabId,
+    widget: &W,
+    bound: WeakRef<B>,
+) {
+    let click = GestureClick::new();
+    click.set_button(0);
+
+    let b = bound.clone();
+    click.connect_pressed(move |c, _n, x, y| {
+        let eo = b.upgrade().unwrap().bound_object().unwrap();
+
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+        let alloc = c.widget().allocation();
+        if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
+            error!(
+                "Workaround -- ignoring junk mouse event in {tab:?} on item {:?}",
+                &*eo.get().name
+            );
+            return;
+        }
+
+
+        debug!("Click {} for {:?} in {tab:?}", c.current_button(), &*eo.get().name);
+
+        if c.current_button() == 1 {
+            tabs_run(|t| t.find(tab).unwrap().workaround_disable_rubberband());
+        } else if c.current_button() == 2 {
+            if let Some(nav) = NavTarget::open_or_jump_abs(eo.get().abs_path.clone()) {
+                tabs_run(|t| t.create_tab(Some(tab), nav, false));
+            }
+        } else if c.current_event().unwrap().triggers_context_menu() {
+            let w = c.widget();
+
+            c.set_state(gtk::EventSequenceState::Claimed);
+            let menu = tabs_run(|tlist| {
+                tlist.set_active(tab);
+                let t = tlist.find(tab).unwrap();
+                t.select_if_not(eo);
+                t.context_menu()
+            });
+
+            let (x, y) = gui_run(|g| w.translate_coordinates(&g.window, x, y)).unwrap();
+
+            let rect = Rectangle::new(x as i32, y as i32, 1, 1);
+            menu.set_pointing_to(Some(&rect));
+            menu.popup();
+        }
+    });
+
+    click.connect_released(move |_c, _n, _x, _y| {
+        tabs_run(|t| t.find(tab).map(Tab::workaround_enable_rubberband));
+    });
+
+    let drag_source = DragSource::new();
+    let b = bound.clone();
+    drag_source.connect_prepare(move |_ds, _x, _y| {
+        let bw = b.upgrade().unwrap();
+        let eo = bw.bound_object().unwrap();
+
+        let provider = tabs_run(|tlist| {
+            tlist.set_active(tab);
+            let t = tlist.find(tab).unwrap();
+            t.select_if_not(eo);
+            t.content_provider(Operation::Cut)
+        });
+
+        Some(provider.into())
+    });
+
+    drag_source.connect_drag_begin(move |ds, _drag| {
+        let Some(bw) = bound.upgrade() else {
+            return;
+        };
+        let paintable = WidgetPaintable::new(Some(&bw));
+
+        ds.set_icon(Some(&paintable), bw.width() / 2, bw.height() / 2);
+    });
+    drag_source.set_propagation_phase(gtk::PropagationPhase::Capture);
+
+    widget.add_controller(click);
+    widget.add_controller(drag_source);
 }

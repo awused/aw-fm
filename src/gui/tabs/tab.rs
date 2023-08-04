@@ -1098,13 +1098,17 @@ impl Tab {
         }
     }
 
-    pub fn set_clipboard(&self, operation: Operation) {
+    pub fn content_provider(&self, operation: Operation) -> ClipboardProvider {
         let selection = self
             .search
             .as_ref()
             .map_or(&self.contents.selection, |s| &s.contents().selection);
 
-        let provider = ClipboardProvider::new(operation, selection);
+        ClipboardProvider::new(operation, selection)
+    }
+
+    pub fn set_clipboard(&self, operation: Operation) {
+        let provider = self.content_provider(operation);
         let text = provider.display_string();
 
         info!("Setting clipboard as: {text}");
@@ -1212,6 +1216,20 @@ impl Tab {
         }
 
         out
+    }
+
+    // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
+    pub fn workaround_disable_rubberband(&self) {
+        if let Some(pane) = self.pane.get() {
+            pane.workaround_disable_rubberband();
+        }
+    }
+
+    // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
+    pub fn workaround_enable_rubberband(&self) {
+        if let Some(pane) = self.pane.get() {
+            pane.workaround_enable_rubberband();
+        }
     }
 }
 
