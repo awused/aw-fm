@@ -62,8 +62,8 @@ split.
 
 #### Custom Actions
 
-Custom actions are enabled by scripts in the custom-actions directory, default
-`$HOME/.config/aw-fm/custom-actions/`. Depending on how they are configured
+Custom actions are enabled by scripts in the actions directory, default
+`$HOME/.config/aw-fm/actions/`. Depending on how they are configured
 they do not always appear in the context menu.
 
 They must be executable text files and options are read from within the file.

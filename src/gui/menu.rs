@@ -429,7 +429,7 @@ impl GuiMenu {
         let iter = match ACTIONS_DIR.read_dir() {
             Ok(rd) => rd,
             Err(e) => {
-                error!("Failed to read custom actions directory: {e}");
+                warn!("Failed to read custom actions directory: {e}");
                 return Vec::new();
             }
         };
@@ -498,7 +498,6 @@ impl GuiMenu {
                 None => &menu,
             };
 
-            // menuitem.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
             menu.append_item(&menuitem);
         }
 
