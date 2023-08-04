@@ -168,6 +168,8 @@ pub static ACTIONS_DIR: Lazy<Arc<PathBuf>> = Lazy::new(|| {
             .unwrap_or_else(|| {
                 panic!("Could not read default config directory, set actions_directory manually.")
             })
+            .join("aw-fm")
+            .join("actions")
             .into()
     })
 });

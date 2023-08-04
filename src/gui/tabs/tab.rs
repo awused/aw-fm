@@ -1185,7 +1185,7 @@ impl Tab {
             if let Some(search) = &self.search { search.contents() } else { &self.contents };
         let sel: Vec<EntryObject> = Selected::from(&contents.selection).collect();
 
-        gui_run(|g| g.menu.get().unwrap().prepare(self.settings, sel))
+        gui_run(|g| g.menu.get().unwrap().prepare(self.settings, sel, &self.dir()))
     }
 
     pub fn env_vars(&self, prefix: &str, env: &mut Vec<(String, OsString)>) {

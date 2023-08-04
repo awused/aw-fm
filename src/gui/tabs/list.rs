@@ -386,6 +386,7 @@ impl TabsList {
     // Splits based on index in self.tabs.
     // Used as an implementation detail for session loading
     // returns false if it fails, and session loading should stop if it happens.
+    #[allow(unused)]
     fn restore_split(&mut self, first: usize, second: usize, orient: Orientation) -> bool {
         if first >= self.tabs.len()
             || second >= self.tabs.len()

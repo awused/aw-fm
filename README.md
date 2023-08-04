@@ -5,9 +5,9 @@ Awused's personal gui file manager.
 It is a simple file manager designed to be fast and efficient at doing what I
 actually do.
 
-As of writing this the project is less than two weeks old.
-It's probably completely unusable for anyone yet.
-Some documentation may not be in-date yet.
+There are many rough edges but as of writing this, it's less than four weeks old
+and just barely usable now that custom actions have been implemented. Expect many
+rough edges.
 
 ## Features
 
@@ -19,10 +19,10 @@ Some documentation may not be in-date yet.
   * A reasonably complete set of text commands to control the application.
   * Define custom shortcuts, custom bookmarks, and custom context menu actions.
 * A UI charitably described as minimal.
+* Custom actions showing up in context menus.
+  * Just flat scripts, easy to write and back up.
 * Not much more, anything I don't personally use doesn't get implemented.
   * Will not cover every use case, like mounting external drives.
-<!-- * Custom actions showing up in context menus. -->
-  <!-- * Just flat scripts, easy to write and back up. -->
 
 ## Installation and Usage
 
@@ -51,11 +51,11 @@ On fedora all required dependencies can be installed with
 ### Defaults
 
 The defaults should make some level of sense. Hit `?` for a popup containing all
-customizable keybinds.
+current customizable keybinds.
 
 Mouse controls are not customizable but should work as expected. Middle clicking
-on a file or directory is the same as the `NewBackgroundTab` command below. Shift
-clicking on a tab will open it in a horizontal split, control clicking in a vertical
+on a file or directory is the same as the `NewBackgroundTab` command below. Control
+clicking on a tab will open it in a horizontal split, shift clicking leads to a vertical
 split.
 
 ### Customization
@@ -167,15 +167,17 @@ with no arguments and several environment variables set.
 [rofi-jump-home.sh](examples/rofi-jump-home.sh) is an example that opens rofi
 to navigate to a directory inside the user's home directory.
 
+All of these variables may be empty or absent.
+
 Environment Variable | Explanation
 -------------------- | ----------
-AWFM_CURRENT_TAB_PATH | The currently selected tab, which is also the current pane. May be empty or absent.
-AWFM_CURRENT_TAB_SEARCH | The currently selected tab's search. May be empty or absent.
-AWFM_SELECTION | A newline-separated list of selected files in the current displayed sort order. May be empty.
-AWFM_NEXT_TAB_PATH | The next(lower) tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be the first tab. May be empty.
-AWFM_NEXT_TAB_SEARCH | See above.
-AWFM_PREV_TAB_PATH | The previous(higher) tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be absent. May be empty.
-AWFM_PREV_TAB_SEARCH | See above.
+`AWFM_CURRENT_TAB_PATH` | The currently selected tab, which is also the current pane.
+`AWFM_CURRENT_TAB_SEARCH` | The currently selected tab's search.
+`AWFM_SELECTION` | A newline-separated list of selected files in the current displayed sort order. Scripts that run against directories may need to check both `AWFM_SELECTION` and `AWFM_CURRENT_TAB_PATH` to decide what to operate on.
+`AWFM_NEXT_TAB_PATH` | The next(lower) tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be the first tab.
+`AWFM_NEXT_TAB_SEARCH` | See above.
+`AWFM_PREV_TAB_PATH` | The previous(higher) tab as visually seen in the tabs list on the left. If tabs are open but no panes are open, this will be absent.
+`AWFM_PREV_TAB_SEARCH` | See above.
 
 <!-- AWFM_NEXT_PANE | The tab open in the "next" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty. -->
 <!-- AWFM_PREV_PANE | The tab open in the "previous" pane. Pane ordering is based on how they were opened as a tree, with left/top tabs coming before right/bottoms tabs. May be empty. -->
@@ -185,7 +187,8 @@ AWFM_PREV_TAB_SEARCH | See above.
 
 ## Building on Windows
 
-Not planned, good luck. Probably won't work.
+Not planned, good luck. Probably won't work even if the trivial things like
+unix-only imports are fixed.
 
 ## Development
 
