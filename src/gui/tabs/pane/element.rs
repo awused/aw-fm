@@ -1,9 +1,10 @@
 use std::fmt::Write;
 
+use gtk::gdk::{ModifierType, Rectangle};
 use gtk::prelude::{Cast, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
-    EditableExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
+    EditableExt, EventControllerExt, GestureSingleExt, PopoverExt, SelectionModelExt, WidgetExt,
 };
 use gtk::{glib, EventControllerFocus, GestureClick, MultiSelection};
 
@@ -11,7 +12,7 @@ use crate::com::SignalHolder;
 use crate::gui::tabs::id::TabId;
 use crate::gui::tabs::list::event_run_tab;
 use crate::gui::tabs::tab::Tab;
-use crate::gui::{tabs_run, Selected};
+use crate::gui::{gui_run, tabs_run, Selected};
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
@@ -50,12 +51,31 @@ impl PaneElement {
                 return;
             }
 
-            trace!("Mouse button {} in pane {:?}", c.current_button(), tab);
+            trace!("Mousebutton {} in pane {:?}", c.current_button(), tab);
+
+            if c.current_event().unwrap().triggers_context_menu() {
+                let menu = tabs_run(|tlist| {
+                    tlist.set_active(tab);
+                    let t = tlist.find(tab).unwrap();
+
+                    let mods = c.current_event().unwrap().modifier_state();
+                    if !mods.contains(ModifierType::SHIFT_MASK)
+                        && !mods.contains(ModifierType::CONTROL_MASK)
+                    {
+                        t.clear_selection();
+                    }
+                    t.context_menu()
+                });
+
+                let (x, y) =
+                    gui_run(|g| c.widget().translate_coordinates(&g.window, x, y)).unwrap();
+
+                let rect = Rectangle::new(x as i32, y as i32, 1, 1);
+                menu.set_pointing_to(Some(&rect));
+                menu.popup();
+            }
+
             match c.current_button() {
-                3 => {
-                    println!("TODO -- bare tab context menu");
-                    tabs_run(|t| t.set_active(tab));
-                }
                 8 => event_run_tab(tab, Tab::back),
                 9 => event_run_tab(tab, Tab::forward),
                 _ => {}

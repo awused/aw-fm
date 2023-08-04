@@ -659,6 +659,13 @@ impl Tab {
         }
     }
 
+    pub fn clear_selection(&self) {
+        let contents =
+            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+
+        contents.selection.unselect_all();
+    }
+
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: NavTarget) {
         info!("Navigating {:?} from {:?} to {:?}", self.id, self.dir.path(), target);
 
