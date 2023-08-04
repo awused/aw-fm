@@ -3,7 +3,7 @@
 #**aw-fm-settings-begin**
 #**aw-fm-settings-end**
 
-# Install scripts to ~/.config/aw-fm/scripts or wherever you've configured it to look.
+# Install custom actions to ~/.config/aw-fm/actions or wherever you've configured it to look.
 #
 # Aw-fm looks for a block beginning with **aw-fm-settings-begin** near the start of the file
 # (first 20 lines) and near the beginning of a line with no whitespace. The configuration block
@@ -15,10 +15,12 @@
 #
 # Inside that block, all settings are parsed after the first whitespace character, one per line.
 # Unrecognized lines are ignored.
+#
+# Custom actions SHOULD NOT produce any output to stdout that isn't intended as a command for aw-fm.
+# Sink any unwanted command output to /dev/null or an appropriate log file.
 
 # All default settings.
 # The default is to just run on anything and everything.
-
 #**aw-fm-settings-begin**
 #
 ## Name, defaults to the name of the script.

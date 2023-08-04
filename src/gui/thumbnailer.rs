@@ -11,7 +11,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use self::send::SendFactory;
 use super::{gui_run, ThumbPriority};
-use crate::com::EntryObject;
+use crate::com::{EntryObject, FileTime};
 use crate::config::CONFIG;
 use crate::{closing, handle_panic};
 
@@ -101,7 +101,7 @@ impl Thumbnailer {
         });
     }
 
-    fn finish_thumbnail(factory: SendFactory, tex: Texture, path: Arc<Path>) {
+    fn finish_thumbnail(factory: SendFactory, tex: Texture, path: Arc<Path>, mtime: FileTime) {
         gtk::glib::idle_add_once(move || {
             Self::done_with_ticket(factory);
 
@@ -109,11 +109,11 @@ impl Thumbnailer {
                 return;
             };
 
-            obj.imp().update_thumbnail(tex);
+            obj.imp().update_thumbnail(tex, mtime);
         });
     }
 
-    fn fail_thumbnail(factory: SendFactory, path: Arc<Path>) {
+    fn fail_thumbnail(factory: SendFactory, path: Arc<Path>, mtime: FileTime) {
         gtk::glib::idle_add_once(move || {
             Self::done_with_ticket(factory);
 
@@ -121,7 +121,7 @@ impl Thumbnailer {
                 return;
             };
 
-            obj.imp().fail_thumbnail();
+            obj.imp().fail_thumbnail(mtime);
         });
     }
 
@@ -195,13 +195,13 @@ impl Thumbnailer {
         let path = entry.abs_path.clone();
         let uri = gtk::gio::File::for_path(&entry.abs_path).uri();
         // It only cares about seconds
-        let mtime_sec = obj.get().mtime.sec;
+        let mtime = obj.get().mtime;
         let mime_type = entry.mime.clone();
 
         // let start = Instant::now();
 
         self.pool.spawn(move || {
-            let existing = factory.lookup(&uri, mtime_sec);
+            let existing = factory.lookup(&uri, mtime.sec);
 
             if let Some(existing) = existing {
                 let gfile = gtk::gio::File::for_path(existing);
@@ -209,25 +209,25 @@ impl Thumbnailer {
                     Ok(tex) => {
                         // This is just too spammy outside of debugging
                         // trace!("Loaded existing thumbnail for {uri:?}");
-                        return Self::finish_thumbnail(factory, tex, path);
+                        return Self::finish_thumbnail(factory, tex, path, mtime);
                     }
                     Err(e) => {
                         error!("Failed to load existing thumbnail: {e:?}");
-                        return Self::fail_thumbnail(factory, path);
+                        return Self::fail_thumbnail(factory, path, mtime);
                     }
                 }
             }
 
-            if factory.has_failed(&uri, mtime_sec) {
-                return Self::fail_thumbnail(factory, path);
+            if factory.has_failed(&uri, mtime.sec) {
+                return Self::fail_thumbnail(factory, path, mtime);
             }
 
-            if !factory.can_thumbnail(&uri, &mime_type, mtime_sec) {
+            if !factory.can_thumbnail(&uri, &mime_type, mtime.sec) {
                 // trace!("Marking thumbnail as failed, though it wasn't attempted.");
-                return Self::fail_thumbnail(factory, path);
+                return Self::fail_thumbnail(factory, path, mtime);
             }
 
-            match factory.generate_and_save_thumbnail(&uri, &mime_type, mtime_sec) {
+            match factory.generate_and_save_thumbnail(&uri, &mime_type, mtime.sec) {
                 Some(tex) => {
                     // Spammy
                     // trace!(
@@ -235,9 +235,9 @@ impl Thumbnailer {
                     //     start.elapsed(),
                     //     path.file_name().unwrap_or(path.as_os_str())
                     // );
-                    Self::finish_thumbnail(factory, tex, path);
+                    Self::finish_thumbnail(factory, tex, path, mtime);
                 }
-                None => Self::fail_thumbnail(factory, path),
+                None => Self::fail_thumbnail(factory, path, mtime),
             }
         });
     }

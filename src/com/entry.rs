@@ -111,7 +111,7 @@ impl GetEntry for Arc<Entry> {
     // In the vast majority of cases we'll only have one instance.
     // This is to avoid needing to read the file twice for overlapping updates.
     fn get_entry(self) -> Entry {
-        Arc::try_unwrap(self).unwrap_or_else(|e| e.clone_inner())
+        Self::try_unwrap(self).unwrap_or_else(|e| e.clone_inner())
     }
 }
 
@@ -290,7 +290,7 @@ mod internal {
     use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassExt};
     use once_cell::sync::Lazy;
 
-    use super::{ThumbPriority, Thumbnail, ALL_ENTRY_OBJECTS};
+    use super::{FileTime, ThumbPriority, Thumbnail, ALL_ENTRY_OBJECTS};
     use crate::com::EntryKind;
 
     // (bound, mapped)
@@ -447,9 +447,14 @@ mod internal {
         // There is a minute risk of a race where we're loading a thumbnail for a file twice at
         // once and the first one finishes second. The risk is so low and the outcome so minor it
         // just isn't worth addressing.
-        pub fn update_thumbnail(&self, tex: Texture) {
+        pub fn update_thumbnail(&self, tex: Texture, mtime: FileTime) {
             let mut b = self.0.borrow_mut();
-            let thumb = &mut b.as_mut().unwrap().thumbnail;
+            let inner = &mut b.as_mut().unwrap();
+            let thumb = &mut inner.thumbnail;
+            if inner.entry.mtime != mtime {
+                trace!("Not updating thumbnail for updated file {:?}", &*inner.entry.name);
+                return;
+            }
 
             match thumb {
                 Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => {}
@@ -461,19 +466,21 @@ mod internal {
             }
         }
 
-        pub fn fail_thumbnail(&self) {
+        pub fn fail_thumbnail(&self, mtime: FileTime) {
             let mut b = self.0.borrow_mut();
-            let thumb = &mut b.as_mut().unwrap().thumbnail;
+            let inner = &mut b.as_mut().unwrap();
+            let thumb = &mut inner.thumbnail;
+            if inner.entry.mtime != mtime {
+                trace!("Not failing thumbnail for updated file {:?}", &*inner.entry.name);
+                return;
+            }
 
             match thumb {
                 Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => (),
-                Thumbnail::Loading => {}
+                Thumbnail::Loading => *thumb = Thumbnail::Failed,
                 Thumbnail::Loaded(_) => {
                     *thumb = Thumbnail::Failed;
-                    error!(
-                        "Marking loaded thumbnail as failed for: {:?}",
-                        b.as_ref().unwrap().entry.abs_path
-                    );
+                    error!("Marking loaded thumbnail as failed for: {:?}", inner.entry.abs_path);
                     drop(b);
                     self.obj().emit_by_name::<()>("update", &[]);
                 }
