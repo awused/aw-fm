@@ -260,7 +260,7 @@ pub enum Thumbnail {
     Unloaded,
     Loading,
     Loaded(Texture),
-    // Outdated(Pixbuf),
+    Outdated(Texture, bool),
     // Can do two-pass unloading for all images.
     // Only marginally useful compared to completely unloading tabs.
     // Unloaded(WeakRef<Pixbuf>),
@@ -272,6 +272,7 @@ impl Thumbnail {
         match self {
             Self::Nothing | Self::Loaded(_) | Self::Failed | Self::Loading => false,
             Self::Unloaded => true,
+            Self::Outdated(_, loading) => !*loading,
         }
     }
 }
@@ -386,7 +387,21 @@ mod internal {
             let widgets = { self.0.borrow().as_ref().unwrap().widgets.clone() };
 
             let (thumbnail, new_p) = match entry.kind {
-                EntryKind::File { .. } => (Thumbnail::Unloaded, Some(widgets.priority())),
+                EntryKind::File { .. } => {
+                    let wrapped = self.0.borrow();
+                    let inner = wrapped.as_ref().unwrap();
+                    let new_thumb = match &inner.thumbnail {
+                        Thumbnail::Nothing
+                        | Thumbnail::Unloaded
+                        | Thumbnail::Loading
+                        | Thumbnail::Failed => Thumbnail::Unloaded,
+                        Thumbnail::Loaded(old) | Thumbnail::Outdated(old, _) => {
+                            Thumbnail::Outdated(old.clone(), false)
+                        }
+                    };
+
+                    (new_thumb, Some(widgets.priority()))
+                }
                 EntryKind::Directory { .. } => (Thumbnail::Nothing, None),
                 EntryKind::Uninitialized => unreachable!(),
             };
@@ -423,7 +438,14 @@ mod internal {
             }
 
             if inner.widgets.priority() == p {
-                inner.thumbnail = Thumbnail::Loading;
+                match &mut inner.thumbnail {
+                    Thumbnail::Nothing
+                    | Thumbnail::Unloaded
+                    | Thumbnail::Loading
+                    | Thumbnail::Loaded(_)
+                    | Thumbnail::Failed => inner.thumbnail = Thumbnail::Loading,
+                    Thumbnail::Outdated(_, loading) => *loading = true,
+                }
                 true
             } else {
                 false
@@ -458,7 +480,7 @@ mod internal {
 
             match thumb {
                 Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => {}
-                Thumbnail::Loading | Thumbnail::Loaded(_) => {
+                Thumbnail::Loading | Thumbnail::Loaded(_) | Thumbnail::Outdated(..) => {
                     *thumb = Thumbnail::Loaded(tex);
                     drop(b);
                     self.obj().emit_by_name::<()>("update", &[]);
@@ -477,7 +499,7 @@ mod internal {
 
             match thumb {
                 Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => (),
-                Thumbnail::Loading => *thumb = Thumbnail::Failed,
+                Thumbnail::Loading | Thumbnail::Outdated(..) => *thumb = Thumbnail::Failed,
                 Thumbnail::Loaded(_) => {
                     *thumb = Thumbnail::Failed;
                     error!("Marking loaded thumbnail as failed for: {:?}", inner.entry.abs_path);
@@ -490,7 +512,13 @@ mod internal {
         pub fn thumbnail(&self) -> Option<Texture> {
             let b = self.0.borrow();
             let thumb = &b.as_ref().unwrap().thumbnail;
-            if let Thumbnail::Loaded(tex) = thumb { Some(tex.clone()) } else { None }
+            if let Thumbnail::Loaded(tex) = thumb {
+                Some(tex.clone())
+            } else if let Thumbnail::Outdated(tex, _) = thumb {
+                Some(tex.clone())
+            } else {
+                None
+            }
         }
     }
 }
