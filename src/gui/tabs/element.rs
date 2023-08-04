@@ -63,6 +63,7 @@ impl TabElement {
 
         // Drag and drop reordering. No fancy animations or drop target indicaticators yet.
         let drag_source = DragSource::new();
+        drag_source.set_actions(DragAction::MOVE);
         drag_source.connect_prepare(move |_ds, _x, _y| {
             Some(ContentProvider::for_value(&BoxedAnyObject::new(tab).into()))
         });
@@ -73,7 +74,7 @@ impl TabElement {
         });
         s.add_controller(drag_source);
 
-        let drop_target = DropTarget::new(BoxedAnyObject::static_type(), DragAction::all());
+        let drop_target = DropTarget::new(BoxedAnyObject::static_type(), DragAction::MOVE);
         drop_target.connect_drop(move |dt, v, _x, y| {
             let source = *v.get::<BoxedAnyObject>().unwrap().borrow::<TabId>();
             if source == tab {

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
-use gtk::gdk::{Key, Rectangle};
+use gtk::gdk::{DragAction, Key, Rectangle};
 use gtk::glib::{Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -642,7 +642,12 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
         tabs_run(|t| t.find(tab).map(Tab::workaround_enable_rubberband));
     });
 
+    click.connect_stopped(move |_c| {
+        tabs_run(|t| t.find(tab).map(Tab::workaround_enable_rubberband));
+    });
+
     let drag_source = DragSource::new();
+    drag_source.set_actions(DragAction::MOVE | DragAction::COPY);
     let b = bound.clone();
     drag_source.connect_prepare(move |_ds, _x, _y| {
         let bw = b.upgrade().unwrap();
