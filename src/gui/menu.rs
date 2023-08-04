@@ -191,7 +191,10 @@ impl ActionSettings {
                         .map_err(|_e| error!("Invalid settings block in {path:?}: got \"{line}\""))
                         .ok()?
                 }
-                "mimetypes" => mimetypes = Some(rest.split(';').map(str::to_string).collect()),
+                "mimetypes" => {
+                    mimetypes =
+                        Some(rest.trim_matches(';').split(';').map(str::to_string).collect())
+                }
                 "extensions" => extensions = Some(rest.split(';').map(str::to_string).collect()),
                 "regex" => {
                     let re = Regex::new(rest)
@@ -574,7 +577,12 @@ impl GuiMenu {
             // but iteration instead.
             custom.retain(|ca| {
                 if ca.settings.rejects(&entry) {
-                    trace!("Disabled {} due to {:?}", ca.display_name(), &*entry.name);
+                    trace!(
+                        "Disabled {} due to {:?} {}",
+                        ca.display_name(),
+                        &*entry.name,
+                        entry.mime
+                    );
                     ca.action.set_enabled(false);
                     false
                 } else {
