@@ -1,9 +1,12 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{glib, GestureClick, GridView, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
-use super::{get_last_visible_child, setup_item_controllers, Bound};
+use super::{get_last_visible_child, setup_item_controllers, setup_view_controllers, Bound};
 use crate::com::{EntryObject, SignalHolder};
 use crate::gui::applications;
 use crate::gui::tabs::id::TabId;
@@ -19,16 +22,44 @@ pub(super) struct IconView {
 }
 
 impl IconView {
-    pub(super) fn new(scroller: &ScrolledWindow, tab: TabId, selection: &MultiSelection) -> Self {
+    pub(super) fn new(
+        scroller: &ScrolledWindow,
+        tab: TabId,
+        selection: &MultiSelection,
+        deny_view_click: Rc<Cell<bool>>,
+    ) -> Self {
         let factory = gtk::SignalListItemFactory::new();
 
+        let deny = deny_view_click.clone();
         factory.connect_setup(move |_factory, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let tile = IconTile::default();
             // Bind to the individual items, not the entire massive tile.
-            setup_item_controllers(tab, &*tile.imp().image, tile.downgrade());
-            setup_item_controllers(tab, &*tile.imp().name, tile.downgrade());
-            setup_item_controllers(tab, &*tile.imp().size, tile.downgrade());
+            setup_item_controllers(tab, &*tile.imp().image, tile.downgrade(), deny.clone());
+            setup_item_controllers(tab, &*tile.imp().name, tile.downgrade(), deny.clone());
+            setup_item_controllers(tab, &*tile.imp().size, tile.downgrade(), deny.clone());
+
+            let deny_bg_click = GestureClick::new();
+            deny_bg_click.set_button(1);
+            let d = deny.clone();
+            deny_bg_click.connect_pressed(move |c, _n, x, y| {
+                // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+                let alloc = c.widget().allocation();
+                if !(x > 0.0
+                    && (x as i32) < alloc.width()
+                    && y > 0.0
+                    && (y as i32) < alloc.height())
+                {
+                    error!("Workaround -- ignoring junk mouse event in {tab:?} on item tile",);
+                    return;
+                }
+
+                if !d.get() {
+                    d.set(true);
+                }
+            });
+            tile.add_controller(deny_bg_click);
+
             item.set_child(Some(&tile));
         });
 
@@ -64,22 +95,7 @@ impl IconView {
         });
 
 
-        let focus_click = GestureClick::new();
-        focus_click.set_button(0);
-        focus_click.connect_pressed(move |gc, n, x, y| {
-            // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-            let alloc = gc.widget().allocation();
-            if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
-                error!("Workaround -- ignoring junk mouse event in {tab:?}");
-                return;
-            }
-
-            // This part is not a workaround.
-            if gc.button() <= 3 && n == 1 {
-                gc.widget().grab_focus();
-            }
-        });
-        grid.add_controller(focus_click);
+        setup_view_controllers(tab, &grid, deny_view_click);
 
         scroller.set_child(Some(&grid));
 

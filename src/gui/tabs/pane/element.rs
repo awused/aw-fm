@@ -51,30 +51,6 @@ impl PaneElement {
                 return;
             }
 
-            trace!("Mousebutton {} in pane {:?}", c.current_button(), tab);
-
-            if c.current_event().unwrap().triggers_context_menu() {
-                let menu = tabs_run(|tlist| {
-                    tlist.set_active(tab);
-                    let t = tlist.find(tab).unwrap();
-
-                    let mods = c.current_event().unwrap().modifier_state();
-                    if !mods.contains(ModifierType::SHIFT_MASK)
-                        && !mods.contains(ModifierType::CONTROL_MASK)
-                    {
-                        t.clear_selection();
-                    }
-                    t.context_menu()
-                });
-
-                let (x, y) =
-                    gui_run(|g| c.widget().translate_coordinates(&g.window, x, y)).unwrap();
-
-                let rect = Rectangle::new(x as i32, y as i32, 1, 1);
-                menu.set_pointing_to(Some(&rect));
-                menu.popup();
-            }
-
             match c.current_button() {
                 8 => event_run_tab(tab, Tab::back),
                 9 => event_run_tab(tab, Tab::forward),

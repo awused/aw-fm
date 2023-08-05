@@ -19,7 +19,7 @@ use crate::com::{
 };
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
-use crate::gui::tabs::{clipboard, NavTarget};
+use crate::gui::tabs::NavTarget;
 use crate::gui::{gui_run, show_error, show_warning, tabs_run};
 
 // For event handlers which cannot be run with the tabs lock being held.
@@ -90,9 +90,6 @@ impl TabsList {
 
     pub fn initial_setup(&mut self) {
         assert!(self.tabs.is_empty());
-
-        clipboard::register_types();
-
 
         let Some(target) = NavTarget::initial(self) else {
             return;

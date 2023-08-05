@@ -2,14 +2,14 @@ use std::path::Path;
 use std::str::{from_utf8, FromStr};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 use gtk::gdk::Display;
-use gtk::prelude::{DisplayExt, FileExt};
+use gtk::gio::{Cancellable, InputStream, MemoryOutputStream, OutputStreamSpliceFlags};
+use gtk::glib::{GString, Priority};
+use gtk::prelude::{DisplayExt, FileExt, MemoryOutputStreamExt, OutputStreamExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib, MultiSelection};
 use strum_macros::{EnumString, IntoStaticStr};
-use x11_clipboard::Clipboard;
 
 use super::id::TabId;
 use crate::gui::{file_operations, gui_run, Selected};
@@ -17,9 +17,10 @@ use crate::gui::{file_operations, gui_run, Selected};
 const SPECIAL: &str = "x-special/aw-fm-copied-files";
 const SPECIAL_MATE: &str = "x-special/mate-copied-files";
 const SPECIAL_GNOME: &str = "x-special/gnome-copied-files";
+const URIS: &str = "text/uri-list";
 
 glib::wrapper! {
-    pub struct ClipboardProvider(ObjectSubclass<imp::ClipboardProvider>)
+    pub struct SelectionProvider(ObjectSubclass<imp::ClipboardProvider>)
         @extends gdk::ContentProvider;
 }
 
@@ -40,7 +41,7 @@ impl Operation {
     }
 }
 
-impl ClipboardProvider {
+impl SelectionProvider {
     // It's fine if the selection is empty.
     pub fn new(operation: Operation, selection: &MultiSelection) -> Self {
         let s: Self = glib::Object::new();
@@ -67,8 +68,80 @@ impl ClipboardProvider {
     }
 }
 
+fn bytes_to_operation(tab: TabId, path: Arc<Path>, uri_list: bool, bytes: &[u8]) {
+    let Ok(text) = from_utf8(bytes) else {
+        return error!("Invalid utf-8 in contents");
+    };
 
-// This is sloppy code just so it can work at all.
+    let mut lines = text.lines();
+    let operation = if !uri_list {
+        let Some(first) = lines.next() else {
+            error!("Empty contents");
+            return;
+        };
+
+        match Operation::from_str(first) {
+            Ok(o) => o,
+            Err(e) => {
+                error!("Got invalid operation from contents: {e}");
+                return;
+            }
+        }
+    } else {
+        Operation::Cut
+    };
+
+    // for_uri can panic
+    let files: thread::Result<Option<Vec<_>>> =
+        std::panic::catch_unwind(|| lines.map(|s| gio::File::for_uri(s).path()).collect());
+    let Ok(Some(files)) = files else {
+        return error!("Got URI for file without a local path. Aborting paste.");
+    };
+
+    glib::idle_add_once(move || {
+        let kind = match operation {
+            Operation::Copy => file_operations::Kind::Copy(path),
+            Operation::Cut => file_operations::Kind::Move(path),
+        };
+
+        gui_run(|g| g.start_operation(tab, kind, files));
+    });
+}
+
+// Takes an InputStream from a clipboard read or drag and drop operation and
+fn stream_to_operation(
+    tab: TabId,
+    path: Arc<Path>,
+    uri_list: bool,
+) -> impl FnOnce(Result<(InputStream, GString), glib::Error>) {
+    move |res| {
+        let in_stream = match res {
+            Ok((is, _)) => is,
+            Err(e) => {
+                error!("Failed to read contents: {e}");
+                return;
+            }
+        };
+
+        let output = MemoryOutputStream::new_resizable();
+        output.clone().splice_async(
+            &in_stream,
+            OutputStreamSpliceFlags::CLOSE_SOURCE | OutputStreamSpliceFlags::CLOSE_TARGET,
+            Priority::LOW,
+            Cancellable::NONE,
+            move |res| match res {
+                Ok(_bytes) => {
+                    let bytes = output.steal_as_bytes();
+                    bytes_to_operation(tab, path, uri_list, &bytes)
+                }
+                Err(e) => {
+                    error!("Failed to read contents: {e}");
+                }
+            },
+        )
+    }
+}
+
 pub fn read_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
     let formats = display.clipboard().formats();
 
@@ -83,108 +156,15 @@ pub fn read_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
         return;
     };
 
-    let clipboard = Clipboard::new().unwrap();
-    let atom = clipboard.getter.get_atom(mime).unwrap();
-    thread::spawn(move || {
-        let Ok(res) = clipboard.load(
-            clipboard.getter.atoms.clipboard,
-            atom,
-            clipboard.getter.atoms.property,
-            Duration::from_secs(5),
-        ) else {
-            return error!("Failed to load clipboard value");
-        };
 
-        let Ok(text) = from_utf8(&res) else {
-            return error!("Invalid utf-8 in clipboard contents");
-        };
-
-        let mut lines = text.lines();
-        let Some(operation) = lines.next().and_then(|s| Operation::from_str(s).ok()) else {
-            return;
-        };
-
-        // for_uri can panic
-        let files: thread::Result<Option<Vec<_>>> =
-            std::panic::catch_unwind(|| lines.map(|s| gio::File::for_uri(s).path()).collect());
-        let Ok(Some(files)) = files else {
-            return error!("Got URI for file without a local path. Aborting paste.");
-        };
-
-        println!("TODO -- {operation:?} {files:?}");
-        glib::idle_add_once(move || {
-            let kind = match operation {
-                Operation::Copy => file_operations::Kind::Copy(path),
-                Operation::Cut => file_operations::Kind::Move(path),
-            };
-
-            gui_run(|g| g.start_operation(tab, kind, files));
-        });
-    });
+    display.clipboard().read_async(
+        &[mime],
+        Priority::LOW,
+        Cancellable::NONE,
+        stream_to_operation(tab, path, false),
+    );
 }
 
-
-// glib::wrapper! {
-//     pub struct SpecialClipboardReader(ObjectSubclass<imp::ClipboardReader>);
-// }
-//
-// impl Default for SpecialClipboardReader {
-//     fn default() -> Self {
-//         glib::Object::new()
-//     }
-// }
-
-pub const fn register_types() {
-    //     SpecialClipboardReader::ensure_type();
-    //
-    //     gdk::content_register_deserializer(
-    //         SPECIAL,
-    //         SpecialClipboardReader::static_type(),
-    //         |deserializer, user_data: &mut Option<SpecialClipboardReader>| {},
-    //     );
-    //
-    //     gdk::content_register_deserializer(
-    //         SPECIAL_MATE,
-    //         SpecialClipboardReader::static_type(),
-    //         |d, out: &mut Option<SpecialClipboardReader>| {
-    //         },
-    //     );
-}
-
-// pub fn read_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
-//     let formats = display.clipboard().formats();
-//
-//     if formats.contains_type(SpecialClipboardReader::static_type()) {
-//         println!("Reading");
-//         let cancel = Cancellable::new();
-//         display.clipboard().read_value_async(
-//             SpecialClipboardReader::static_type(),
-//             glib::Priority::DEFAULT,
-//             Some(&cancel),
-//             move |text| {
-//                 println!("{text:?}");
-//                 let text = match text {
-//                     Ok(text) => text,
-//                     Err(e) => {
-//                         let msg = format!("Error reading clipboard: {e}");
-//                         error!("{msg}");
-//                         return gui_run(|g| g.error(&msg));
-//                     }
-//                 };
-//
-//                 let Ok(text) = text.get::<SpecialClipboardReader>() else {
-//                     return info!("Got paste but clipboard was empty");
-//                 };
-//
-//                 error!(
-//                     "TODO remove got clipboard -- {:?}, {:?}",
-//                     text.imp().operation.get(),
-//                     text.imp().entries.get()
-//                 );
-//             },
-//         );
-//     }
-// }
 
 mod imp {
     use std::ffi::OsString;
@@ -198,12 +178,11 @@ mod imp {
     use gtk::{gdk, gio, glib};
     use once_cell::unsync::OnceCell;
 
-    use super::{Operation, SPECIAL, SPECIAL_GNOME, SPECIAL_MATE};
+    use super::{Operation, SPECIAL, SPECIAL_GNOME, SPECIAL_MATE, URIS};
     use crate::com::EntryObject;
 
 
     // TODO -- application/vnd.portal.filetransfer, if it ever comes up
-    const URIS: &str = "text/uri-list";
     const UTF8: &str = "text/plain;charset=utf-8";
     const PLAIN: &str = "text/plain";
 
@@ -217,7 +196,7 @@ mod imp {
     #[glib::object_subclass]
     impl ObjectSubclass for ClipboardProvider {
         type ParentType = gdk::ContentProvider;
-        type Type = super::ClipboardProvider;
+        type Type = super::SelectionProvider;
 
         const NAME: &'static str = "ClipboardProvider";
     }
@@ -342,19 +321,4 @@ mod imp {
                 .map(|_| ())
         }
     }
-
-    // #[derive(Default)]
-    // pub struct ClipboardReader {
-    //     pub operation: OnceCell<Operation>,
-    //     pub entries: OnceCell<String>,
-    // }
-    //
-    // #[glib::object_subclass]
-    // impl ObjectSubclass for ClipboardReader {
-    //     type Type = super::SpecialClipboardReader;
-    //
-    //     const NAME: &'static str = "ClipboardReader";
-    // }
-    //
-    // impl ObjectImpl for ClipboardReader {}
 }

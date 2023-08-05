@@ -4,13 +4,13 @@ use std::rc::Rc;
 use gtk::glib::Object;
 use gtk::prelude::*;
 use gtk::{
-    glib, ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, GestureClick,
-    MultiSelection, ScrolledWindow, SignalListItemFactory, Widget,
+    glib, ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, MultiSelection,
+    ScrolledWindow, SignalListItemFactory, Widget,
 };
 
 use self::icon_cell::IconCell;
 use self::string_cell::{EntryString, StringCell};
-use super::{get_last_visible_child, setup_item_controllers, Bound};
+use super::{get_last_visible_child, setup_item_controllers, setup_view_controllers, Bound};
 use crate::com::{DirSettings, EntryObject, SignalHolder, SortDir, SortMode, SortSettings};
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, tabs_run};
@@ -40,10 +40,11 @@ impl DetailsView {
         tab: TabId,
         settings: DirSettings,
         selection: &MultiSelection,
+        deny_view_click: Rc<Cell<bool>>,
     ) -> Self {
         let column_view = ColumnView::new(Some(selection.clone()));
 
-        setup_columns(tab, &column_view);
+        setup_columns(tab, &column_view, deny_view_click.clone());
         set_sort(&column_view, settings.sort);
 
         let current_sort = Rc::new(Cell::new(settings.sort));
@@ -82,23 +83,7 @@ impl DetailsView {
             applications::activate(tab, &display, &model)
         });
 
-        let focus_click = GestureClick::new();
-        focus_click.set_button(0);
-        focus_click.connect_pressed(move |gc, n, x, y| {
-            // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-            let alloc = gc.widget().allocation();
-            if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
-                error!("Workaround -- ignoring junk mouse event in {tab:?}");
-                return;
-            }
-
-
-            // This part is not a workaround.
-            if gc.button() <= 3 && n == 1 {
-                gc.widget().grab_focus();
-            }
-        });
-        column_view.add_controller(focus_click);
+        setup_view_controllers(tab, &column_view, deny_view_click);
 
         scroller.set_child(Some(&column_view));
 
@@ -194,14 +179,16 @@ impl DetailsView {
 }
 
 
-fn setup_columns(tab: TabId, column_view: &ColumnView) {
+fn setup_columns(tab: TabId, column_view: &ColumnView, deny_view_click: Rc<Cell<bool>>) {
     let dummy_sorter = CustomSorter::new(dummy_sort_fn);
 
+
     let icon_factory = SignalListItemFactory::new();
+    let deny = deny_view_click.clone();
     icon_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = IconCell::default();
-        setup_item_controllers(tab, &cell, cell.downgrade());
+        setup_item_controllers(tab, &cell, cell.downgrade(), deny.clone());
 
         item.set_child(Some(&cell));
     });
@@ -218,10 +205,11 @@ fn setup_columns(tab: TabId, column_view: &ColumnView) {
 
 
     let name_factory = SignalListItemFactory::new();
+    let deny = deny_view_click.clone();
     name_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = StringCell::new(EntryString::Name);
-        setup_item_controllers(tab, &cell, cell.downgrade());
+        setup_item_controllers(tab, &cell, cell.downgrade(), deny.clone());
 
         item.set_child(Some(&cell));
     });
@@ -233,10 +221,11 @@ fn setup_columns(tab: TabId, column_view: &ColumnView) {
 
 
     let size_factory = SignalListItemFactory::new();
+    let deny = deny_view_click.clone();
     size_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = StringCell::new(EntryString::Size);
-        setup_item_controllers(tab, &cell, cell.downgrade());
+        setup_item_controllers(tab, &cell, cell.downgrade(), deny.clone());
 
         cell.align_end(9);
         item.set_child(Some(&cell));
@@ -249,10 +238,11 @@ fn setup_columns(tab: TabId, column_view: &ColumnView) {
 
 
     let modified_factory = SignalListItemFactory::new();
+    let deny = deny_view_click.clone();
     modified_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = StringCell::new(EntryString::Modified);
-        setup_item_controllers(tab, &cell, cell.downgrade());
+        setup_item_controllers(tab, &cell, cell.downgrade(), deny.clone());
 
         item.set_child(Some(&cell));
     });

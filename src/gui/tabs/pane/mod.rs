@@ -1,9 +1,9 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
-use gtk::gdk::{DragAction, Key, Rectangle};
+use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
 use gtk::glib::{Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -86,6 +86,10 @@ pub(super) struct Pane {
     tab: TabId,
     selection: MultiSelection,
 
+    // This is a workaround for GTK not providing ways to better segment clicks.
+    // If a click is handled on an item, don't handle it again on the
+    deny_view_click: Rc<Cell<bool>>,
+
     _signals: PaneSignals,
 
     connections: Vec<SignalHolder<gtk::Entry>>,
@@ -148,14 +152,22 @@ impl Pane {
 
     fn create(tab: TabId, settings: DirSettings, selection: &MultiSelection) -> Self {
         let (element, signals) = PaneElement::new(tab, selection);
+        let deny_view_click = Rc::new(Cell::new(false));
 
         let view = match settings.display_mode {
-            DisplayMode::Icons => {
-                View::Icons(IconView::new(&element.imp().scroller, tab, selection))
-            }
-            DisplayMode::Columns => {
-                View::Columns(DetailsView::new(&element.imp().scroller, tab, settings, selection))
-            }
+            DisplayMode::Icons => View::Icons(IconView::new(
+                &element.imp().scroller,
+                tab,
+                selection,
+                deny_view_click.clone(),
+            )),
+            DisplayMode::Columns => View::Columns(DetailsView::new(
+                &element.imp().scroller,
+                tab,
+                settings,
+                selection,
+                deny_view_click.clone(),
+            )),
         };
 
         // Reset on escape
@@ -184,6 +196,8 @@ impl Pane {
 
             tab,
             selection: selection.clone(),
+
+            deny_view_click,
 
             _signals: signals,
 
@@ -337,6 +351,7 @@ impl Pane {
         }
 
         self._signals = self.element.setup_signals(selection);
+        self.deny_view_click.set(false);
         self.setup_flat(path);
     }
 
@@ -353,6 +368,7 @@ impl Pane {
         }
 
         self._signals = self.element.setup_signals(selection);
+        self.deny_view_click.set(false);
         self.setup_search(filter, filtered, queries);
 
         if self.element.imp().active.get() {
@@ -423,6 +439,8 @@ impl Pane {
     }
 
     pub fn update_settings(&mut self, settings: DirSettings, list: &Contents) {
+        self.deny_view_click.set(false);
+
         if self.view.matches(settings.display_mode) {
             self.view.update_settings(settings);
             return;
@@ -431,14 +449,18 @@ impl Pane {
         let vs = self.get_state(list);
 
         self.view = match settings.display_mode {
-            DisplayMode::Icons => {
-                View::Icons(IconView::new(&self.element.imp().scroller, self.tab, &self.selection))
-            }
+            DisplayMode::Icons => View::Icons(IconView::new(
+                &self.element.imp().scroller,
+                self.tab,
+                &self.selection,
+                self.deny_view_click.clone(),
+            )),
             DisplayMode::Columns => View::Columns(DetailsView::new(
                 &self.element.imp().scroller,
                 self.tab,
                 settings,
                 &self.selection,
+                self.deny_view_click.clone(),
             )),
         };
 
@@ -465,6 +487,8 @@ impl Pane {
     }
 
     pub fn apply_state(&mut self, state: PaneState, list: &Contents) {
+        self.deny_view_click.set(false);
+
         let pos = state
             .scroll_pos
             .and_then(|sp| {
@@ -586,17 +610,70 @@ trait Bound {
     fn bound_object(&self) -> Option<EntryObject>;
 }
 
+fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<bool>>) {
+    let click = GestureClick::new();
+
+    click.set_button(0);
+    click.connect_pressed(move |c, n, x, y| {
+        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+        let alloc = c.widget().allocation();
+        if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
+            error!("Workaround -- ignoring junk mouse event in {tab:?}");
+            return;
+        }
+
+        // This part is not a workaround.
+        if c.button() <= 3 && n == 1 {
+            c.widget().grab_focus();
+        }
+
+        if deny.get() {
+            deny.set(false);
+            return;
+        }
+
+        trace!("Mousebutton {} in pane {:?}", c.current_button(), tab);
+
+        tabs_run(|tlist| {
+            let t = tlist.find(tab).unwrap();
+
+            let mods = c.current_event().unwrap().modifier_state();
+            if c.button() <= 3
+                && !mods.contains(ModifierType::SHIFT_MASK)
+                && !mods.contains(ModifierType::CONTROL_MASK)
+            {
+                t.clear_selection();
+            }
+
+            if c.current_event().unwrap().triggers_context_menu() {
+                let menu = tlist.find(tab).unwrap().context_menu();
+
+                let (x, y) =
+                    gui_run(|g| c.widget().translate_coordinates(&g.window, x, y)).unwrap();
+
+                let rect = Rectangle::new(x as i32, y as i32, 1, 1);
+                menu.set_pointing_to(Some(&rect));
+                menu.popup();
+            }
+        });
+    });
+
+    widget.add_controller(click);
+}
+
 // Sets up various controllers that should be set only on items, and not on dead space around
 // items.
 fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
     tab: TabId,
     widget: &W,
     bound: WeakRef<B>,
+    deny_view: Rc<Cell<bool>>,
 ) {
     let click = GestureClick::new();
     click.set_button(0);
 
     let b = bound.clone();
+    let deny = deny_view.clone();
     click.connect_pressed(move |c, _n, x, y| {
         let eo = b.upgrade().unwrap().bound_object().unwrap();
 
@@ -612,6 +689,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
 
 
         debug!("Click {} for {:?} in {tab:?}", c.current_button(), &*eo.get().name);
+        deny.set(true);
 
         if c.current_button() == 1 {
             tabs_run(|t| t.find(tab).unwrap().workaround_disable_rubberband());
@@ -638,12 +716,15 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
         }
     });
 
+    let deny = deny_view.clone();
     click.connect_released(move |_c, _n, _x, _y| {
         tabs_run(|t| t.find(tab).map(Tab::workaround_enable_rubberband));
+        deny.set(false);
     });
 
     click.connect_stopped(move |_c| {
         tabs_run(|t| t.find(tab).map(Tab::workaround_enable_rubberband));
+        deny_view.set(false);
     });
 
     let drag_source = DragSource::new();

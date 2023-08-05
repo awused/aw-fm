@@ -11,7 +11,7 @@ use gtk::{AlertDialog, Orientation, PopoverMenu, Widget};
 use MaybePane as MP;
 
 use self::flat_dir::FlatDir;
-use super::clipboard::{read_clipboard, ClipboardProvider, Operation};
+use super::clipboard::{read_clipboard, Operation, SelectionProvider};
 use super::contents::Contents;
 use super::element::TabElement;
 use super::id::{TabId, TabUid};
@@ -1105,13 +1105,13 @@ impl Tab {
         }
     }
 
-    pub fn content_provider(&self, operation: Operation) -> ClipboardProvider {
+    pub fn content_provider(&self, operation: Operation) -> SelectionProvider {
         let selection = self
             .search
             .as_ref()
             .map_or(&self.contents.selection, |s| &s.contents().selection);
 
-        ClipboardProvider::new(operation, selection)
+        SelectionProvider::new(operation, selection)
     }
 
     pub fn set_clipboard(&self, operation: Operation) {
