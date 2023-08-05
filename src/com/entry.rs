@@ -380,7 +380,6 @@ mod internal {
             &self,
             mut entry: super::Entry,
         ) -> (super::Entry, Option<ThumbPriority>) {
-            // TODO -- this is where we'd be able to use "Outdated"
             // Every time there is an update, we have an opportunity to try the thumbnail again if
             // it failed.
 
@@ -499,10 +498,13 @@ mod internal {
 
             match thumb {
                 Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => (),
-                Thumbnail::Loading | Thumbnail::Outdated(..) => *thumb = Thumbnail::Failed,
-                Thumbnail::Loaded(_) => {
+                Thumbnail::Loading => *thumb = Thumbnail::Failed,
+                Thumbnail::Outdated(..) | Thumbnail::Loaded(_) => {
                     *thumb = Thumbnail::Failed;
-                    error!("Marking loaded thumbnail as failed for: {:?}", inner.entry.abs_path);
+                    info!(
+                        "Marking previously valid thumbnail as failed for: {:?}",
+                        inner.entry.abs_path
+                    );
                     drop(b);
                     self.obj().emit_by_name::<()>("update", &[]);
                 }
