@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
-use gtk::gdk::{ContentFormats, DragAction, Key, ModifierType, Rectangle};
+use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
 use gtk::glib::{Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -19,7 +19,7 @@ use gtk::{
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
-use super::clipboard::{Operation, SPECIAL, URIS};
+use super::clipboard::{Operation, URIS};
 use super::id::TabId;
 use super::tab::Tab;
 use super::{Contents, PaneState};

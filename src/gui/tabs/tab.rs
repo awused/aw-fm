@@ -1133,7 +1133,7 @@ impl Tab {
     }
 
     pub fn paste(&self) {
-        if self.accepts_paste() {
+        if !self.accepts_paste() {
             return show_warning("Cannot paste here");
         }
         handle_clipboard(self.element.display(), self.id(), self.dir());
@@ -1146,7 +1146,7 @@ impl Tab {
             }
         }
 
-        if self.accepts_paste() {
+        if !self.accepts_paste() {
             show_warning("Cannot drop here");
             return false;
         }

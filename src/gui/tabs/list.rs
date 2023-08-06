@@ -731,7 +731,7 @@ impl TabsList {
 
         for n in 0..old_tabs {
             // We do swap_remove so this is fine.
-            let tab = &mut self.tabs[n];
+            let tab = &mut self.tabs[old_tabs - n - 1];
             if tab.visible() {
                 tab.close_pane();
             }
