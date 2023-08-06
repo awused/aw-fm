@@ -135,7 +135,10 @@ fn read_dir_sync(
                     }
                 };
 
-                if sender.send(ReadResult::Entry(entry)).is_err() && !closing::closed() {
+                if sender.send(ReadResult::Entry(entry)).is_err()
+                    && !closing::closed()
+                    && !cancel.load(Relaxed)
+                {
                     error!("Channel unexpectedly closed while reading directory");
                     closing::close();
                 }
