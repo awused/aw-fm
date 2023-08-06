@@ -203,7 +203,7 @@ pub mod id {
     #[derive(Debug, Eq, PartialEq)]
     pub struct TabUid(u64);
 
-    #[derive(Debug, Eq, PartialEq, Clone, Copy)]
+    #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
     pub struct TabId(u64);
 
     pub fn next_id() -> TabUid {

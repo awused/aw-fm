@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::ffi::OsStr;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::sync::mpsc::{Receiver, SyncSender};
@@ -17,10 +18,16 @@ use crate::com::{
 use crate::config::CONFIG;
 use crate::{closing, spawn_thread};
 
+pub struct Session {
+    pub paths: Vec<Arc<Path>>,
+}
 
 enum DBAction {
     Get(Arc<Path>, oneshot::Sender<DirSettings>),
     Store(Arc<Path>, DirSettings),
+    LoadSession(String, oneshot::Sender<Option<Session>>),
+    SaveSession(String, Session),
+    DeleteSession(String),
     Teardown,
 }
 
@@ -64,12 +71,6 @@ impl DBCon {
         Self(sender, DebugIgnore::from(Cell::new(Some(h))))
     }
 
-    pub fn destroy(&self) {
-        debug!("Tearing down database connection");
-        self.0.send(DBAction::Teardown).unwrap();
-        self.1.take().unwrap().join().unwrap();
-    }
-
     // Reading is fast enough to block on
     pub fn get(&self, path: Arc<Path>) -> DirSettings {
         let start = Instant::now();
@@ -89,6 +90,34 @@ impl DBCon {
     pub fn store(&self, path: Arc<Path>, settings: DirSettings) {
         self.0.send(DBAction::Store(path, settings)).unwrap();
     }
+
+    pub fn load_session(&self, name: String) -> Option<Session> {
+        let start = Instant::now();
+
+        let (send, recv) = oneshot::channel();
+
+        self.0.send(DBAction::LoadSession(name, send)).unwrap();
+
+        // This should swallow all DB errors so should not fail
+        let session = recv.blocking_recv().unwrap();
+
+        trace!("Loaded session in {:?}: found {}", start.elapsed(), session.is_some());
+        session
+    }
+
+    pub fn save_session(&self, name: String, session: Session) {
+        self.0.send(DBAction::SaveSession(name, session)).unwrap();
+    }
+
+    pub fn delete_session(&self, name: String) {
+        self.0.send(DBAction::DeleteSession(name)).unwrap();
+    }
+
+    pub fn destroy(&self) {
+        debug!("Tearing down database connection");
+        self.0.send(DBAction::Teardown).unwrap();
+        self.1.take().unwrap().join().unwrap();
+    }
 }
 
 
@@ -100,6 +129,9 @@ impl Con {
             match a {
                 DBAction::Get(path, resp) => drop(resp.send(self.get(&path))),
                 DBAction::Store(path, settings) => self.store(&path, settings),
+                DBAction::SaveSession(name, session) => self.save_session(&name, session),
+                DBAction::LoadSession(name, resp) => drop(resp.send(self.load_session(&name))),
+                DBAction::DeleteSession(name) => self.delete_session(&name),
                 DBAction::Teardown => {
                     return;
                 }
@@ -116,7 +148,7 @@ impl Con {
 
         let settings = con
             .query_row(
-                "SELECT display_mode, sort_mode, sort_direction FROM dir_settings WHERE PATH = ?",
+                "SELECT display_mode, sort_mode, sort_direction FROM dir_settings WHERE path = ?",
                 [path.as_os_str().as_bytes()],
                 |row| {
                     Ok(DirSettings {
@@ -172,6 +204,68 @@ VALUES
             0
         });
         trace!("Saved settings for path {path:?} in {:?}", start.elapsed());
+    }
+
+    fn load_session(&self, name: &str) -> Option<Session> {
+        let con = &self.0;
+
+        con.query_row("SELECT paths FROM sessions WHERE name = ?", [name], |row| {
+            let raw: &[u8] = row.get_ref(0)?.as_bytes()?;
+
+            let paths = raw
+                .split(|b| *b == 0)
+                .map(OsStr::from_bytes)
+                .map(Path::new)
+                .map(Into::into)
+                .collect();
+
+            Ok(Session { paths })
+        })
+        .map_err(|e| {
+            if e == rusqlite::Error::QueryReturnedNoRows {
+                trace!("No saved session named {name}");
+            } else {
+                error!("Error reading saved session {name}: {e}");
+            }
+        })
+        .ok()
+    }
+
+    fn save_session(&self, name: &str, session: Session) {
+        let start = Instant::now();
+        let con = &self.0;
+
+        let paths = session
+            .paths
+            .iter()
+            .map(|p| p.as_os_str())
+            .map(OsStr::as_bytes)
+            .collect::<Vec<_>>()
+            .join(&[0u8] as &[u8]);
+
+        con.execute(
+            "INSERT OR REPLACE INTO sessions(name, paths) VALUES (?, ?);",
+            params![name, paths],
+        )
+        .unwrap_or_else(|e| {
+            if e == rusqlite::Error::QueryReturnedNoRows {
+                trace!("No saved session named {name}");
+            } else {
+                error!("Error reading saved session {name}: {e}");
+            }
+            0
+        });
+
+        trace!("Saved session {name} in {:?}", start.elapsed());
+    }
+
+    fn delete_session(&self, name: &str) {
+        let start = Instant::now();
+        let con = &self.0;
+
+        drop(con.execute("DELETE FROM sessions WHERE name = ?", [name]));
+
+        trace!("Deleted session {name} in {:?}", start.elapsed());
     }
 }
 
@@ -287,6 +381,17 @@ CREATE TABLE dir_settings(
     sort_direction TEXT NOT NULL,
     -- display_hidden TEXT NOT NULL,
     PRIMARY KEY(path)
+);"#,
+    );
+    update_to(
+        con,
+        2,
+        initial_version,
+        r#"
+CREATE TABLE sessions(
+    name TEXT NOT NULL,
+    paths BLOB NOT NULL, -- null separated possibly invalid UTF-8, very few characters are disallowed in paths
+    PRIMARY KEY(name)
 );"#,
     );
 }

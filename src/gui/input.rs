@@ -18,6 +18,7 @@ use super::Gui;
 use crate::closing;
 use crate::com::{DisplayMode, ManagerAction, SortDir, SortMode};
 use crate::config::CONFIG;
+use crate::gui::show_warning;
 
 mod help;
 
@@ -209,6 +210,26 @@ impl Gui {
                 },
 
                 "Search" => return tabs.active_search(arg),
+
+                "SaveSession" => {
+                    if let Some(session) = tabs.get_session() {
+                        self.database.save_session(arg.to_owned(), session);
+                    } else {
+                        show_warning("No tabs open to save as session");
+                    }
+                    return;
+                }
+                "LoadSession" => {
+                    if let Some(session) = self.database.load_session(arg.to_string()) {
+                        tabs.load_session(session);
+                    } else {
+                        show_warning(format!("No session named \"{arg}\" found"));
+                    }
+                    return;
+                }
+                "DeleteSession" => {
+                    return self.database.delete_session(arg.to_string());
+                }
 
                 "Execute" => {
                     drop(tabs);

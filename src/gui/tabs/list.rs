@@ -2,9 +2,10 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::sync::Arc;
 
+use ahash::AHashMap;
 use dirs::home_dir;
 use gtk::gio::ListStore;
-use gtk::prelude::{Cast, CastNone, ListModelExt};
+use gtk::prelude::{Cast, CastNone, ListModelExt, ListModelExtManual};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{BoxExt, ListItemExt};
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
@@ -17,6 +18,7 @@ use crate::com::{
     DirSnapshot, DisplayMode, EntryObject, SearchSnapshot, SearchUpdate, SortDir, SortMode,
     SortSettings, Update,
 };
+use crate::database::Session;
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
@@ -699,6 +701,43 @@ impl TabsList {
 
         let dst = self.element_position(dest).unwrap();
         self.tab_elements.insert(if after { dst + 1 } else { dst }, &moved);
+    }
+
+    pub fn get_session(&self) -> Option<Session> {
+        if self.tabs.is_empty() {
+            info!("No tabs to save as session");
+            return None;
+        }
+
+        let tabs: AHashMap<_, _> = self.tabs.iter().map(|t| (t.id(), t)).collect();
+
+        let paths = self
+            .tab_elements
+            .iter::<TabElement>()
+            .map(Result::unwrap)
+            .map(|el| tabs[el.imp().tab.get().unwrap()].dir())
+            .collect();
+
+        Some(Session { paths })
+    }
+
+    pub fn load_session(&mut self, session: Session) {
+        // Take advantage of existing data if we can.
+        let old_tabs = self.tabs.len();
+        for path in session.paths {
+            let target = NavTarget::assume_dir(path);
+            self.create_tab(None, target, false);
+        }
+
+        for n in 0..old_tabs {
+            // We do swap_remove so this is fine.
+            let tab = &mut self.tabs[n];
+            if tab.visible() {
+                tab.close_pane();
+            }
+            let id = tab.id();
+            self.close_tab(id);
+        }
     }
 
     pub fn get_env(&self) -> Vec<(String, OsString)> {

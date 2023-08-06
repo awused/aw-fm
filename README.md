@@ -139,6 +139,9 @@ specify them.
   * Splits the current tab in two.
   * The new tab is on the right or bottom of the split.
   * If no tabs are visible, opens a new on.
+* `SaveSession name`, `LoadSession name`, and `DeleteSession name`
+  * Saves, loads, or deletes the current session.
+  * Only currently saves the list of open tabs.
 
 ##### Display Settings
 

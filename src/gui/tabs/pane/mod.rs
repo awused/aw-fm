@@ -728,7 +728,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
     });
 
     let drag_source = DragSource::new();
-    drag_source.set_actions(DragAction::MOVE | DragAction::COPY);
+    drag_source.set_actions(DragAction::all());
     let b = bound.clone();
     drag_source.connect_prepare(move |_ds, _x, _y| {
         let bw = b.upgrade().unwrap();

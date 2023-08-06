@@ -79,6 +79,10 @@ shortcuts = [
   # {key= "F6", action = "Execute /path/to/examples/dump-env.sh"},
   # {key= "H", modifiers = "Control, Shift", action = "Script /path/to/examples/rofi-jump-home.sh"},
   # {key= "P", modifiers = "Alt", action = "Script /path/to/examples/rofi-open-subdirs.sh"},
+
+  {key = "F1", action = "LoadSession one"},
+  {key = "F1", modifiers="Control", action = "SaveSession one"},
+  {key = "F1", modifiers="Alt", action = "DeleteSession one"},
 ]
 
 # Bookmarks
