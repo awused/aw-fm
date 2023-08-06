@@ -1,10 +1,9 @@
 use std::fmt::Write;
 
-use gtk::gdk::{ModifierType, Rectangle};
 use gtk::prelude::{Cast, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
-    EditableExt, EventControllerExt, GestureSingleExt, PopoverExt, SelectionModelExt, WidgetExt,
+    EditableExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
 };
 use gtk::{glib, EventControllerFocus, GestureClick, MultiSelection};
 
@@ -12,7 +11,7 @@ use crate::com::SignalHolder;
 use crate::gui::tabs::id::TabId;
 use crate::gui::tabs::list::event_run_tab;
 use crate::gui::tabs::tab::Tab;
-use crate::gui::{gui_run, tabs_run, Selected};
+use crate::gui::{tabs_run, Selected};
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)

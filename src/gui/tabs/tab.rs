@@ -11,7 +11,7 @@ use gtk::{AlertDialog, Orientation, PopoverMenu, Widget};
 use MaybePane as MP;
 
 use self::flat_dir::FlatDir;
-use super::clipboard::{read_clipboard, Operation, SelectionProvider};
+use super::clipboard::{handle_clipboard, handle_drop, Operation, SelectionProvider};
 use super::contents::Contents;
 use super::element::TabElement;
 use super::id::{TabId, TabUid};
@@ -389,7 +389,7 @@ impl Tab {
         if self.settings.display_mode == DisplayMode::Icons {
             if let Some(scroller) = self.pane.get().map(Pane::workaround_scroller) {
                 if scroller.vscrollbar_policy() != gtk::PolicyType::Never {
-                    error!("Locking scrolling to work around gtk crash");
+                    warn!("Locking scrolling to work around gtk crash");
                     scroller.set_vscrollbar_policy(gtk::PolicyType::Never);
                 }
             }
@@ -883,7 +883,7 @@ impl Tab {
         info!("Applying {:?} to tab {:?}", state, self.id);
 
         if self.settings.display_mode == DisplayMode::Icons {
-            error!("Unsetting GTK crash workaround");
+            warn!("Unsetting GTK crash workaround");
         }
         // Unconditionally unset it in case mode was swapped.
         pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
@@ -1128,11 +1128,30 @@ impl Tab {
         }
     }
 
+    pub fn accepts_paste(&self) -> bool {
+        self.search.is_none() || CONFIG.paste_into_search
+    }
+
     pub fn paste(&self) {
-        if self.search.is_some() && !CONFIG.paste_into_search {
+        if self.accepts_paste() {
             return show_warning("Cannot paste here");
         }
-        read_clipboard(self.element.display(), self.id(), self.dir());
+        handle_clipboard(self.element.display(), self.id(), self.dir());
+    }
+
+    pub fn drag_drop(&self, drop_ev: &gtk::gdk::Drop, eo: Option<EntryObject>) -> bool {
+        if let Some(eo) = eo {
+            if eo.get().dir() {
+                todo!()
+            }
+        }
+
+        if self.accepts_paste() {
+            show_warning("Cannot drop here");
+            return false;
+        }
+
+        handle_drop(drop_ev, self.id(), self.dir())
     }
 
     fn run_deletion(tab: TabId, files: Vec<PathBuf>, kind: Kind) {

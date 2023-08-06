@@ -205,15 +205,13 @@ fn setup_columns(tab: TabId, column_view: &ColumnView, deny_view_click: Rc<Cell<
 
 
     let name_factory = SignalListItemFactory::new();
-    let deny = deny_view_click.clone();
     name_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = StringCell::new(EntryString::Name);
-        setup_item_controllers(tab, &cell, cell.downgrade(), deny.clone());
 
         item.set_child(Some(&cell));
     });
-    setup_string_binds(&name_factory);
+    setup_string_binds(&name_factory, tab, deny_view_click.clone());
 
     let name_column = ColumnViewColumn::new(Some(NAME), Some(name_factory));
     name_column.set_expand(true);
@@ -221,16 +219,14 @@ fn setup_columns(tab: TabId, column_view: &ColumnView, deny_view_click: Rc<Cell<
 
 
     let size_factory = SignalListItemFactory::new();
-    let deny = deny_view_click.clone();
     size_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = StringCell::new(EntryString::Size);
-        setup_item_controllers(tab, &cell, cell.downgrade(), deny.clone());
 
         cell.align_end(9);
         item.set_child(Some(&cell));
     });
-    setup_string_binds(&size_factory);
+    setup_string_binds(&size_factory, tab, deny_view_click.clone());
 
     let size_column = ColumnViewColumn::new(Some(SIZE), Some(size_factory));
     size_column.set_sorter(Some(&dummy_sorter));
@@ -238,15 +234,13 @@ fn setup_columns(tab: TabId, column_view: &ColumnView, deny_view_click: Rc<Cell<
 
 
     let modified_factory = SignalListItemFactory::new();
-    let deny = deny_view_click.clone();
     modified_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = StringCell::new(EntryString::Modified);
-        setup_item_controllers(tab, &cell, cell.downgrade(), deny.clone());
 
         item.set_child(Some(&cell));
     });
-    setup_string_binds(&modified_factory);
+    setup_string_binds(&modified_factory, tab, deny_view_click);
 
     let modified_column = ColumnViewColumn::new(Some(DATE_MODIFIED), Some(modified_factory));
     modified_column.set_sorter(Some(&dummy_sorter));
@@ -276,10 +270,15 @@ fn unwrap_item<T: IsA<Widget>>(obj: &Object) -> (T, EntryObject) {
     (child, entry)
 }
 
-fn setup_string_binds(factory: &SignalListItemFactory) {
+fn setup_string_binds(factory: &SignalListItemFactory, tab: TabId, deny: Rc<Cell<bool>>) {
     factory.connect_bind(move |_factory, item| {
         let (child, entry) = unwrap_item::<StringCell>(item);
         child.bind(&entry);
+
+        if !child.has_controllers() {
+            setup_item_controllers(tab, &child.parent().unwrap(), child.downgrade(), deny.clone());
+            child.set_controllers();
+        }
     });
 
     factory.connect_unbind(move |_factory, item| {

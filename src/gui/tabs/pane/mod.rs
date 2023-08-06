@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
-use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
+use gtk::gdk::{ContentFormats, DragAction, Key, ModifierType, Rectangle};
 use gtk::glib::{Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -12,14 +12,14 @@ use gtk::traits::{
     GestureSingleExt, PopoverExt, WidgetExt,
 };
 use gtk::{
-    CustomFilter, DragSource, EventControllerKey, FilterChange, FilterListModel, GestureClick,
-    MultiSelection, Orientation, ScrolledWindow, Widget, WidgetPaintable,
+    CustomFilter, DragSource, DropTargetAsync, EventControllerKey, FilterChange, FilterListModel,
+    GestureClick, MultiSelection, Orientation, ScrolledWindow, Widget, WidgetPaintable,
 };
 
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
-use super::clipboard::Operation;
+use super::clipboard::{Operation, SPECIAL, URIS};
 use super::id::TabId;
 use super::tab::Tab;
 use super::{Contents, PaneState};
@@ -610,6 +610,10 @@ trait Bound {
     fn bound_object(&self) -> Option<EntryObject>;
 }
 
+thread_local! {
+    static DRAGGING_TAB: Cell<Option<TabId>> = Cell::default();
+}
+
 fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<bool>>) {
     let click = GestureClick::new();
 
@@ -618,7 +622,7 @@ fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
         let alloc = c.widget().allocation();
         if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
-            error!("Workaround -- ignoring junk mouse event in {tab:?}");
+            warn!("Workaround -- ignoring junk mouse event in {tab:?}");
             return;
         }
 
@@ -658,6 +662,34 @@ fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<
         });
     });
 
+    let drop_target = DropTargetAsync::new(None, DragAction::all());
+    drop_target.connect_accept(move |_dta, dr| {
+        if DRAGGING_TAB.with(|dt| dt.get() == Some(tab)) {
+            info!("Ignoring drag into same tab");
+            return false;
+        }
+
+        if !dr.formats().contain_mime_type(URIS) {
+            return false;
+        }
+
+        if !tabs_run(|tlist| tlist.find(tab).unwrap().accepts_paste()) {
+            return false;
+        }
+
+        true
+    });
+
+    drop_target.connect_drop(move |_dta, dr, _x, _y| {
+        tabs_run(|tlist| {
+            info!("Handling drop in {tab:?}");
+            let t = tlist.find(tab).unwrap();
+
+            t.drag_drop(dr, None)
+        })
+    });
+
+    widget.add_controller(drop_target);
     widget.add_controller(click);
 }
 
@@ -680,8 +712,8 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
         let alloc = c.widget().allocation();
         if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
-            error!(
-                "Workaround -- ignoring junk mouse event in {tab:?} on item {:?}",
+            warn!(
+                "Workaround -- ignoring junk mouse event in {tab:?} on item {:?} {x} {y}",
                 &*eo.get().name
             );
             return;
@@ -729,9 +761,8 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
 
     let drag_source = DragSource::new();
     drag_source.set_actions(DragAction::all());
-    let b = bound.clone();
-    drag_source.connect_prepare(move |_ds, _x, _y| {
-        let bw = b.upgrade().unwrap();
+    drag_source.connect_prepare(move |ds, _x, _y| {
+        let bw = bound.upgrade().unwrap();
         let eo = bw.bound_object().unwrap();
 
         let provider = tabs_run(|tlist| {
@@ -741,16 +772,16 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
             t.content_provider(Operation::Cut)
         });
 
-        Some(provider.into())
-    });
-
-    drag_source.connect_drag_begin(move |ds, _drag| {
-        let Some(bw) = bound.upgrade() else {
-            return;
-        };
         let paintable = WidgetPaintable::new(Some(&bw));
 
         ds.set_icon(Some(&paintable), bw.width() / 2, bw.height() / 2);
+        DRAGGING_TAB.with(|dt| dt.set(Some(tab)));
+        Some(provider.into())
+    });
+
+    drag_source.connect_drag_end(|_ds, _drag, _n| {
+        trace!("Clearing drag source");
+        DRAGGING_TAB.with(Cell::take);
     });
     drag_source.set_propagation_phase(gtk::PropagationPhase::Capture);
 

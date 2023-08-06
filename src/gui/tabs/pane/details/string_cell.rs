@@ -31,6 +31,14 @@ impl StringCell {
         self.imp().contents.set_xalign(1.0);
         self.imp().contents.set_min_chars(chars);
     }
+
+    pub(super) fn set_controllers(&self) {
+        self.imp().has_controllers.set(true);
+    }
+
+    pub(super) fn has_controllers(&self) -> bool {
+        self.imp().has_controllers.take()
+    }
 }
 
 impl Bound for StringCell {
@@ -90,6 +98,8 @@ mod imp {
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
         pub bound_object: RefCell<Option<EntryObject>>,
         pub update_connection: Cell<Option<SignalHolder<EntryObject>>>,
+        // These controllers need to be bound late.
+        pub has_controllers: Cell<bool>,
     }
 
     #[glib::object_subclass]

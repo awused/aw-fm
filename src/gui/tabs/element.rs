@@ -31,7 +31,7 @@ impl TabElement {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
             let alloc = c.widget().allocation();
             if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
-                error!("Workaround -- ignoring junk mouse event on {tab:?} element",);
+                warn!("Workaround -- ignoring junk mouse event on {tab:?} element",);
                 return;
             }
 

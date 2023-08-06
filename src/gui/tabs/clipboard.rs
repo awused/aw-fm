@@ -3,7 +3,7 @@ use std::str::{from_utf8, FromStr};
 use std::sync::Arc;
 use std::thread;
 
-use gtk::gdk::Display;
+use gtk::gdk::{Display, DragAction};
 use gtk::gio::{Cancellable, InputStream, MemoryOutputStream, OutputStreamSpliceFlags};
 use gtk::glib::{GString, Priority};
 use gtk::prelude::{DisplayExt, FileExt, MemoryOutputStreamExt, OutputStreamExt};
@@ -14,10 +14,10 @@ use strum_macros::{EnumString, IntoStaticStr};
 use super::id::TabId;
 use crate::gui::{file_operations, gui_run, Selected};
 
-const SPECIAL: &str = "x-special/aw-fm-copied-files";
-const SPECIAL_MATE: &str = "x-special/mate-copied-files";
-const SPECIAL_GNOME: &str = "x-special/gnome-copied-files";
-const URIS: &str = "text/uri-list";
+pub const SPECIAL: &str = "x-special/aw-fm-copied-files";
+pub const SPECIAL_MATE: &str = "x-special/mate-copied-files";
+pub const SPECIAL_GNOME: &str = "x-special/gnome-copied-files";
+pub const URIS: &str = "text/uri-list";
 
 glib::wrapper! {
     pub struct SelectionProvider(ObjectSubclass<imp::ClipboardProvider>)
@@ -113,12 +113,14 @@ fn stream_to_operation(
     tab: TabId,
     path: Arc<Path>,
     uri_list: bool,
+    finished: impl FnOnce() + 'static,
 ) -> impl FnOnce(Result<(InputStream, GString), glib::Error>) {
     move |res| {
         let in_stream = match res {
             Ok((is, _)) => is,
             Err(e) => {
                 error!("Failed to read contents: {e}");
+                finished();
                 return;
             }
         };
@@ -129,20 +131,23 @@ fn stream_to_operation(
             OutputStreamSpliceFlags::CLOSE_SOURCE | OutputStreamSpliceFlags::CLOSE_TARGET,
             Priority::LOW,
             Cancellable::NONE,
-            move |res| match res {
-                Ok(_bytes) => {
-                    let bytes = output.steal_as_bytes();
-                    bytes_to_operation(tab, path, uri_list, &bytes)
+            move |res| {
+                match res {
+                    Ok(_bytes) => {
+                        let bytes = output.steal_as_bytes();
+                        bytes_to_operation(tab, path, uri_list, &bytes)
+                    }
+                    Err(e) => {
+                        error!("Failed to read contents: {e}");
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to read contents: {e}");
-                }
+                finished();
             },
         )
     }
 }
 
-pub fn read_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
+pub fn handle_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
     let formats = display.clipboard().formats();
 
     let mime = if formats.contain_mime_type(SPECIAL) {
@@ -161,8 +166,45 @@ pub fn read_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
         &[mime],
         Priority::LOW,
         Cancellable::NONE,
-        stream_to_operation(tab, path, false),
+        stream_to_operation(tab, path, false, || {}),
     );
+}
+
+pub fn handle_drop(drop_ev: &gdk::Drop, tab: TabId, path: Arc<Path>) -> bool {
+    let formats = drop_ev.formats();
+
+    let (mime, uris) = if formats.contain_mime_type(SPECIAL) {
+        (SPECIAL, false)
+    } else if formats.contain_mime_type(SPECIAL_MATE) {
+        (SPECIAL_MATE, false)
+    } else if formats.contain_mime_type(SPECIAL_GNOME) {
+        (SPECIAL_GNOME, false)
+    } else if formats.contain_mime_type(URIS) {
+        (URIS, true)
+    } else {
+        warn!("Paste with no recognized mimetype. Got {:?}", formats.mime_types());
+        unreachable!();
+    };
+
+
+    let actions = drop_ev.actions();
+    let action = if actions.contains(DragAction::MOVE) {
+        DragAction::MOVE
+    } else if actions.contains(DragAction::COPY) {
+        DragAction::COPY
+    } else {
+        actions
+    };
+    println!("{actions}");
+
+    let dr = drop_ev.clone();
+    drop_ev.read_async(
+        &[mime],
+        Priority::LOW,
+        Cancellable::NONE,
+        stream_to_operation(tab, path, uris, move || dr.finish(action)),
+    );
+    true
 }
 
 
