@@ -90,6 +90,7 @@ shortcuts = [
 #
 # Ask yourself if you really want these, or if a keyboard shortcut and a
 # rofi script wouldn't be a better option.
+#
 # Defined as { name = "Name", action = "Command" },
 bookmarks = [
   {name = "Home", action = "Home"},
@@ -103,6 +104,14 @@ bookmarks = [
 # Sub-menus and sections can be specified by name.
 # All commands sharing the same named sub-menu or section will be grouped together in order.
 #
+# For selection the allowed options are: any/zero/maybe_one/one/at_least_one/multiple
+# 'any' will impose no requirements.
+# 'zero' will require that no items are selected.
+# 'maybe_one' will allow one or zero items to be selected.
+# 'one' will require exactly one item to be selected.
+# 'at_least_one' will require one or more items to be selected.
+# 'multiple' will require at least two items to be selected.
+#
 # For more control over when actions appear, use custom action scripts which allow for
 # fine-grained filtering on mimetypes or paths.
 #
@@ -110,6 +119,9 @@ bookmarks = [
 # {name = "Do Something", action = "Execute /path/to/do-something.sh"},
 # {name = "Sample Script", action = "Script /path/to/sample-script.sh"},
 context_menu = [
+  {name = "Cut", action = "Cut", selection = "at_least_one" },
+  {name = "Copy", action = "Copy", selection = "at_least_one" },
+
   {name = "Icons", submenu = "Display", action = "Display icons"},
   {name = "Columns", submenu = "Display", action = "Display columns"},
 

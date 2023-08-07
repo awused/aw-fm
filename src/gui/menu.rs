@@ -16,11 +16,10 @@ use gtk::traits::{GtkWindowExt, PopoverExt, WidgetExt};
 use gtk::{PopoverMenu, PositionType};
 use once_cell::unsync::Lazy;
 use regex::bytes::Regex;
-use strum_macros::{AsRefStr, EnumString};
 
 use super::Gui;
 use crate::com::{DirSettings, Entry, EntryObject};
-use crate::config::{ContextMenuGroup, ACTIONS_DIR, CONFIG};
+use crate::config::{ContextMenuEntry, ContextMenuGroup, Selection, ACTIONS_DIR, CONFIG};
 
 
 enum GC {
@@ -82,18 +81,6 @@ impl GC {
 }
 
 
-#[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
-#[strum(serialize_all = "snake_case")]
-enum Selection {
-    #[default]
-    Any,
-    Zero,
-    MaybeOne,
-    One,
-    AtLeastOne,
-    Multiple,
-}
-
 #[derive(Debug)]
 struct ActionSettings {
     name: Option<String>,
@@ -130,7 +117,7 @@ thread_local! {
 }
 
 impl ActionSettings {
-    fn parse(path: &Path, read: impl Read) -> Option<Self> {
+    fn parse_script(path: &Path, read: impl Read) -> Option<Self> {
         // No more than 1MB
         let mut read = read.take(1024 * 1024);
 
@@ -222,6 +209,21 @@ impl ActionSettings {
 
         error!("Found no end of settings line in {path:?}");
         None
+    }
+
+    fn for_action(name: String, selection: Selection) -> Self {
+        let s = Self {
+            name: Some(name),
+            directories: true,
+            files: true,
+            mimetypes: None,
+            extensions: None,
+            regex: None,
+            selection,
+            priority: 0,
+        };
+        debug!("Constructed filterable action from context menu entry: {s:#?}");
+        s
     }
 
     // Whether we can safely skip per-entry checks.
@@ -326,7 +328,12 @@ impl Ord for CustomAction {
 }
 
 impl CustomAction {
-    fn create(path: PathBuf, g: &Rc<Gui>, group: &SimpleActionGroup, n: usize) -> Option<Self> {
+    fn create_script(
+        path: PathBuf,
+        g: &Rc<Gui>,
+        group: &SimpleActionGroup,
+        n: usize,
+    ) -> Option<Self> {
         if !path.exists() || !path.is_file() {
             error!("Failed to read custom action in {path:?}: not a regular file");
             return None;
@@ -348,7 +355,7 @@ impl CustomAction {
             .map_err(|e| error!("Failed to read custom action in {path:?}: {e}"))
             .ok()?;
 
-        let settings = ActionSettings::parse(&path, read)?;
+        let settings = ActionSettings::parse_script(&path, read)?;
 
 
         let action = SimpleAction::new(&format!("custom-{n}"), None);
@@ -361,6 +368,27 @@ impl CustomAction {
         group.add_action(&action);
 
         Some(Self { path, settings, action })
+    }
+
+    fn create_action(
+        context: &ContextMenuEntry,
+        g: &Rc<Gui>,
+        group: &SimpleActionGroup,
+        n: usize,
+    ) -> Self {
+        let settings = ActionSettings::for_action(context.name.clone(), context.selection);
+
+
+        let action = SimpleAction::new(&format!("custom-context-{n}"), None);
+        let g = g.clone();
+        let cmd = context.action.clone();
+        action.connect_activate(move |_a, _v| {
+            g.run_command(&cmd);
+        });
+
+        group.add_action(&action);
+
+        Self { path: PathBuf::new(), settings, action }
     }
 
     fn display_name(&self) -> Cow<'_, str> {
@@ -393,6 +421,7 @@ pub(super) struct GuiMenu {
 
     menu: PopoverMenu,
     custom: Vec<CustomAction>,
+    custom_context: Vec<CustomAction>,
 }
 
 impl GuiMenu {
@@ -422,12 +451,15 @@ impl GuiMenu {
 
         let custom = Self::parse_custom_actions(gui, &action_group);
 
+        let (custom_context, menu) = Self::rebuild_menu(gui, &custom, &action_group);
+
         Self {
             display,
             sort_mode,
             sort_dir,
-            menu: Self::rebuild_menu(gui, &custom),
+            menu,
             custom,
+            custom_context,
         }
     }
 
@@ -452,14 +484,18 @@ impl GuiMenu {
                 }
             })
             .enumerate()
-            .filter_map(|(n, f)| CustomAction::create(f, g, group, n))
+            .filter_map(|(n, f)| CustomAction::create_script(f, g, group, n))
             .collect();
 
         actions.sort();
         actions
     }
 
-    fn rebuild_menu(gui: &Rc<Gui>, actions: &[CustomAction]) -> PopoverMenu {
+    fn rebuild_menu(
+        gui: &Rc<Gui>,
+        actions: &[CustomAction],
+        group: &SimpleActionGroup,
+    ) -> (Vec<CustomAction>, PopoverMenu) {
         let mut custom = actions.iter().fuse().peekable();
 
         let menu = Menu::new();
@@ -474,17 +510,30 @@ impl GuiMenu {
 
         let mut submenus = AHashMap::new();
         let mut sections = AHashMap::new();
+        let mut filterable_entries = Vec::new();
 
-        for entry in &CONFIG.context_menu {
-            let menuitem = MenuItem::new(Some(&entry.name), None);
-            let cmd = GC::from(entry.action.trim_start());
+        for c_entry in &CONFIG.context_menu {
+            let menuitem = if c_entry.selection != Selection::Any {
+                let action =
+                    CustomAction::create_action(c_entry, gui, group, filterable_entries.len());
+                let menuitem = action.menuitem();
 
-            menuitem.set_action_and_target_value(
-                Some(&format!("context-menu.{}", cmd.action())),
-                Some(cmd.variant()),
-            );
+                filterable_entries.push(action);
 
-            let menu = match &entry.group {
+                menuitem
+            } else {
+                let menuitem = MenuItem::new(Some(&c_entry.name), None);
+                let cmd = GC::from(c_entry.action.trim_start());
+
+                menuitem.set_action_and_target_value(
+                    Some(&format!("context-menu.{}", cmd.action())),
+                    Some(cmd.variant()),
+                );
+
+                menuitem
+            };
+
+            let menu = match &c_entry.group {
                 Some(ContextMenuGroup::Submenu(sm)) => match submenus.entry(sm.clone()) {
                     hash_map::Entry::Occupied(e) => e.into_mut(),
                     hash_map::Entry::Vacant(e) => {
@@ -527,7 +576,7 @@ impl GuiMenu {
             });
         }
 
-        menu
+        (filterable_entries, menu)
     }
 
     pub fn prepare(
@@ -540,12 +589,21 @@ impl GuiMenu {
         self.sort_mode.change_state(&settings.sort.mode.as_ref().to_variant());
         self.sort_dir.change_state(&settings.sort.direction.as_ref().to_variant());
 
+        for cme in &self.custom_context {
+            if cme.settings.rejects_count(entries.len()) {
+                trace!("Disabled context menu entry {} due to count", cme.display_name());
+                cme.action.set_enabled(false);
+            } else {
+                cme.action.set_enabled(true);
+            }
+        }
+
         let mut custom: Vec<_> = self
             .custom
             .iter()
             .filter(|ca| {
                 if ca.settings.rejects_count(entries.len()) {
-                    trace!("Disabled {} due to count", ca.display_name());
+                    trace!("Disabled custom action {} due to count", ca.display_name());
                     ca.action.set_enabled(false);
                     false
                 } else if ca.settings.permissive() {

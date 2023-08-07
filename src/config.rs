@@ -10,6 +10,7 @@ use dirs::config_dir;
 use gtk::gdk;
 use once_cell::sync::Lazy;
 use serde::{de, Deserialize, Deserializer};
+use strum_macros::{AsRefStr, EnumString};
 
 
 #[derive(Debug, Parser)]
@@ -48,6 +49,8 @@ pub struct ContextMenuEntry {
     pub name: String,
     #[serde(default, flatten)]
     pub group: Option<ContextMenuGroup>,
+    #[serde(default)]
+    pub selection: Selection,
 }
 
 #[derive(Debug, Default, Deserialize, Clone, Copy)]
@@ -68,6 +71,19 @@ pub enum FileCollision {
     Rename,
     Newer,
     Skip,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, EnumString, AsRefStr, Deserialize)]
+#[strum(serialize_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum Selection {
+    #[default]
+    Any,
+    Zero,
+    MaybeOne,
+    One,
+    AtLeastOne,
+    Multiple,
 }
 
 #[derive(Debug, Deserialize, Default)]

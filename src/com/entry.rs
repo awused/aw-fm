@@ -261,9 +261,6 @@ pub enum Thumbnail {
     Loading,
     Loaded(Texture),
     Outdated(Texture, bool),
-    // Can do two-pass unloading for all images.
-    // Only marginally useful compared to completely unloading tabs.
-    // Unloaded(WeakRef<Pixbuf>),
     Failed,
 }
 
