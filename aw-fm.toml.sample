@@ -53,7 +53,7 @@ shortcuts = [
 
   {key = "F", modifiers = "Control", action = "Search"},
 
-  # {key = "R", modifiers = "Control", action = "Rename"},
+  {key = "R", modifiers = "Control", action = "Rename"},
 
   {key = "Up", modifiers = "Alt", action = "Parent"},
   {key = "Down", modifiers = "Alt", action = "Child"},

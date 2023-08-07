@@ -693,6 +693,14 @@ impl TabsList {
         self.find(active).unwrap().delete();
     }
 
+    pub fn active_rename(&self) {
+        let Some(active) = self.active else {
+            return warn!("Rename called with no open panes");
+        };
+
+        self.find(active).unwrap().rename();
+    }
+
     pub fn reorder(&mut self, moved: TabId, dest: TabId, after: bool) {
         let src = self.element_position(moved).unwrap();
 

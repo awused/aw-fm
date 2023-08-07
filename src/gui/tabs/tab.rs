@@ -1209,6 +1209,23 @@ impl Tab {
         });
     }
 
+    pub fn rename(&self) {
+        let sel = if let Some(search) = &self.search {
+            &search.contents().selection
+        } else {
+            &self.contents.selection
+        };
+
+        let mut files = Selected::from(sel);
+        if files.len() != 1 {
+            return info!("Can't rename {} files", files.len());
+        }
+
+        let path = files.next().unwrap().get().abs_path.clone();
+
+        gui_run(|g| g.rename_dialog(self.id(), path));
+    }
+
     pub fn context_menu(&self) -> PopoverMenu {
         info!("Spawning context menu for {:?}", self.id());
         let contents =

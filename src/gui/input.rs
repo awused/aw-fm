@@ -3,28 +3,35 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use ahash::AHashMap;
 use dirs::home_dir;
 use gtk::gdk::{Key, ModifierType};
+use gtk::glib::clone::Downgrade;
 use gtk::glib::Propagation;
 use gtk::pango::EllipsizeMode;
 use gtk::prelude::Cast;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{BoxExt, EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt};
+use gtk::traits::{
+    BoxExt, EditableExt, EntryExt, EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt,
+};
 use gtk::Orientation;
 
+use super::tabs::id::TabId;
 use super::Gui;
 use crate::closing;
 use crate::com::{DisplayMode, ManagerAction, SortDir, SortMode};
 use crate::config::CONFIG;
-use crate::gui::show_warning;
+use crate::gui::file_operations::Kind;
+use crate::gui::{gui_run, show_warning};
 
 mod help;
 
 #[derive(Debug, Default)]
 pub(super) struct OpenDialogs {
     help: Option<gtk::Window>,
+    // rename: bool,
 }
 
 impl Gui {
@@ -102,6 +109,63 @@ impl Gui {
             .xalign(0.0)
             .build();
         container.append(&header);
+    }
+
+    pub(super) fn rename_dialog(self: &Rc<Self>, tab: TabId, path: Arc<Path>) {
+        let Some(fname) = path.file_name() else {
+            info!("Can't rename without file name");
+            return;
+        };
+
+        let dialog = gtk::Window::builder()
+            .title("Rename")
+            .transient_for(&self.window)
+            .modal(true)
+            .build();
+
+        self.close_on_quit(&dialog);
+
+        dialog.set_default_width(800);
+        // dialog.set_default_height(80);
+
+        let vbox = gtk::Box::new(Orientation::Vertical, 12);
+
+        let label = gtk::Label::new(Some(&path.to_string_lossy()));
+
+        let entry = gtk::Entry::new();
+
+        entry.set_placeholder_text(Some(&fname.to_string_lossy()));
+        let d = dialog.downgrade();
+        entry.connect_activate(move |e| {
+            d.upgrade().unwrap().destroy();
+
+            let new_name = e.text();
+            if new_name.is_empty() || new_name.contains('/') || new_name.contains('\\') {
+                show_warning("Invalid name for file \"{new_name}\"");
+                return;
+            }
+
+            let parent = path.parent().unwrap();
+            gui_run(|g| {
+                g.start_operation(
+                    tab,
+                    Kind::Rename(parent.join(new_name)),
+                    vec![path.to_path_buf()],
+                )
+            });
+        });
+
+        vbox.append(&label);
+        vbox.append(&entry);
+
+        dialog.set_child(Some(&vbox));
+
+        dialog.connect_close_request(move |d| {
+            d.destroy();
+            Propagation::Proceed
+        });
+
+        dialog.set_visible(true);
     }
 
     fn close_on_quit<T: WidgetExt>(self: &Rc<Self>, w: &T) {
@@ -283,6 +347,8 @@ impl Gui {
 
             "Trash" => return tabs.active_trash(),
             "Delete" => return tabs.active_delete(),
+
+            "Rename" => return tabs.active_rename(),
 
             "Search" => return tabs.active_search(""),
             _ => true,

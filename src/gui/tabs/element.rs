@@ -82,7 +82,8 @@ impl TabElement {
                 return false;
             }
 
-            if y > dt.widget().allocated_height() as f64 / 2.0 {
+            // 2.5-3.0 feels more like half the target than 2.0 does
+            if y > dt.widget().allocated_height() as f64 / 2.5 {
                 debug!("Reordering {source:?} after {tab:?}");
                 tabs_run(|t| t.reorder(source, tab, true));
             } else {

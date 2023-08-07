@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
-use gtk::glib::{Propagation, WeakRef};
+use gtk::glib::{self, Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
@@ -750,12 +750,18 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
 
     let deny = deny_view.clone();
     click.connect_released(move |_c, _n, _x, _y| {
-        tabs_run(|t| t.find(tab).map(Tab::workaround_enable_rubberband));
+        // This can get called at strange times
+        glib::idle_add_local_once(move || {
+            tabs_run(|t| t.find(tab).map(Tab::workaround_enable_rubberband));
+        });
         deny.set(false);
     });
 
     click.connect_stopped(move |_c| {
-        tabs_run(|t| t.find(tab).map(Tab::workaround_enable_rubberband));
+        // This can get called at strange times
+        glib::idle_add_local_once(move || {
+            tabs_run(|t| t.find(tab).map(Tab::workaround_enable_rubberband));
+        });
         deny_view.set(false);
     });
 

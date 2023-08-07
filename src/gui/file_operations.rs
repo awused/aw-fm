@@ -472,7 +472,7 @@ impl Operation {
         let status = match &self.kind {
             Kind::Move(p) => self.process_next_move(p),
             Kind::Copy(p) => self.process_next_copy(p),
-            Kind::Rename(_p) => todo!(),
+            Kind::Rename(p) => self.process_rename(p),
             Kind::Undo { .. } => todo!(),
             Kind::Trash => self.process_next_trash(),
             Kind::Delete => self.process_next_delete(),
@@ -928,6 +928,41 @@ impl Operation {
                 s.process_next();
             },
         );
+    }
+
+    fn process_rename(self: &Rc<Self>, new_path: &Path) -> Status {
+        if new_path.exists() {
+            show_warning(format!("{new_path:?} already exists"));
+            self.progress.borrow_mut().push_outcome(Outcome::Skip);
+            return Status::Done;
+        }
+
+        let source = self.progress.borrow_mut().files.pop().unwrap();
+        let dest = new_path.to_path_buf();
+
+        let s = self.clone();
+        gio::File::for_path(&source).move_async(
+            &gio::File::for_path(new_path),
+            FileCopyFlags::NOFOLLOW_SYMLINKS | FileCopyFlags::ALL_METADATA,
+            glib::Priority::LOW,
+            Some(&self.cancellable),
+            None,
+            move |result| {
+                if let Err(e) = result {
+                    if !s.cancellable.is_cancelled() {
+                        show_error(format!("{e}"));
+                        s.cancel();
+                    }
+                } else {
+                    trace!("Finished renameing {source:?} to {dest:?}");
+                    s.progress.borrow_mut().push_outcome(Outcome::Move { source, dest });
+                }
+
+                gui_run(|g| g.finish_operation(s))
+            },
+        );
+
+        Status::AsyncScheduled
     }
 
     fn cancel(&self) {

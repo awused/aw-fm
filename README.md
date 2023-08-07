@@ -101,6 +101,8 @@ specify them.
   * aw-fm doesn't have utilities to manage trash.
 * `Delete`
   * Spawns a confirmation dialog before permanently deleting the selected items.
+* `Rename`
+  * Spawns a rename dialog for the current file.
 
 ##### Navigation Commands
 
