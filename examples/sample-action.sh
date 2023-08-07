@@ -51,13 +51,6 @@
 #
 # extensions=
 #
-## Allowed paths, as a glob.
-## This should be absolute.
-## All files/directories must pass this glob if set.
-## TODO -- unimplemented, may be dropped
-#
-# glob=
-#
 ## Allowed paths, as a regular expression.
 ## All files/directories must match this regex if set.
 #
@@ -66,10 +59,19 @@
 ## Whether this can run on multiple files or not.
 ## This includes directories.
 ## Only runs if all files pass the above filters.
-## required will require at least two matching items.
-## true/false/required
+## If "any", "zero", or "maybe_one" are specified and no items are selected, the current directory
+## will need to pass the above regex and 'directories' must be set to true. The script will be
+## called with an empty "AWFM_SELECTION" variable.
+##
+## any/zero/maybe_one/one/at_least_one/multiple
+## 'any' will impose no requirements.
+## 'zero' will require that no items are selected.
+## 'maybe_one' will allow one or zero items to be selected.
+## 'one' will require exactly one item to be selected.
+## 'at_least_one' will require one or more items to be selected.
+## 'multiple' will require at least two matching items to be selected.
 #
-# multiple=true
+# selection=any
 #
 ## How to handle sorting actions.
 ## This can be any integer (32 bit) and lower numbers appear earlier in the list.
@@ -88,7 +90,7 @@
 #**aw-fm-settings-begin**
 # name=Directories
 # files=false
-# multiple=false
+# selection=maybe_one
 #**aw-fm-settings-end**
 
 # A script that can run on multiple mp3 files.
@@ -107,15 +109,14 @@
 # directories=false
 # mimetypes=video/;image/png
 # extensions=abc;abcd
-# multiple=required
+# selection=multiple
 #**aw-fm-settings-end**
 
-# A script that can run on anything but only inside in a user's Downloads folder.
+# A script that can run on anything inside a user's Downloads folder.
 # The glob and regular expression should behave the same.
 # Shows up in the context menu as "Remove Downloads"
 #**aw-fm-settings-begin**
 # name=Remove Downloads
-# glob=/home/*/Downloads/**
 # regex=^/home/[^/]+/Downloads/
 #**aw-fm-settings-end**
 

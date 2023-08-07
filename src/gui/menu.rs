@@ -83,12 +83,15 @@ impl GC {
 
 
 #[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
-#[strum(serialize_all = "lowercase")]
-enum Multiple {
+#[strum(serialize_all = "snake_case")]
+enum Selection {
     #[default]
-    True,
-    False,
-    Required,
+    Any,
+    Zero,
+    MaybeOne,
+    One,
+    AtLeastOne,
+    Multiple,
 }
 
 #[derive(Debug)]
@@ -99,7 +102,7 @@ struct ActionSettings {
     mimetypes: Option<Vec<String>>,
     extensions: Option<Vec<String>>,
     regex: Option<Regex>,
-    multiple: Multiple,
+    selection: Selection,
     priority: i32,
 }
 
@@ -122,7 +125,7 @@ impl Ord for ActionSettings {
 
 thread_local! {
     static SETTINGS_RE: Lazy<regex::Regex> = Lazy::new(||
-        regex::Regex::new(r"(name|directories|files|mimetypes|extensions|regex|multiple|priority)=(.*)$")
+        regex::Regex::new(r"(name|directories|files|mimetypes|extensions|regex|selection|priority)=(.*)$")
             .unwrap());
 }
 
@@ -150,7 +153,7 @@ impl ActionSettings {
         let mut mimetypes = None;
         let mut extensions = None;
         let mut regex = None;
-        let mut multiple = Multiple::True;
+        let mut selection = Selection::Any;
         let mut priority = 0;
 
         for line in lines {
@@ -162,7 +165,7 @@ impl ActionSettings {
                     mimetypes,
                     extensions,
                     regex,
-                    multiple,
+                    selection,
                     priority,
                 };
                 debug!("Read script from {path:?}: {s:#?}");
@@ -202,8 +205,8 @@ impl ActionSettings {
                         .ok()?;
                     regex = Some(re);
                 }
-                "multiple" => {
-                    multiple = Multiple::from_str(rest)
+                "selection" => {
+                    selection = Selection::from_str(rest)
                         .map_err(|_e| error!("Invalid settings block in {path:?}: got \"{line}\""))
                         .ok()?
                 }
@@ -232,10 +235,13 @@ impl ActionSettings {
     }
 
     const fn rejects_count(&self, count: usize) -> bool {
-        match self.multiple {
-            Multiple::True => false,
-            Multiple::False => count > 1,
-            Multiple::Required => count < 2,
+        match self.selection {
+            Selection::Any => false,
+            Selection::Zero => count != 0,
+            Selection::MaybeOne => count > 1,
+            Selection::One => count != 1,
+            Selection::AtLeastOne => count == 0,
+            Selection::Multiple => count < 2,
         }
     }
 
