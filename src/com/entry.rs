@@ -313,6 +313,7 @@ mod internal {
         entry: super::Entry,
         widgets: WidgetCounter,
         thumbnail: Thumbnail,
+        updated: bool,
     }
 
     #[derive(Debug, Default)]
@@ -371,6 +372,7 @@ mod internal {
                 entry,
                 widgets: WidgetCounter(0, 0),
                 thumbnail,
+                updated: false,
             };
             assert!(self.0.replace(Some(wrapped)).is_none());
             p
@@ -415,7 +417,7 @@ mod internal {
             }
 
 
-            let wrapped = Entry { entry, widgets, thumbnail };
+            let wrapped = Entry { entry, widgets, thumbnail, updated: true };
             let old = self.0.replace(Some(wrapped)).unwrap();
             self.obj().emit_by_name::<()>("update", &[]);
 
@@ -477,6 +479,8 @@ mod internal {
                 return;
             }
 
+            inner.updated = false;
+
             match thumb {
                 Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => {}
                 Thumbnail::Loading | Thumbnail::Loaded(_) | Thumbnail::Outdated(..) => {
@@ -495,6 +499,8 @@ mod internal {
                 trace!("Not failing thumbnail for updated file {:?}", &*inner.entry.name);
                 return;
             }
+
+            inner.updated = false;
 
             match thumb {
                 Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => (),
@@ -522,6 +528,10 @@ mod internal {
                 None
             }
         }
+
+        pub fn was_updated(&self) -> bool {
+            self.0.borrow().as_ref().unwrap().updated
+        }
     }
 }
 
@@ -546,7 +556,7 @@ impl EntryObject {
     fn create(entry: Entry) -> Self {
         let obj: Self = Object::new();
         let p = obj.imp().init(entry);
-        obj.queue_thumb(p);
+        obj.queue_thumb(p, false);
 
         obj
     }
@@ -612,7 +622,7 @@ impl EntryObject {
         trace!("Update for {:?}", entry.borrow().abs_path);
 
         let (old, p) = self.imp().update_inner(entry.get_entry());
-        self.queue_thumb(p);
+        self.queue_thumb(p, true);
 
 
         Some(old)
@@ -626,25 +636,31 @@ impl EntryObject {
         self.imp().get()
     }
 
-    fn queue_thumb(&self, p: Option<ThumbPriority>) {
+    fn queue_thumb(&self, p: Option<ThumbPriority>, from_event: bool) {
         if let Some(p) = p {
             // Very spammy
             // trace!("Queuing thumbnail for {:?} {:?}", self.get().abs_path, p);
-            queue_thumb(self.downgrade(), p)
+            queue_thumb(self.downgrade(), p, from_event)
         }
     }
 
     // mapped is whether the widget was mapped at the time of binding.
     pub fn mark_bound(&self, mapped: bool) {
-        self.queue_thumb(self.imp().change_widgets(1, mapped.into()));
+        self.queue_thumb(self.imp().change_widgets(1, mapped.into()), self.imp().was_updated());
     }
 
     pub fn mark_unbound(&self, mapped: bool) {
-        self.queue_thumb(self.imp().change_widgets(-1, -i16::from(mapped)));
+        self.queue_thumb(
+            self.imp().change_widgets(-1, -i16::from(mapped)),
+            self.imp().was_updated(),
+        );
     }
 
     pub fn mark_mapped_changed(&self, mapped: bool) {
-        self.queue_thumb(self.imp().change_widgets(0, if mapped { 1 } else { -1 }));
+        self.queue_thumb(
+            self.imp().change_widgets(0, if mapped { 1 } else { -1 }),
+            self.imp().was_updated(),
+        );
     }
 
     pub fn icon(&self) -> Icon {

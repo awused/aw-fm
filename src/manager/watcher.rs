@@ -14,8 +14,8 @@ use crate::com::{Entry, GuiAction, SearchUpdate, Update};
 use crate::config::CONFIG;
 
 // Use our own debouncer as the existing notify debouncers leave a lot to be desired.
-// Send the first event immediately and then at most one event per period.
-const DEBOUNCE_DURATION: Duration = Duration::from_millis(500);
+// Send the first event ~immediately and then at most one event per period.
+const DEBOUNCE_DURATION: Duration = Duration::from_millis(1000);
 // Used to optimize the common case where a bunch of notifies arrive basically instantly for one
 // file. Especially after creation.
 const DEDUPE_DELAY: Duration = Duration::from_millis(5);

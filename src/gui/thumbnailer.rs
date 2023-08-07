@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gtk::gdk::Texture;
 use gtk::glib::WeakRef;
@@ -19,10 +20,10 @@ use crate::{closing, handle_panic};
 #[derive(Debug, Default)]
 struct PendingThumbs {
     // Currently visible.
-    high_priority: VecDeque<WeakRef<EntryObject>>,
+    high_priority: VecDeque<(WeakRef<EntryObject>, bool)>,
     // Bound but not visible. Uses the same number of threads as low but runs earlier.
-    med_priority: VecDeque<WeakRef<EntryObject>>,
-    low_priority: Vec<WeakRef<EntryObject>>,
+    med_priority: VecDeque<(WeakRef<EntryObject>, bool)>,
+    low_priority: Vec<(WeakRef<EntryObject>, bool)>,
 
     // Never bother cloning these, it's a waste, just pass them around.
     // It's marginally more efficient (2-3 seconds worth over 100k items) to not clone and drop
@@ -66,7 +67,7 @@ impl Thumbnailer {
         Self { pending: pending.into(), pool, high, low }
     }
 
-    pub fn queue(&self, weak: WeakRef<EntryObject>, p: ThumbPriority) {
+    pub fn queue(&self, weak: WeakRef<EntryObject>, p: ThumbPriority, from_event: bool) {
         if self.high == 0 {
             return;
         }
@@ -76,7 +77,7 @@ impl Thumbnailer {
                 if self.low == 0 {
                     return;
                 }
-                self.pending.borrow_mut().low_priority.push(weak);
+                self.pending.borrow_mut().low_priority.push((weak, from_event));
             }
             ThumbPriority::Medium => {
                 if self.low == 0 {
@@ -84,10 +85,10 @@ impl Thumbnailer {
                 }
                 // The ones added first aren't particularly useful, but if we have a bunch of bound
                 // elements the ones added later are less likely to be useful.
-                self.pending.borrow_mut().med_priority.push_back(weak);
+                self.pending.borrow_mut().med_priority.push_back((weak, from_event));
             }
             ThumbPriority::High => {
-                self.pending.borrow_mut().high_priority.push_back(weak);
+                self.pending.borrow_mut().high_priority.push_back((weak, from_event));
             }
         }
         self.process();
@@ -125,18 +126,18 @@ impl Thumbnailer {
         });
     }
 
-    fn find_next(&self) -> Option<(EntryObject, SendFactory)> {
+    fn find_next(&self) -> Option<(EntryObject, bool, SendFactory)> {
         let mut pending = self.pending.borrow_mut();
 
         if pending.factories.is_empty() {
             return None;
         }
 
-        while let Some(weak) = pending.high_priority.pop_front() {
+        while let Some((weak, from_event)) = pending.high_priority.pop_front() {
             if let Some(strong) = weak.upgrade() {
                 if strong.imp().mark_thumbnail_loading(ThumbPriority::High) {
                     pending.processed += 1;
-                    return Some((strong, pending.factories.pop().unwrap()));
+                    return Some((strong, from_event, pending.factories.pop().unwrap()));
                 }
             }
         }
@@ -145,20 +146,20 @@ impl Thumbnailer {
             return None;
         }
 
-        while let Some(weak) = pending.med_priority.pop_front() {
+        while let Some((weak, from_event)) = pending.med_priority.pop_front() {
             if let Some(strong) = weak.upgrade() {
                 if strong.imp().mark_thumbnail_loading(ThumbPriority::Medium) {
                     pending.processed += 1;
-                    return Some((strong, pending.factories.pop().unwrap()));
+                    return Some((strong, from_event, pending.factories.pop().unwrap()));
                 }
             }
         }
 
-        while let Some(weak) = pending.low_priority.pop() {
+        while let Some((weak, from_event)) = pending.low_priority.pop() {
             if let Some(strong) = weak.upgrade() {
                 if strong.imp().mark_thumbnail_loading(ThumbPriority::Low) {
                     pending.processed += 1;
-                    return Some((strong, pending.factories.pop().unwrap()));
+                    return Some((strong, from_event, pending.factories.pop().unwrap()));
                 }
             }
         }
@@ -186,7 +187,7 @@ impl Thumbnailer {
             return;
         }
 
-        let Some((obj, factory)) = self.find_next() else {
+        let Some((obj, from_event, factory)) = self.find_next() else {
             return;
         };
 
@@ -200,7 +201,7 @@ impl Thumbnailer {
 
         // let start = Instant::now();
 
-        self.pool.spawn(move || {
+        let gen_thumb = move || {
             let existing = factory.lookup(&uri, mtime.sec);
 
             if let Some(existing) = existing {
@@ -227,7 +228,7 @@ impl Thumbnailer {
                 return Self::fail_thumbnail(factory, path, mtime);
             }
 
-            match factory.generate_and_save_thumbnail(&uri, &mime_type, mtime.sec) {
+            match factory.generate_and_save_thumbnail(&uri, &mime_type, mtime.sec, from_event) {
                 Some(tex) => {
                     // Spammy
                     // trace!(
@@ -239,7 +240,9 @@ impl Thumbnailer {
                 }
                 None => Self::fail_thumbnail(factory, path, mtime),
             }
-        });
+        };
+
+        self.pool.spawn(gen_thumb);
     }
 }
 
@@ -324,6 +327,7 @@ mod send {
             uri: &str,
             mime_type: &str,
             mtime_sec: u64,
+            from_event: bool,
         ) -> Option<Texture> {
             let generated = self.0.generate_thumbnail(uri, mime_type, None::<&Cancellable>);
 
@@ -342,13 +346,24 @@ mod send {
                         return None;
                     }
 
-                    error!("Failed to generate thumbnail for {uri:?} ({mime_type}): {e}");
-                    if let Err(e) =
-                        self.0.create_failed_thumbnail(uri, mtime_sec as i64, None::<&Cancellable>)
-                    {
-                        // Not a serious error for aw-fm, we will still skip trying multiple times,
-                        // but it will be retried unnecessarily in the future.
-                        error!("Failed to save failed thumbnail for {uri:?}: {e}");
+                    error!(
+                        "Failed to generate thumbnail for {uri:?} ({mime_type}) from_event: \
+                         {from_event}: {e}"
+                    );
+                    // Don't store failed thumbnails for updates from events, as the second-level
+                    // precision causes problems. This means it will be retried later, but that's
+                    // fine.
+                    if !from_event {
+                        if let Err(e) = self.0.create_failed_thumbnail(
+                            uri,
+                            mtime_sec as i64,
+                            None::<&Cancellable>,
+                        ) {
+                            // Not a serious error for aw-fm, we will still skip trying multiple
+                            // times, but it will be retried
+                            // unnecessarily in the future.
+                            error!("Failed to save failed thumbnail for {uri:?}: {e}");
+                        }
                     }
                     return None;
                 }

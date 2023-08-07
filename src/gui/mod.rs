@@ -72,8 +72,8 @@ pub enum ThumbPriority {
     High,
 }
 
-pub fn queue_thumb(weak: WeakRef<EntryObject>, p: ThumbPriority) {
-    gui_run(|g| g.thumbnailer.queue(weak, p));
+pub fn queue_thumb(weak: WeakRef<EntryObject>, p: ThumbPriority, from_event: bool) {
+    gui_run(|g| g.thumbnailer.queue(weak, p, from_event));
 }
 
 
