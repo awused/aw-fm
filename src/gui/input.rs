@@ -134,7 +134,8 @@ impl Gui {
 
         let entry = gtk::Entry::new();
 
-        entry.set_placeholder_text(Some(&fname.to_string_lossy()));
+        entry.set_text(&fname.to_string_lossy());
+
         let d = dialog.downgrade();
         entry.connect_activate(move |e| {
             d.upgrade().unwrap().destroy();
