@@ -979,13 +979,6 @@ impl Gui {
         };
         let op = ops.swap_remove(index);
 
-        {
-            println!("TODO -- remove me Finished operation {:?}", op.kind);
-            let b = op.progress.borrow();
-            for out in &b.log {
-                println!("{out:?}");
-            }
-        }
         // Allow file system + notifies to settle for 10 + 2ms
         // We dedupe notifications for at most 10ms, plus some margin
         glib::timeout_add_local_once(Duration::from_millis(12), move || {

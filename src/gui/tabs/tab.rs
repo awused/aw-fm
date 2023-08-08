@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use ahash::AHashSet;
 use gtk::gio::Cancellable;
-use gtk::prelude::{CastNone, ListModelExt, ListModelExtManual};
+use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{SelectionModelExt, WidgetExt};
 use gtk::{AlertDialog, Orientation, PopoverMenu, Widget};
@@ -1229,12 +1229,12 @@ impl Tab {
 
     pub fn scroll_to_completed(&mut self, kind: &Kind, outcomes: &[Outcome]) {
         if !self.loaded() {
-            info!("Ignoring scroll to completed operation tab that is not loaded {:?}", self.id);
+            info!("Not scrolling to completed operation in tab that is not loaded {:?}", self.id);
             return;
         }
 
         if !self.visible() {
-            info!("Ignoring scroll to completed operation tab that is not visible {:?}", self.id);
+            info!("Not scrolling to completed operation in tab that is not visible {:?}", self.id);
             return;
         }
 
