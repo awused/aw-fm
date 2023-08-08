@@ -201,6 +201,7 @@ impl Contents {
         assert!(!self.stale);
         if let Some(filtered) = &self.filtered {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5989
+            // TODO [incremental]
             // if filtered.is_incremental() {
             //     // Must unset incremental to get an accurate position.
             //     filtered.set_incremental(false);

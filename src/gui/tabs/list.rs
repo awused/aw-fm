@@ -19,6 +19,7 @@ use crate::com::{
     SortSettings, Update,
 };
 use crate::database::Session;
+use crate::gui::file_operations::{Kind, Outcome};
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
@@ -257,6 +258,14 @@ impl TabsList {
         let (left, tab, right) = self.split_around_mut(index);
 
         tab.navigate(left, right, target)
+    }
+
+    pub fn scroll_to_completed(&mut self, id: TabId, kind: &Kind, outcomes: &[Outcome]) {
+        let Some(tab) = self.find_mut(id) else {
+            return info!("Not scrolling to completed operation in closed tab {id:?}");
+        };
+
+        tab.scroll_to_completed(kind, outcomes);
     }
 
     pub fn get_active_dir(&self) -> Option<Arc<Path>> {

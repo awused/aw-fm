@@ -32,7 +32,7 @@ mod element;
 mod icon_view;
 
 static MIN_PANE_RES: i32 = 400;
-// TODO -- lower to 2 when incremental filtering isn't broken.
+// TODO [incremental] -- lower to 2 when incremental filtering isn't broken.
 static MIN_SEARCH: usize = 3;
 
 
@@ -266,6 +266,7 @@ impl Pane {
             }
 
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5989
+            // TODO [incremental]
             // let mut incremental = true;
 
             let change = if query.len() < MIN_SEARCH {

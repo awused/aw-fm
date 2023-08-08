@@ -20,7 +20,7 @@ use regex::bytes::{Captures, Match, Regex};
 use super::tabs::id::TabId;
 use super::{gui_run, Gui};
 use crate::config::{DirectoryCollision, FileCollision, CONFIG};
-use crate::gui::{show_error, show_warning};
+use crate::gui::{show_error, show_warning, tabs_run};
 
 thread_local! {
     static COPY_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"^(.*)( \(copy (\d+)\))(\.[^/]+)?$").unwrap());
@@ -57,7 +57,7 @@ impl Fragment {
 // It should be possible to undo (best-effort) a file operation by reversing each completed action
 // in roughly reverse order.
 #[derive(Debug)]
-enum Outcome {
+pub enum Outcome {
     // Includes overwrites, undo -> move back
     Move { source: PathBuf, dest: PathBuf },
     // Does not include overwrite copies, undo -> delete with no confirmation
@@ -979,11 +979,20 @@ impl Gui {
         };
         let op = ops.swap_remove(index);
 
-        println!("TODO -- remove me Finished operation {:?}", op.kind);
-        let b = op.progress.borrow();
-        for out in &b.log {
-            println!("{out:?}");
+        {
+            println!("TODO -- remove me Finished operation {:?}", op.kind);
+            let b = op.progress.borrow();
+            for out in &b.log {
+                println!("{out:?}");
+            }
         }
+        // Allow file system + notifies to settle for 10 + 2ms
+        // We dedupe notifications for at most 10ms, plus some margin
+        glib::timeout_add_local_once(Duration::from_millis(12), move || {
+            tabs_run(|tlist| {
+                tlist.scroll_to_completed(op.tab, &op.kind, &op.progress.borrow().log)
+            });
+        });
     }
 
     pub(super) fn start_operation(self: &Rc<Self>, tab: TabId, kind: Kind, files: Vec<PathBuf>) {

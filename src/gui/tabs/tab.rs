@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use ahash::AHashSet;
 use gtk::gio::Cancellable;
-use gtk::prelude::{CastNone, ListModelExt};
+use gtk::prelude::{CastNone, ListModelExt, ListModelExtManual};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{SelectionModelExt, WidgetExt};
 use gtk::{AlertDialog, Orientation, PopoverMenu, Widget};
@@ -23,7 +24,7 @@ use crate::com::{
     SearchSnapshot, SearchUpdate, SnapshotId, SortDir, SortMode, SortSettings,
 };
 use crate::config::CONFIG;
-use crate::gui::file_operations::Kind;
+use crate::gui::file_operations::{Kind, Outcome};
 use crate::gui::tabs::PartiallyAppliedUpdate;
 use crate::gui::{applications, gui_run, show_error, show_warning, Selected, Update};
 
@@ -1224,6 +1225,120 @@ impl Tab {
         let path = files.next().unwrap().get().abs_path.clone();
 
         gui_run(|g| g.rename_dialog(self.id(), path));
+    }
+
+    pub fn scroll_to_completed(&mut self, kind: &Kind, outcomes: &[Outcome]) {
+        if !self.loaded() {
+            info!("Ignoring scroll to completed operation tab that is not loaded {:?}", self.id);
+            return;
+        }
+
+        if !self.visible() {
+            info!("Ignoring scroll to completed operation tab that is not visible {:?}", self.id);
+            return;
+        }
+
+
+        let tab_dir = &**self.dir.path();
+        match kind {
+            Kind::Move(d) | Kind::Copy(d) => {
+                if tab_dir != &**d {
+                    info!(
+                        "Ignoring scroll to completed operation: tab dir {tab_dir:?} not equal to \
+                         operation path {d:?}"
+                    );
+                    return;
+                }
+            }
+            Kind::Rename(f) => {
+                if f.parent() == Some(tab_dir) {
+                    warn!(
+                        "Ignoring scroll to completed rename: tab dir {tab_dir:?} not equal to \
+                         operation path {:?}. This is unusual.",
+                        f.parent().unwrap()
+                    );
+                    return;
+                }
+            }
+            Kind::Undo { .. } => todo!(),
+            Kind::Trash | Kind::Delete => {
+                info!("Not scrolling to completed deletion or trash operation.");
+                return;
+            }
+        }
+
+        // We expect these to normally be sorted by the same method as they came from.
+        // If not, it could be wrong, but it doesn't matter too much.
+        let mut new_paths: AHashSet<&Path> = outcomes
+            .iter()
+            .filter_map(|out| match out {
+                Outcome::Move { dest, .. }
+                | Outcome::Create(dest)
+                | Outcome::CopyOverwrite(dest)
+                | Outcome::CreateDestDir(dest) => {
+                    if Some(tab_dir) == dest.parent() {
+                        return Some(&**dest);
+                    }
+                    None
+                }
+                Outcome::RemoveSourceDir(..)
+                | Outcome::Skip
+                | Outcome::Delete
+                | Outcome::DeleteDir
+                | Outcome::Trash => None,
+            })
+            .collect();
+
+        if new_paths.is_empty() {
+            info!("No new paths to scroll to after operation in {tab_dir:?}");
+            return;
+        }
+
+        let contents =
+            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+        let selection = &contents.selection;
+
+        // TODO [incremental] -- if incremental filtering, must disable it now.
+        let mut scroll_target = None;
+
+        // The first one may not be the earliest by sort.
+        // TODO [efficiency] -- for small new_paths and large n_items, it'd be more efficient to do
+        // EntryObject::lookup and find position by sorted.
+        for i in 0..selection.n_items() {
+            if new_paths.is_empty() {
+                break;
+            }
+
+            let eo = selection.item(i).and_downcast::<EntryObject>().unwrap();
+            if !new_paths.contains(&*eo.get().abs_path) {
+                continue;
+            }
+
+            new_paths.remove(&*eo.get().abs_path);
+
+            if scroll_target.is_none() {
+                selection.unselect_all();
+                scroll_target = Some(ScrollPosition {
+                    path: eo.get().abs_path.clone(),
+                    index: i,
+                });
+            }
+
+            selection.select_item(i, false);
+        }
+
+        let Some(pos) = scroll_target else {
+            info!("Could not find first new item to scroll to, giving up, in {:?}", self.id);
+            return;
+        };
+
+        info!("Scrolling to {pos:?} after completed operation in {:?}", self.id);
+
+        let mut state = self.pane.clone_state(contents);
+        state.scroll_pos = Some(pos);
+        self.pane.overwrite_state(state);
+
+        self.apply_pane_state();
     }
 
     pub fn context_menu(&self) -> PopoverMenu {
