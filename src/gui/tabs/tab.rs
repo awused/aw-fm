@@ -827,10 +827,9 @@ impl Tab {
 
         let target = NavTarget::assume_dir(first.get().abs_path.clone());
         info!(
-            "Navigating {:?} from {:?} to sole child directory {:?}",
+            "Navigating {:?} from {:?} to sole child directory {target:?}",
             self.id,
             self.dir.path(),
-            target
         );
 
         let history = self.current_history();
@@ -1064,9 +1063,26 @@ impl Tab {
                 PartiallyAppliedUpdate::Delete(obj)
             }
             (Update::Removed(path), None, Some(obj)) => {
-                // So rare it's not worth optimizing
-                warn!("Removed search-only {:?} from event. This should be uncommon.", path);
-                PartiallyAppliedUpdate::Delete(obj)
+                // This case can be hit if a directory is deleted while tabs are open to both it
+                // and its parent. Duplicate events can be dispatched immediately, since they're
+                // removals, before disposals can run.
+
+                info!(
+                    "Removed search-only {path:?} from event, or got duplicate event. This should \
+                     be uncommon."
+                );
+
+                let search_delete = PartiallyAppliedUpdate::Delete(obj);
+                for t in left
+                    .iter_mut()
+                    .chain(right.iter_mut())
+                    .filter(|t| !t.matches_arc(self.dir.path()))
+                {
+                    if let Some(search) = &mut t.search {
+                        search.handle_subdir_flat_update(&search_delete);
+                    }
+                }
+                return;
             }
             (Update::Removed(path), None, None) => {
                 // Unusual case, probably shouldn't happen often.
@@ -1101,7 +1117,7 @@ impl Tab {
             .filter(|t| !t.matches_arc(self.dir.path()))
         {
             if let Some(search) = &mut t.search {
-                search.handle_subdir_flat_mutate(&mutate);
+                search.handle_subdir_flat_update(&mutate);
             }
         }
     }

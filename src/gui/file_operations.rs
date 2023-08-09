@@ -19,6 +19,8 @@ use regex::bytes::{Captures, Match, Regex};
 
 use super::tabs::id::TabId;
 use super::{gui_run, Gui};
+use crate::com::Update::Removed;
+use crate::com::{GuiAction, Update};
 use crate::config::{DirectoryCollision, FileCollision, CONFIG};
 use crate::gui::{show_error, show_warning, tabs_run};
 
@@ -919,6 +921,14 @@ impl Operation {
                     }
                 } else {
                     trace!("Finished deleting {path:?}");
+                    // Just deleted something, if it's on NFS a silly rename could happen.
+                    // There's a tiny chance this is wrong but it's unlikely for a deletion to be
+                    // reversed by a creation instantly.
+                    //
+                    // For a search-only deletion and silly rename this won't be enough, but that's
+                    // enough of an edge case to not be a major concern.
+                    gui_run(|g| g.handle_update(GuiAction::Update(Update::Removed(path.into()))));
+
                     s.progress.borrow_mut().push_outcome(if was_dir {
                         Outcome::DeleteDir
                     } else {

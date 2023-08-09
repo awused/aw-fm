@@ -135,12 +135,16 @@ impl Search {
     // Special handling for flat events in other tabs that might overlap this search.
     // They might need to be immediately applied, even during loading, because they could
     // change sort order.
-    pub fn handle_subdir_flat_mutate(&mut self, update: &PartiallyAppliedUpdate) {
+    pub fn handle_subdir_flat_update(&mut self, update: &PartiallyAppliedUpdate) {
         if !update.is_in_subdir(&self.path) {
             return;
         }
 
-        if let PartiallyAppliedUpdate::Mutate(old, new) = update {
+        if let PartiallyAppliedUpdate::Delete(old) = update {
+            if let Some(pos) = self.contents.total_position_by_sorted(&old.get()) {
+                self.contents.remove(pos);
+            }
+        } else if let PartiallyAppliedUpdate::Mutate(old, new) = update {
             // This needs to be applied immediately if the item is present to maintain sorting.
             if let Some(pos) = self.contents.total_position_by_sorted(old) {
                 self.contents.reinsert_updated(pos, new, old);
