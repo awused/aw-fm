@@ -201,23 +201,32 @@ impl Thumbnailer {
         // let start = Instant::now();
 
         let gen_thumb = move || {
-            let existing = factory.lookup(&uri, mtime.sec);
+            // Exceedingly rare for any kind of event-based operation to already have a valid
+            // thumbnail, so don't even check. For things like images that can have valid
+            // thumbnails while being incomplete, this can be a stale partial thumbnail.
+            //
+            // Also can't trust mtime to make sense according to wall time or UTC time.
+            if !from_event {
+                let existing = factory.lookup(&uri, mtime.sec);
 
-            if let Some(existing) = existing {
-                let gfile = gtk::gio::File::for_path(existing);
-                match Texture::from_file(&gfile) {
-                    Ok(tex) => {
-                        // This is just too spammy outside of debugging
-                        // trace!("Loaded existing thumbnail for {uri:?}");
-                        return Self::finish_thumbnail(factory, tex, path, mtime);
-                    }
-                    Err(e) => {
-                        error!("Failed to load existing thumbnail: {e:?}");
-                        return Self::fail_thumbnail(factory, path, mtime);
+                if let Some(existing) = existing {
+                    let gfile = gtk::gio::File::for_path(existing);
+                    match Texture::from_file(&gfile) {
+                        Ok(tex) => {
+                            // This is just too spammy outside of debugging
+                            // trace!("Loaded existing thumbnail for {uri:?}");
+                            return Self::finish_thumbnail(factory, tex, path, mtime);
+                        }
+                        Err(e) => {
+                            error!("Failed to load existing thumbnail: {e:?}");
+                            return Self::fail_thumbnail(factory, path, mtime);
+                        }
                     }
                 }
             }
 
+            // aw-fm doesn't write failed thumbnails for operations from events,
+            // so this is most likely legitimate.
             if factory.has_failed(&uri, mtime.sec) {
                 return Self::fail_thumbnail(factory, path, mtime);
             }
