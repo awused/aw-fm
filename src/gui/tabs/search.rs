@@ -185,7 +185,7 @@ impl Search {
             (_, Some(_), None) => unreachable!(),
             (Update::Entry(entry), None, None) => {
                 trace!("Inserting new item from update in search tab.");
-                let new = EntryObject::new(entry.get_entry());
+                let new = EntryObject::new(entry.get_entry(), true);
                 self.contents.insert(&new);
             }
             (Update::Entry(_), None, Some(eo)) => {

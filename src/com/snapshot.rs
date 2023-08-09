@@ -73,7 +73,7 @@ impl From<DirSnapshot> for EntryObjectSnapshot {
             .entries
             .into_iter()
             .map(|entry| {
-                let (eo, updated) = EntryObject::create_or_update(entry);
+                let (eo, updated) = EntryObject::create_or_update(entry, false);
                 had_search_updates = had_search_updates || updated.is_some();
                 eo
             })
@@ -102,7 +102,7 @@ impl SearchSnapshot {
 
     pub fn into_entries(self) -> impl Iterator<Item = EntryObject> {
         self.entries.into_iter().map(|entry| {
-            EntryObject::lookup(&entry.abs_path).unwrap_or_else(|| EntryObject::new(entry))
+            EntryObject::lookup(&entry.abs_path).unwrap_or_else(|| EntryObject::new(entry, false))
         })
     }
 }

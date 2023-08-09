@@ -550,16 +550,16 @@ impl EntryObject {
         ALL_ENTRY_OBJECTS.with(RefCell::take);
     }
 
-    fn create(entry: Entry) -> Self {
+    fn create(entry: Entry, from_event: bool) -> Self {
         let obj: Self = Object::new();
         let p = obj.imp().init(entry);
-        obj.queue_thumb(p, false);
+        obj.queue_thumb(p, from_event);
 
         obj
     }
 
-    pub fn new(entry: Entry) -> Self {
-        let obj = Self::create(entry);
+    pub fn new(entry: Entry, from_event: bool) -> Self {
+        let obj = Self::create(entry, from_event);
 
         ALL_ENTRY_OBJECTS.with(|m| {
             let old = m.borrow_mut().insert(obj.get().abs_path.clone(), obj.downgrade());
@@ -572,7 +572,7 @@ impl EntryObject {
     // If the old entry is present, we have existing search tabs we'll need to update.
     //
     // This cannot cause updates to existing non-search lists.
-    pub fn create_or_update(entry: Entry) -> (Self, Option<Entry>) {
+    pub fn create_or_update(entry: Entry, from_event: bool) -> (Self, Option<Entry>) {
         ALL_ENTRY_OBJECTS.with(|m| {
             let mut map = m.borrow_mut();
 
@@ -583,16 +583,18 @@ impl EntryObject {
                 hash_map::Entry::Occupied(o) => {
                     let value = o.into_mut();
                     if let Some(existing) = value.upgrade() {
+                        // If we got a meaningful update here, treat it as if it's from an event
+                        // regardless.
                         return (existing.clone(), existing.update(entry));
                     }
 
                     warn!("Got dangling WeakRef in EntryObject::create_or_update");
-                    let new = Self::create(entry);
+                    let new = Self::create(entry, from_event);
                     *value = new.downgrade();
                     (new, None)
                 }
                 hash_map::Entry::Vacant(v) => {
-                    let new = Self::create(entry);
+                    let new = Self::create(entry, from_event);
                     v.insert(new.downgrade());
                     (new, None)
                 }
@@ -636,7 +638,11 @@ impl EntryObject {
     fn queue_thumb(&self, p: Option<ThumbPriority>, from_event: bool) {
         if let Some(p) = p {
             // Very spammy
-            // trace!("Queuing thumbnail for {:?} {:?}", self.get().abs_path, p);
+            // trace!(
+            //     "Queuing thumbnail for {:?} {:?}: from_event {from_event}",
+            //     self.get().abs_path,
+            //     p
+            // );
             queue_thumb(self.downgrade(), p, from_event)
         }
     }

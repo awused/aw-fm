@@ -224,7 +224,6 @@ impl Thumbnailer {
                     }
                 }
             }
-
             // aw-fm doesn't write failed thumbnails for operations from events,
             // so this is most likely legitimate.
             if factory.has_failed(&uri, mtime.sec) {

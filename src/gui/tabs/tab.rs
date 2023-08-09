@@ -1052,7 +1052,7 @@ impl Tab {
                 PartiallyAppliedUpdate::Insert(obj)
             }
             (Update::Entry(entry), None, None) => {
-                let new = EntryObject::new(entry.get_entry());
+                let new = EntryObject::new(entry.get_entry(), true);
 
                 self.contents.insert(&new);
                 trace!("Inserted new {:?} from event", new.get().abs_path);

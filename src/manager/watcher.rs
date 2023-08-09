@@ -180,7 +180,7 @@ impl Manager {
                 if *state == State::Deduping {
                     trace!("Deduping event for {path:?} from {source:?}");
                 } else {
-                    trace!("Debouncing event for {path:?} from {source:?}");
+                    // trace!("Debouncing event for {path:?} from {source:?}");
                 }
 
                 match source {
