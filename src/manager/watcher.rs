@@ -6,8 +6,10 @@ use gtk::glib;
 use notify::event::{ModifyKind, RenameMode};
 use notify::RecursiveMode::NonRecursive;
 use notify::{Event, Watcher};
-use tokio::time::{Duration, Instant};
+use tokio::task::spawn_blocking;
+use tokio::time::{timeout, Duration, Instant};
 
+use super::read_dir::flat_dir_count;
 use super::{Manager, RecurseId};
 use crate::closing;
 use crate::com::{Entry, GuiAction, SearchUpdate, Update};
@@ -89,7 +91,7 @@ impl Manager {
         // It's probably true that sources.flat means any search updates are wasted.
         // But the flat tab could have been closed.
 
-        let entry = match Entry::new(path) {
+        let (entry, needs_full_count) = match Entry::new(path) {
             Ok(entry) => entry,
             Err((path, e)) => {
                 // For now, don't convey this error.
@@ -110,10 +112,15 @@ impl Manager {
         }
 
         if sources.flat {
+            let p = entry.abs_path.clone();
             sender.send(GuiAction::Update(Update::Entry(entry))).unwrap_or_else(|e| {
                 error!("{e}");
                 closing::close()
-            })
+            });
+
+            if needs_full_count {
+                flat_dir_count(p, sender.clone());
+            }
         }
     }
 
@@ -258,7 +265,7 @@ impl Manager {
         // trace!("Processed {starting_len} events in {:?}", now.elapsed());
     }
 
-    pub(super) fn watch_search(&mut self, path: Arc<Path>, cancel: RecurseId) {
+    pub(super) async fn watch_search(&mut self, path: Arc<Path>, cancel: RecurseId) {
         if Some(0) == CONFIG.search_max_depth {
             return;
         }
@@ -319,13 +326,39 @@ impl Manager {
             }
         };
 
-        if let Err(e) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
+        // This can be glacially slow on, say, networked fuse drives.
+        // We want it, but we don't want to wait forever for it
+        let p = path.clone();
+        let watcher = timeout(
+            Duration::from_secs(5),
+            spawn_blocking(move || {
+                let res = watcher.watch(&p, notify::RecursiveMode::Recursive);
+                (watcher, res)
+            }),
+        )
+        .await;
+
+        if watcher.is_err() {
+            let msg = format!("Search watcher in {path:?} timed out, updates will not be received");
+            error!("{msg}");
+            self.send(GuiAction::DirectoryError(path, msg));
+            return;
+        }
+
+        if let Ok(Err(e)) = watcher {
             let msg = format!("Search watcher error: {e}");
             error!("{msg}");
             self.send(GuiAction::DirectoryError(path, msg));
             return;
         }
 
-        self.open_searches.push((cancel, watcher));
+        if let Ok(Ok((_watcher_, Err(e)))) = watcher {
+            let msg = format!("Search watcher error: {e}");
+            error!("{msg}");
+            self.send(GuiAction::DirectoryError(path, msg));
+            return;
+        }
+
+        self.open_searches.push((cancel, watcher.unwrap().unwrap().0));
     }
 }

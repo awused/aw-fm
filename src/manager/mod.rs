@@ -111,7 +111,7 @@ impl Manager {
                         closing::close();
                         break 'main;
                     };
-                    self.handle_action(ma);
+                    self.handle_action(ma).await;
                 }
                 ev = self.notify_receiver.recv() => {
                     let Some((ev, id)) = ev else {
@@ -134,7 +134,7 @@ impl Manager {
         // }
     }
 
-    fn handle_action(&mut self, ma: ManagerAction) {
+    async fn handle_action(&mut self, ma: ManagerAction) {
         use ManagerAction::*;
 
         match ma {
@@ -146,7 +146,7 @@ impl Manager {
             Unwatch(path) => self.unwatch_dir(&path),
 
             Search(path, cancel) => {
-                self.watch_search(path.clone(), cancel.clone());
+                self.watch_search(path.clone(), cancel.clone()).await;
                 self.recurse_dir(path, cancel);
             }
             EndSearch(cancel) => self.unwatch_search(cancel),

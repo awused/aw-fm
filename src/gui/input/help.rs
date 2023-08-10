@@ -19,7 +19,7 @@ impl Gui {
 
         let dialog = gtk::Window::builder().title("Help").transient_for(&self.window).build();
 
-        self.close_on_quit(&dialog);
+        self.close_on_quit_or_esc(&dialog);
 
         // default size might want to scale based on dpi
         dialog.set_default_width(800);

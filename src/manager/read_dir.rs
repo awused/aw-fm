@@ -20,7 +20,9 @@ use tokio::task::spawn_local;
 use tokio::time::{sleep, sleep_until, Instant};
 
 use super::Manager;
-use crate::com::{DirSnapshot, Entry, GuiAction, SearchSnapshot, SnapshotKind, SortSettings};
+use crate::com::{
+    DirSnapshot, Entry, GuiAction, SearchSnapshot, SnapshotKind, SortSettings, Update,
+};
 use crate::config::CONFIG;
 use crate::{closing, handle_panic};
 
@@ -84,6 +86,16 @@ static SORT_POOL: Lazy<ThreadPool> = Lazy::new(|| {
         .expect("Error creating directory sort threadpool")
 });
 
+// This will rarely be spun up
+static COUNT_POOL: Lazy<ThreadPool> = Lazy::new(|| {
+    ThreadPoolBuilder::new()
+        .thread_name(|u| format!("count-{u}"))
+        .panic_handler(handle_panic)
+        .num_threads(1)
+        .build()
+        .expect("Error creating directory contents count threadpool")
+});
+
 #[derive(Debug)]
 enum ReadResult {
     DirUnreadable(std::io::Error),
@@ -97,6 +109,7 @@ fn read_dir_sync(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
     sender: UnboundedSender<ReadResult>,
+    gui_sender: glib::Sender<GuiAction>,
 ) -> oneshot::Receiver<()> {
     let (send_done, recv_done) = oneshot::channel();
 
@@ -126,7 +139,7 @@ fn read_dir_sync(
                     }
                 };
 
-                let entry = match Entry::new(dirent.path().into()) {
+                let (entry, needs_full_count) = match Entry::new(dirent.path().into()) {
                     Ok(entry) => entry,
                     Err((path, e)) => {
                         error!("Unexpected error reading file info {path:?} {e}");
@@ -134,6 +147,10 @@ fn read_dir_sync(
                         return;
                     }
                 };
+
+                if needs_full_count {
+                    flat_dir_count(entry.abs_path.clone(), gui_sender.clone());
+                }
 
                 if sender.send(ReadResult::Entry(entry)).is_err()
                     && !closing::closed()
@@ -204,7 +221,7 @@ fn recurse_dir_sync(
                 }
 
                 // TODO -- move onto a new rayon task to unblock this walker thread?
-                let entry = match Entry::new(path.into()) {
+                let (entry, needs_full_count) = match Entry::new(path.into()) {
                     Ok(entry) => entry,
                     Err((path, e)) => {
                         error!("Unexpected error reading file info {path:?} {e}");
@@ -212,6 +229,11 @@ fn recurse_dir_sync(
                         return WalkState::Continue;
                     }
                 };
+
+                if needs_full_count {
+                    warn!("Got suspicious directory count in a search tab, but ignoring");
+                    // search_dir_count(entry.abs_path.clone(), gui_sender.clone(), cancel.clone());
+                }
 
                 if sender.send(ReadResult::Entry(entry)).is_err() && !closing::closed() {
                     error!("Channel unexpectedly closed while recursively reading {root:?}");
@@ -240,7 +262,7 @@ async fn read_dir(
     let start = Instant::now();
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
 
-    let h = read_dir_sync(path.clone(), cancel.clone(), sender);
+    let h = read_dir_sync(path.clone(), cancel.clone(), sender, gui_sender.clone());
 
     consume_entries(path.clone(), cancel, gui_sender, receiver, flat_snap(sort)).await;
 
@@ -385,8 +407,8 @@ async fn consume_entries(
 //
 // For increasing batch sizes we:
 //   - Consume entries until we meet the minimum batch size
-//   - Continue to consume entries until 5ms have passed without a new entry, up to 100ms total
-//   - If more than 100ms have passed, consume only immediately available entrie
+//   - Continue to consume entries until 5ms have passed without a new entry, up to BATCH_TIMEOUT
+//   - If BATCH_TIMEOUT has passed, consume only immediately available entrie
 //   - Send the batch
 async fn read_slow_dir(
     path: Arc<Path>,
@@ -582,6 +604,43 @@ async fn read_slow_dir(
     }
 }
 
+pub fn flat_dir_count(path: Arc<Path>, gui_sender: glib::Sender<GuiAction>) {
+    count_dir_contents(path, move |entry| {
+        drop(gui_sender.send(GuiAction::Update(Update::Entry(entry.into()))))
+    });
+}
+
+// For now, don't count items in search directories. It would mean allowing search updates to
+// mutate Entries.
+
+// fn search_dir_count(
+//     path: Arc<Path>,
+//     gui_sender: glib::Sender<GuiAction>,
+//     search_id: Arc<AtomicBool>,
+// ) { count_dir_contents(path, move |entry| { let update = SearchUpdate { search_id, update:
+//   Update::Entry(entry.into()), }; drop(gui_sender.send(GuiAction::SearchUpdate(update))) });
+// }
+
+
+fn count_dir_contents(path: Arc<Path>, send_update: impl FnOnce(Entry) + Send + 'static) {
+    COUNT_POOL.spawn(move || {
+        debug!("Doing full count of files in {path:?}");
+        let read_dir = match path.read_dir() {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to count contents of {path:?}: {e}");
+                return;
+            }
+        };
+
+        let count = read_dir.count();
+        trace!("Counted {count} entries in {path:?}");
+
+        if let Some(entry) = Entry::new_assume_dir_size(path, count as u64) {
+            send_update(entry);
+        }
+    });
+}
 
 impl Manager {
     pub(super) fn start_read_dir(

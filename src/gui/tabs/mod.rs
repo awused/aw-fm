@@ -10,7 +10,6 @@ use crate::com::{Entry, EntryObject};
 use crate::config::OPTIONS;
 use crate::gui::show_warning;
 
-mod clipboard;
 mod contents;
 mod element;
 pub mod list;

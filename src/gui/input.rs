@@ -123,7 +123,7 @@ impl Gui {
             .modal(true)
             .build();
 
-        self.close_on_quit(&dialog);
+        self.close_on_quit_or_esc(&dialog);
 
         dialog.set_default_width(800);
         // dialog.set_default_height(80);
@@ -169,18 +169,17 @@ impl Gui {
         dialog.set_visible(true);
     }
 
-    fn close_on_quit<T: WidgetExt>(self: &Rc<Self>, w: &T) {
+    fn close_on_quit_or_esc<T: WidgetExt>(self: &Rc<Self>, w: &T) {
         let key = gtk::EventControllerKey::new();
         let g = self.clone();
-        key.connect_key_pressed(move |e, a, _b, c| {
-            match g.shortcut_from_key(a, c) {
-                Some(s) if s == "Quit" => {
-                    e.widget()
-                        .downcast::<gtk::Window>()
-                        .expect("Dialog was somehow not a window")
-                        .close();
-                }
-                _ => (),
+        key.connect_key_pressed(move |e, key, _b, mods| {
+            if (mods.is_empty() && key == Key::Escape)
+                || g.shortcut_from_key(key, mods).is_some_and(|s| s == "Quit")
+            {
+                e.widget()
+                    .downcast::<gtk::Window>()
+                    .expect("Dialog was somehow not a window")
+                    .close();
             }
             Propagation::Proceed
         });

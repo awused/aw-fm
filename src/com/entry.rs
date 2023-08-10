@@ -13,6 +13,7 @@ use gtk::gio::{
     self, Cancellable, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
     FILE_ATTRIBUTE_STANDARD_ICON, FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
     FILE_ATTRIBUTE_STANDARD_TYPE, FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+    FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
 };
 use gtk::glib::{self, GStr, Object, Variant, WeakRef};
 use gtk::prelude::{FileExt, IconExt, ObjectExt};
@@ -36,6 +37,7 @@ static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
         FILE_ATTRIBUTE_STANDARD_SIZE,
         FILE_ATTRIBUTE_TIME_MODIFIED,
         FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+        FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
     ]
     .map(GStr::as_str)
     .join(",")
@@ -68,7 +70,7 @@ impl fmt::Debug for FileTime {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
     File { size: u64 },
-    Directory { contents: u64 },
+    Directory { contents: Option<u64> },
     Uninitialized, // Broken {}
 }
 
@@ -80,7 +82,6 @@ pub struct Entry {
     // This is an absolute but NOT canonicalized path.
     pub abs_path: Arc<Path>,
     // It's kind of expensive to do this but necessary as an mtime/ctime tiebreaker anyway.
-    // TODO -- is this really name, or should it be rel_path for searching
     pub name: ParsedString,
     pub mtime: FileTime,
 
@@ -129,9 +130,12 @@ impl Entry {
             (File { .. }, Directory { .. }) => return Ordering::Greater,
             (Directory { .. }, File { .. }) => return Ordering::Less,
             (File { size: self_size }, File { size: other_size })
-            | (Directory { contents: self_size }, Directory { contents: other_size }) => {
+            | (Directory { contents: Some(self_size) }, Directory { contents: Some(other_size) }) => {
                 self_size.cmp(other_size)
             }
+            (Directory { contents: None }, Directory { contents: Some(_) }) => Ordering::Less,
+            (Directory { contents: Some(_) }, Directory { contents: None }) => Ordering::Greater,
+            (Directory { contents: None }, Directory { contents: None }) => Ordering::Equal,
         };
 
         let m_order = self.mtime.cmp(&other.mtime);
@@ -154,7 +158,7 @@ impl Entry {
         }
     }
 
-    pub fn new(abs_path: Arc<Path>) -> Result<Self, (Arc<Path>, gtk::glib::Error)> {
+    pub fn new(abs_path: Arc<Path>) -> Result<(Self, bool), (Arc<Path>, gtk::glib::Error)> {
         debug_assert!(abs_path.is_absolute());
 
         let name = abs_path.file_name().unwrap_or(abs_path.as_os_str());
@@ -184,9 +188,23 @@ impl Entry {
         let size = info.attribute_uint64(FILE_ATTRIBUTE_STANDARD_SIZE);
 
         let file_type = info.attribute_uint32(FILE_ATTRIBUTE_STANDARD_TYPE);
+        let mut needs_full_count = false;
+
         let kind = if file_type == G_FILE_TYPE_DIRECTORY as u32 {
-            // I think this is counting "." and ".." as members.
-            EntryKind::Directory { contents: size.saturating_sub(2) }
+            let mountpoint = info.boolean(FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT);
+
+            if (size % 512 == 0 && size <= 8192) || (mountpoint && size <= 2) {
+                info!(
+                    "Got suspicious directory size {size} for {abs_path:?}, counting files \
+                     directly"
+                );
+                // This is suspicious, and we should count the contents directly.
+                needs_full_count = true;
+                EntryKind::Directory { contents: None }
+            } else {
+                // I think this is counting "." and ".." as members.
+                EntryKind::Directory { contents: Some(size.saturating_sub(2)) }
+            }
         } else {
             EntryKind::File { size }
         };
@@ -195,23 +213,50 @@ impl Entry {
         let icon = info.icon().unwrap().serialize().unwrap();
         let symlink = info.is_symlink();
 
-        Ok(Self {
-            kind,
-            abs_path,
-            name,
-            mtime,
-            // btime,
-            mime,
-            symlink,
-            icon,
-        })
+        Ok((
+            Self {
+                kind,
+                abs_path,
+                name,
+                mtime,
+                // btime,
+                mime,
+                symlink,
+                icon,
+            },
+            needs_full_count,
+        ))
+    }
+
+    pub fn new_assume_dir_size(abs_path: Arc<Path>, size: u64) -> Option<Self> {
+        let res = Self::new(abs_path);
+
+        let mut s = match res {
+            Ok((entry, _)) => entry,
+            Err((abs_path, e)) => {
+                error!("Failed to recreate directory Entry for {abs_path:?}: {e}");
+                return None;
+            }
+        };
+
+        let EntryKind::Directory { contents } = &mut s.kind else {
+            warn!(
+                "Directory {:?} stopped being a directory after we counted its contents",
+                s.abs_path
+            );
+            return None;
+        };
+
+        *contents = Some(size);
+        Some(s)
     }
 
     // This could be a compact string/small string but possibly not worth the dependency on its own
     pub fn short_size_string(&self) -> String {
         match self.kind {
             EntryKind::File { size } => humansize::format_size(size, humansize::WINDOWS),
-            EntryKind::Directory { contents } => format!("{contents}"),
+            EntryKind::Directory { contents: Some(contents) } => format!("{contents}"),
+            EntryKind::Directory { contents: None } => "...".into(),
             EntryKind::Uninitialized => unreachable!(),
         }
     }
@@ -219,7 +264,8 @@ impl Entry {
     pub fn long_size_string(&self) -> String {
         match self.kind {
             EntryKind::File { size } => humansize::format_size(size, humansize::WINDOWS),
-            EntryKind::Directory { contents } => format!("{contents} items"),
+            EntryKind::Directory { contents: Some(contents) } => format!("{contents} items"),
+            EntryKind::Directory { contents: None } => "... items".into(),
             EntryKind::Uninitialized => unreachable!(),
         }
     }
@@ -228,10 +274,10 @@ impl Entry {
         matches!(self.kind, EntryKind::Directory { .. })
     }
 
-    pub const fn raw_size(&self) -> u64 {
+    pub fn raw_size(&self) -> u64 {
         match self.kind {
             EntryKind::File { size } => size,
-            EntryKind::Directory { contents } => contents,
+            EntryKind::Directory { contents } => contents.unwrap_or_default(),
             EntryKind::Uninitialized => unreachable!(),
         }
     }
