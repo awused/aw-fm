@@ -12,7 +12,6 @@ use gtk::{AlertDialog, Orientation, PopoverMenu, Widget};
 use MaybePane as MP;
 
 use self::flat_dir::FlatDir;
-use super::clipboard::{handle_clipboard, handle_drop, Operation, SelectionProvider};
 use super::contents::Contents;
 use super::element::TabElement;
 use super::id::{TabId, TabUid};
@@ -24,6 +23,7 @@ use crate::com::{
     SearchSnapshot, SearchUpdate, SnapshotId, SortDir, SortMode, SortSettings,
 };
 use crate::config::CONFIG;
+use crate::gui::clipboard::{handle_clipboard, handle_drop, Operation, SelectionProvider};
 use crate::gui::file_operations::{Kind, Outcome};
 use crate::gui::tabs::PartiallyAppliedUpdate;
 use crate::gui::{applications, gui_run, show_error, show_warning, Selected, Update};
@@ -1363,7 +1363,7 @@ impl Tab {
             if let Some(search) = &self.search { search.contents() } else { &self.contents };
         let sel: Vec<EntryObject> = Selected::from(&contents.selection).collect();
 
-        gui_run(|g| g.menu.get().unwrap().prepare(self.settings, sel, &self.dir()))
+        gui_run(|g| g.menu.get().unwrap().prepare(g, self.settings, sel, &self.dir()))
     }
 
     pub fn env_vars(&self, prefix: &str, env: &mut Vec<(String, OsString)>) {

@@ -11,7 +11,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib, MultiSelection};
 use strum_macros::{EnumString, IntoStaticStr};
 
-use super::id::TabId;
+use super::tabs::id::TabId;
 use crate::gui::{file_operations, gui_run, Selected};
 
 pub const SPECIAL: &str = "x-special/aw-fm-copied-files";
@@ -145,6 +145,14 @@ fn stream_to_operation(
             },
         )
     }
+}
+
+pub fn contains_mimetype(display: Display) -> bool {
+    let formats = display.clipboard().formats();
+
+    formats.contain_mime_type(SPECIAL)
+        || formats.contain_mime_type(SPECIAL_MATE)
+        || formats.contain_mime_type(SPECIAL_GNOME)
 }
 
 pub fn handle_clipboard(display: Display, tab: TabId, path: Arc<Path>) {

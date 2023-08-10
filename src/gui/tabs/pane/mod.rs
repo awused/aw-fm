@@ -19,11 +19,11 @@ use gtk::{
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
-use super::clipboard::{Operation, URIS};
 use super::id::TabId;
 use super::tab::Tab;
 use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
+use crate::gui::clipboard::{Operation, URIS};
 use crate::gui::tabs::NavTarget;
 use crate::gui::{gui_run, tabs_run};
 

@@ -20,12 +20,15 @@ use regex::bytes::Regex;
 use super::Gui;
 use crate::com::{DirSettings, Entry, EntryObject};
 use crate::config::{ContextMenuEntry, ContextMenuGroup, Selection, ACTIONS_DIR, CONFIG};
+use crate::gui::clipboard;
 
 
+#[derive(Eq, PartialEq)]
 enum GC {
     Display(Variant),
     SortMode(Variant),
     SortDir(Variant),
+    Paste,
     Action(Variant),
 }
 
@@ -42,7 +45,12 @@ impl From<&str> for GC {
             }
         }
 
-        Self::Action(command.to_variant())
+
+        if command == "Paste" {
+            Self::Paste
+        } else {
+            Self::Action(command.to_variant())
+        }
     }
 }
 
@@ -52,17 +60,37 @@ impl GC {
             Self::Display(_) => "Display",
             Self::SortMode(_) => "SortBy",
             Self::SortDir(_) => "SortDir",
+            Self::Paste => "Paste",
             Self::Action(_) => "action",
         }
     }
 
-    const fn variant(&self) -> &Variant {
+    const fn variant(&self) -> Option<&Variant> {
         match self {
-            Self::Display(v) | Self::SortMode(v) | Self::SortDir(v) | Self::Action(v) => v,
+            Self::Display(v) | Self::SortMode(v) | Self::SortDir(v) | Self::Action(v) => Some(v),
+            Self::Paste => None,
+        }
+    }
+
+    const fn hide_if_disabled(&self) -> bool {
+        match self {
+            Self::Display(_) | Self::SortMode(_) | Self::SortDir(_) | Self::Action(_) => false,
+            Self::Paste => true,
         }
     }
 
     fn simple_action(&self, g: &Rc<Gui>) -> SimpleAction {
+        if *self == Self::Paste {
+            let sa = SimpleAction::new(self.action(), None);
+
+            let g = g.clone();
+            sa.connect_activate(move |a, _v| {
+                g.run_command(&a.name());
+            });
+
+            return sa;
+        }
+
         let sa = SimpleAction::new_stateful(
             self.action(),
             Some(VariantTy::new("s").unwrap()),
@@ -419,6 +447,9 @@ pub(super) struct GuiMenu {
     sort_mode: SimpleAction,
     sort_dir: SimpleAction,
 
+    // Special handling
+    paste: SimpleAction,
+
     menu: PopoverMenu,
     custom: Vec<CustomAction>,
     custom_context: Vec<CustomAction>,
@@ -429,6 +460,7 @@ impl GuiMenu {
         let display = GC::Display(().to_variant()).simple_action(gui);
         let sort_mode = GC::SortMode(().to_variant()).simple_action(gui);
         let sort_dir = GC::SortDir(().to_variant()).simple_action(gui);
+        let paste = GC::Paste.simple_action(gui);
 
 
         let command = SimpleAction::new(
@@ -446,6 +478,7 @@ impl GuiMenu {
         action_group.add_action(&sort_mode);
         action_group.add_action(&sort_dir);
         action_group.add_action(&command);
+        action_group.add_action(&paste);
 
         gui.window.insert_action_group("context-menu", Some(&action_group));
 
@@ -457,6 +490,8 @@ impl GuiMenu {
             display,
             sort_mode,
             sort_dir,
+            paste,
+
             menu,
             custom,
             custom_context,
@@ -527,8 +562,13 @@ impl GuiMenu {
 
                 menuitem.set_action_and_target_value(
                     Some(&format!("context-menu.{}", cmd.action())),
-                    Some(cmd.variant()),
+                    cmd.variant(),
                 );
+
+                if cmd.hide_if_disabled() {
+                    menuitem
+                        .set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
+                }
 
                 menuitem
             };
@@ -581,6 +621,7 @@ impl GuiMenu {
 
     pub fn prepare(
         &self,
+        g: &Gui,
         settings: DirSettings,
         entries: Vec<EntryObject>,
         dir: &Path,
@@ -588,6 +629,7 @@ impl GuiMenu {
         self.display.change_state(&settings.display_mode.as_ref().to_variant());
         self.sort_mode.change_state(&settings.sort.mode.as_ref().to_variant());
         self.sort_dir.change_state(&settings.sort.direction.as_ref().to_variant());
+        self.paste.set_enabled(clipboard::contains_mimetype(g.window.display()));
 
         for cme in &self.custom_context {
             if cme.settings.rejects_count(entries.len()) {

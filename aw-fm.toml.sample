@@ -121,7 +121,9 @@ bookmarks = [
 context_menu = [
   {name = "Cut", action = "Cut", selection = "at_least_one" },
   {name = "Copy", action = "Copy", selection = "at_least_one" },
-  {name = "Paste", action = "Paste", selection = "maybe_one" },
+  # Paste has special handling, if selection is not present
+  {name = "Paste", action = "Paste" },
+  {name = "Rename", action = "Rename", selection = "one" },
 
   {name = "Icons", submenu = "Display", action = "Display icons"},
   {name = "Columns", submenu = "Display", action = "Display columns"},

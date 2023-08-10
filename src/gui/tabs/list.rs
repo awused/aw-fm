@@ -10,7 +10,6 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{BoxExt, ListItemExt};
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
 
-use super::clipboard::Operation;
 use super::element::TabElement;
 use super::id::TabId;
 use super::tab::Tab;
@@ -19,6 +18,7 @@ use crate::com::{
     SortSettings, Update,
 };
 use crate::database::Session;
+use crate::gui::clipboard::Operation;
 use crate::gui::file_operations::{Kind, Outcome};
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;

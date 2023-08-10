@@ -20,6 +20,7 @@ use crate::config::CONFIG;
 use crate::database::DBCon;
 
 mod applications;
+mod clipboard;
 mod file_operations;
 mod input;
 mod main_window;
