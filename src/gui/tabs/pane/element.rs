@@ -1,13 +1,21 @@
+use std::cell::Cell;
 use std::fmt::Write;
+use std::ops::Deref;
 
-use gtk::prelude::{Cast, ListModelExt};
+use gtk::gdk::{DragAction, Key};
+use gtk::glib::Propagation;
+use gtk::prelude::{Cast, CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
     EditableExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
 };
-use gtk::{glib, EventControllerFocus, GestureClick, MultiSelection};
+use gtk::{glib, DropTargetAsync, EventControllerFocus, GestureClick, MultiSelection};
+use strum_macros::{AsRefStr, EnumString};
+use StackChild::*;
 
+use super::DRAGGING_TAB;
 use crate::com::SignalHolder;
+use crate::gui::clipboard::URIS;
 use crate::gui::tabs::id::TabId;
 use crate::gui::tabs::list::event_run_tab;
 use crate::gui::tabs::tab::Tab;
@@ -18,6 +26,24 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Box;
 }
 
+#[derive(AsRefStr, EnumString, Eq, PartialEq)]
+#[strum(serialize_all = "lowercase")]
+enum StackChild {
+    Count,
+    Selection,
+    Seek,
+    Clipboard,
+}
+
+impl Deref for StackChild {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_ref()
+    }
+}
+
+
 // Contains signals attached to something else, not tied to the lifecycle of this Pane.
 #[derive(Debug)]
 pub(super) struct PaneSignals(SignalHolder<MultiSelection>, SignalHolder<MultiSelection>);
@@ -27,6 +53,45 @@ impl PaneElement {
         let s: Self = glib::Object::new();
         let signals = s.setup_signals(selection);
 
+        s.add_controllers(tab);
+
+        let imp = s.imp();
+
+        imp.tab.set(tab).unwrap();
+        imp.text_entry.set_enable_undo(true);
+        imp.stack.set_visible_child_name(&Count);
+
+        s.connect_destroy(move |_| trace!("Pane for {tab:?} destroyed"));
+        (s, signals)
+    }
+
+    pub(super) fn search_text(&self, text: &str, original: String) {
+        let imp = self.imp();
+        imp.text_entry.set_text(text);
+        imp.original_text.replace(original);
+        imp.seek.set_text("");
+        imp.stack.set_visible_child_name(&Count);
+    }
+
+    pub(super) fn flat_text(&self, location: String) {
+        let imp = self.imp();
+        imp.text_entry.set_text(&location);
+        imp.original_text.replace(location);
+        imp.seek.set_text("");
+        imp.stack.set_visible_child_name(&Count);
+    }
+
+    pub(super) fn clipboard_text(&self, text: &str) {
+        let imp = self.imp();
+        imp.clipboard.set_text(text);
+        imp.clipboard.set_tooltip_text(Some(text));
+
+        if imp.stack.visible_child_name().map_or(false, |n| n != *Seek) {
+            imp.stack.set_visible_child_name(&Clipboard);
+        }
+    }
+
+    fn add_controllers(&self, tab: TabId) {
         let focus = EventControllerFocus::new();
         focus.connect_enter(move |focus| {
             debug!("Focus entered {tab:?}");
@@ -37,7 +102,7 @@ impl PaneElement {
                 tabs_run(|t| t.set_active(tab));
             }
         });
-        s.add_controller(focus);
+        self.add_controller(focus);
 
         // Maps forward/back on a mouse to Forward/Backward
         let forward_back_mouse = GestureClick::new();
@@ -56,16 +121,117 @@ impl PaneElement {
                 _ => {}
             }
         });
-        s.add_controller(forward_back_mouse);
+        self.add_controller(forward_back_mouse);
 
-        let imp = s.imp();
+        let drop_target = DropTargetAsync::new(None, DragAction::all());
+        drop_target.connect_accept(move |_dta, dr| {
+            if DRAGGING_TAB.with(|dt| dt.get() == Some(tab)) {
+                info!("Ignoring drag into same tab");
+                return false;
+            }
 
-        imp.tab.set(tab).unwrap();
-        imp.text_entry.set_enable_undo(true);
-        imp.stack.set_visible_child_name("count");
+            if !dr.formats().contain_mime_type(URIS) {
+                return false;
+            }
 
-        s.connect_destroy(move |_| trace!("Pane for {tab:?} destroyed"));
-        (s, signals)
+            let accepts_paste = tabs_run(|tlist| {
+                let tab = tlist.find(tab).unwrap();
+                if let Some(dragging_tab) = DRAGGING_TAB.with(Cell::get) {
+                    if let Some(dragging) = tlist.find(dragging_tab) {
+                        if dragging.matches_arc(&tab.dir()) {
+                            info!("Ignoring drag into same directory");
+                            return false;
+                        }
+                    }
+                }
+                tab.accepts_paste()
+            });
+
+            if !accepts_paste {
+                return false;
+            }
+
+            true
+        });
+
+        drop_target.connect_drop(move |_dta, dr, _x, _y| {
+            tabs_run(|tlist| {
+                info!("Handling drop in {tab:?}");
+                let t = tlist.find(tab).unwrap();
+
+                t.drag_drop(dr, None)
+            })
+        });
+
+        self.imp().scroller.add_controller(drop_target);
+
+        let seek_controller = gtk::EventControllerKey::new();
+        seek_controller.connect_key_pressed(move |kc, key, _, mods| {
+            let pane = kc.widget().parent().and_downcast::<Self>().unwrap();
+            let seek = &pane.imp().seek;
+            let stack = &pane.imp().stack;
+
+            if !mods.is_empty() {
+                return Propagation::Proceed;
+            }
+
+            let seek_visible = stack.visible_child_name().map_or(false, |n| n == *Seek);
+
+            if seek_visible {
+                let handled = if key == Key::BackSpace {
+                    let t = seek.text();
+                    let mut chars = t.chars();
+                    chars.next_back();
+                    seek.set_text(chars.as_str());
+                    // No need to do any seek here?
+                    true
+                } else if key == Key::Escape {
+                    seek.set_text("");
+                    true
+                } else {
+                    false
+                };
+
+                if handled {
+                    if seek.text().is_empty() {
+                        debug!("Closing seek in {tab:?}");
+                        if pane.imp().selection.text().is_empty() {
+                            stack.set_visible_child_name(&Count);
+                        } else {
+                            stack.set_visible_child_name(&Selection);
+                        }
+                    }
+                    return Propagation::Stop;
+                }
+            }
+
+            let Some(c) = key.to_unicode() else {
+                return Propagation::Proceed;
+            };
+
+            // Allow ^ for prefix matching?
+            if !c.is_alphanumeric() {
+                return Propagation::Proceed;
+            }
+
+            let mut t = seek.text().to_string();
+            t.push(c);
+            seek.set_text(&t);
+
+            if !seek_visible {
+                debug!("Opening seek in {tab:?}");
+                stack.set_visible_child_name(&Seek);
+            }
+
+            debug!("Do seek {t} in {tab:?}");
+            tabs_run(move |tlist| {
+                tlist.find_mut(tab).unwrap().seek(t);
+            });
+
+            Propagation::Stop
+        });
+
+        self.imp().scroller.add_controller(seek_controller);
     }
 
     pub(super) fn setup_signals(&self, selection: &MultiSelection) -> PaneSignals {
@@ -80,10 +246,10 @@ impl PaneElement {
         let count_signal = selection.connect_items_changed(move |list, _p, _a, _r| {
             // There is no selection_changed event on item removal
             // selection().size() is comparatively expensive but unavoidable.
-            if stk.visible_child_name().map_or(false, |n| n != "count")
+            if stk.visible_child_name().map_or(false, |n| n != *Count && n != *Seek)
                 && (list.n_items() == 0 || list.selection().size() == 0)
             {
-                stk.set_visible_child_name("count");
+                stk.set_visible_child_name(&Count);
             }
             count.set_text(&format!("{} items", list.n_items()));
         });
@@ -94,8 +260,12 @@ impl PaneElement {
         let update_selected = move |selection: &MultiSelection, _p: u32, _n: u32| {
             let mut sel = Selected::from(selection);
             let len = sel.len();
-            if len == 0 && stk.visible_child_name().map_or(false, |n| n != "count") {
-                stk.set_visible_child_name("count");
+            if len == 0 {
+                selected.set_text("");
+
+                if stk.visible_child_name().map_or(false, |n| n != *Count && n != *Seek) {
+                    stk.set_visible_child_name(&Count);
+                }
                 return;
             }
 
@@ -118,8 +288,8 @@ impl PaneElement {
             selected.set_text(&text);
             selected.set_tooltip_text(Some(&text));
 
-            if stk.visible_child_name().map_or(false, |n| n != "selection") {
-                stk.set_visible_child_name("selection");
+            if stk.visible_child_name().map_or(false, |n| n != *Selection && n != *Seek) {
+                stk.set_visible_child_name(&Selection);
             }
         };
 
@@ -152,19 +322,19 @@ mod imp {
         pub scroller: TemplateChild<gtk::ScrolledWindow>,
 
         #[template_child]
-        pub stack: TemplateChild<gtk::Stack>,
+        pub(super) stack: TemplateChild<gtk::Stack>,
 
         #[template_child]
-        pub count: TemplateChild<gtk::Label>,
+        pub(super) count: TemplateChild<gtk::Label>,
 
         #[template_child]
-        pub selection: TemplateChild<gtk::Label>,
+        pub(super) selection: TemplateChild<gtk::Label>,
 
         #[template_child]
-        pub seek: TemplateChild<gtk::Label>,
+        pub(super) seek: TemplateChild<gtk::Label>,
 
         #[template_child]
-        pub clipboard: TemplateChild<gtk::Label>,
+        pub(super) clipboard: TemplateChild<gtk::Label>,
 
         pub active: Cell<bool>,
         pub original_text: RefCell<String>,

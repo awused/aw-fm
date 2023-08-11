@@ -32,7 +32,7 @@ pub(super) struct DetailsView {
     _workaround_rubber: SignalHolder<MultiSelection>,
 }
 
-// TODO -- gtk4.12, use ColumnViewRow
+// TODO [gtk4.12] use ColumnViewRow
 
 impl DetailsView {
     pub(super) fn new(
@@ -115,6 +115,7 @@ impl DetailsView {
     }
 
     pub(super) fn scroll_to(&self, pos: u32) {
+        // TODO [gtk4.12] use ColumnView.scroll_to
         if self.selection.n_items() <= pos {
             return;
         }

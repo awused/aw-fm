@@ -116,6 +116,7 @@ impl IconView {
     }
 
     pub(super) fn scroll_to(&self, pos: u32) {
+        // TODO [gtk4.12] use GridView.scroll_to
         if self.selection.n_items() <= pos {
             return;
         }

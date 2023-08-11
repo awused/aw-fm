@@ -12,8 +12,8 @@ use gtk::traits::{
     GestureSingleExt, PopoverExt, WidgetExt,
 };
 use gtk::{
-    CustomFilter, DragSource, DropTargetAsync, EventControllerKey, FilterChange, FilterListModel,
-    GestureClick, MultiSelection, Orientation, ScrolledWindow, Widget, WidgetPaintable,
+    CustomFilter, DragSource, EventControllerKey, FilterChange, FilterListModel, GestureClick,
+    MultiSelection, Orientation, ScrolledWindow, Widget, WidgetPaintable,
 };
 
 use self::details::DetailsView;
@@ -23,7 +23,7 @@ use super::id::TabId;
 use super::tab::Tab;
 use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
-use crate::gui::clipboard::{Operation, URIS};
+use crate::gui::clipboard::Operation;
 use crate::gui::tabs::NavTarget;
 use crate::gui::{gui_run, tabs_run};
 
@@ -34,6 +34,10 @@ mod icon_view;
 static MIN_PANE_RES: i32 = 400;
 // TODO [incremental] -- lower to 2 when incremental filtering isn't broken.
 static MIN_SEARCH: usize = 3;
+
+thread_local! {
+    static DRAGGING_TAB: Cell<Option<TabId>> = Cell::default();
+}
 
 
 #[derive(Debug)]
@@ -244,14 +248,13 @@ impl Pane {
 
         self.connections.clear();
         let tab = self.tab;
-        let imp = self.element.imp();
         debug!("Creating new search pane for {tab:?}: {:?}", original.borrow());
 
-        imp.text_entry.set_text(&original.borrow());
-        imp.original_text.replace("".to_string());
+        self.element.search_text(&original.borrow(), String::new());
 
         // Decent opportunity for UnsafeCell if it benchmarks better.
         let query = query_rc.clone();
+        let imp = self.element.imp();
 
         let filt = filter.clone();
         let signal = imp.text_entry.connect_changed(move |e| {
@@ -403,10 +406,7 @@ impl Pane {
         self.update_settings(settings, list);
 
         let location = path.to_string_lossy().to_string();
-        self.element.imp().text_entry.set_text(&location);
-        self.element.imp().original_text.replace(location);
-        self.element.imp().seek.set_text("");
-        self.element.imp().stack.set_visible_child_name("count");
+        self.element.flat_text(location);
     }
 
     pub(super) fn move_active_focus_to_text(&self) {
@@ -416,17 +416,11 @@ impl Pane {
     }
 
     pub(super) fn update_search(&self, query: &str) {
-        self.element.imp().text_entry.set_text(query);
+        self.element.search_text(&query, query.to_string());
     }
 
     pub(super) fn set_clipboard_text(&self, text: &str) {
-        let stack = &self.element.imp().stack;
-        let clipboard = &self.element.imp().clipboard;
-
-        clipboard.set_text(text);
-        clipboard.set_tooltip_text(Some(text));
-
-        stack.set_visible_child_name("clipboard");
+        self.element.clipboard_text(text);
     }
 
     pub fn set_active(&mut self, active: bool) {
@@ -611,10 +605,6 @@ trait Bound {
     fn bound_object(&self) -> Option<EntryObject>;
 }
 
-thread_local! {
-    static DRAGGING_TAB: Cell<Option<TabId>> = Cell::default();
-}
-
 fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<bool>>) {
     let click = GestureClick::new();
 
@@ -663,34 +653,6 @@ fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<
         });
     });
 
-    let drop_target = DropTargetAsync::new(None, DragAction::all());
-    drop_target.connect_accept(move |_dta, dr| {
-        if DRAGGING_TAB.with(|dt| dt.get() == Some(tab)) {
-            info!("Ignoring drag into same tab");
-            return false;
-        }
-
-        if !dr.formats().contain_mime_type(URIS) {
-            return false;
-        }
-
-        if !tabs_run(|tlist| tlist.find(tab).unwrap().accepts_paste()) {
-            return false;
-        }
-
-        true
-    });
-
-    drop_target.connect_drop(move |_dta, dr, _x, _y| {
-        tabs_run(|tlist| {
-            info!("Handling drop in {tab:?}");
-            let t = tlist.find(tab).unwrap();
-
-            t.drag_drop(dr, None)
-        })
-    });
-
-    widget.add_controller(drop_target);
     widget.add_controller(click);
 }
 

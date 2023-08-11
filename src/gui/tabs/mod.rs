@@ -55,6 +55,9 @@ struct ScrollPosition {
     path: Arc<Path>,
     // Used as a backup if path has been removed.
     index: u32,
+    // TODO [gtk4.12] explicitly select and focus for seek
+    // select: bool,
+    // focus: bool
 }
 
 // Not kept up to date, maybe an enum?

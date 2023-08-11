@@ -660,6 +660,36 @@ impl Tab {
         }
     }
 
+    pub fn seek(&mut self, fragment: String) {
+        // Smart case seeking?
+        // Prefix instead?
+        let fragment = fragment.to_lowercase();
+        let contents =
+            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+
+        for i in 0..contents.selection.n_items() {
+            let eo = contents.selection.item(i).and_downcast::<EntryObject>().unwrap();
+            if !eo.get().name.lowercase().contains(&fragment) {
+                continue;
+            }
+
+            // TODO [gtk4.12]-- explicitly focus
+            debug!("Seeking to {:?}", &*eo.get().name);
+
+            contents.selection.select_item(i, true);
+
+            let mut state = self.pane.clone_state(contents);
+            state.scroll_pos = Some(ScrollPosition {
+                path: eo.get().abs_path.clone(),
+                index: i,
+            });
+            self.pane.overwrite_state(state);
+
+            self.apply_pane_state();
+            return;
+        }
+    }
+
     pub fn clear_selection(&self) {
         let contents =
             if let Some(search) = &self.search { search.contents() } else { &self.contents };

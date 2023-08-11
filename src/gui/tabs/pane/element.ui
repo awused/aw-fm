@@ -72,7 +72,6 @@
               </object>
             </child>
 
-
             <child>
               <object class="GtkStackPage">
                 <property name="name">clipboard</property>
