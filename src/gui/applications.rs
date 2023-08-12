@@ -53,7 +53,7 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
 
         let file = File::for_path(&entry.abs_path);
 
-        if let Some((_app, v)) = apps.iter_mut().find(|(a, _)| a == &app) {
+        if let Some((_app, v)) = apps.iter_mut().find(|(a, _)| a.equal(&app)) {
             v.push(file)
         } else {
             apps.push((app, vec![file]));

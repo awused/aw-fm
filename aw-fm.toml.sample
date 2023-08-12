@@ -119,6 +119,7 @@ bookmarks = [
 # {name = "Do Something", action = "Execute /path/to/do-something.sh"},
 # {name = "Sample Script", action = "Script /path/to/sample-script.sh"},
 context_menu = [
+  {name = "Open", action = "Activate", selection = "at_least_one"},
   {name = "Cut", action = "Cut", selection = "at_least_one" },
   {name = "Copy", action = "Copy", selection = "at_least_one" },
   # Paste has special handling, if selection is not present
