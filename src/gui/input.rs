@@ -136,6 +136,13 @@ impl Gui {
 
         entry.set_text(&fname.to_string_lossy());
 
+        let end_pos = if let Some(stem) = path.file_stem() {
+            stem.to_string_lossy().chars().count() as i32
+            // entry.select_region(0, stem.to_string_lossy().chars().count() as i32);
+        } else {
+            -1
+        };
+
         let d = dialog.downgrade();
         entry.connect_activate(move |e| {
             d.upgrade().unwrap().destroy();
@@ -167,6 +174,9 @@ impl Gui {
         });
 
         dialog.set_visible(true);
+
+        entry.set_enable_undo(true);
+        entry.select_region(0, end_pos);
     }
 
     fn close_on_quit_or_esc<T: WidgetExt>(self: &Rc<Self>, w: &T) {
