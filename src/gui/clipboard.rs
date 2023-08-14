@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::Path;
 use std::str::{from_utf8, FromStr};
 use std::sync::Arc;
@@ -92,8 +93,9 @@ fn bytes_to_operation(tab: TabId, path: Arc<Path>, uri_list: bool, bytes: &[u8])
     };
 
     // for_uri can panic
-    let files: thread::Result<Option<Vec<_>>> =
-        std::panic::catch_unwind(|| lines.map(|s| gio::File::for_uri(s).path()).collect());
+    let files: thread::Result<Option<VecDeque<_>>> = std::panic::catch_unwind(|| {
+        lines.map(|s| gio::File::for_uri(s).path().map(Into::into)).collect()
+    });
     let Ok(Some(files)) = files else {
         return error!("Got URI for file without a local path. Aborting paste.");
     };

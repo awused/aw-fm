@@ -1,5 +1,6 @@
+use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -1201,7 +1202,7 @@ impl Tab {
         handle_drop(drop_ev, self.id(), self.dir())
     }
 
-    fn run_deletion(tab: TabId, files: Vec<PathBuf>, kind: Kind) {
+    fn run_deletion(tab: TabId, files: VecDeque<Arc<Path>>, kind: Kind) {
         gui_run(|g| g.start_operation(tab, kind, files))
     }
 
@@ -1213,7 +1214,7 @@ impl Tab {
             &self.contents.selection
         };
 
-        let files = Selected::from(sel).map(|eo| eo.get().abs_path.to_path_buf()).collect();
+        let files = Selected::from(sel).map(|eo| eo.get().abs_path.clone()).collect();
         Self::run_deletion(self.id(), files, Kind::Trash);
     }
 
@@ -1238,7 +1239,7 @@ impl Tab {
             )
         };
 
-        let files: Vec<_> = files.map(|eo| eo.get().abs_path.to_path_buf()).collect();
+        let files: VecDeque<_> = files.map(|eo| eo.get().abs_path.clone()).collect();
 
         let alert = AlertDialog::builder()
             .buttons(["Cancel", "Delete"])

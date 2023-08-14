@@ -2,6 +2,7 @@
 #![allow(unused)]
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::fs::{remove_dir, ReadDir};
 use std::os::unix::prelude::{OsStrExt, OsStringExt};
@@ -61,14 +62,14 @@ impl Fragment {
 #[derive(Debug)]
 pub enum Outcome {
     // Includes overwrites, undo -> move back
-    Move { source: PathBuf, dest: PathBuf },
+    Move { source: Arc<Path>, dest: PathBuf },
     // Does not include overwrite copies, undo -> delete with no confirmation
     Create(PathBuf),
     // Only overwrites from copy, undo -> delete with confirmation
     CopyOverwrite(PathBuf),
     // FileInfo needs to be restored after we populate the contents, which is awkward.
     // Could unconditionally store FileInfo to restore it, probably not worth it.
-    RemoveSourceDir(PathBuf, Option<FileInfo>),
+    RemoveSourceDir(Arc<Path>, Option<FileInfo>),
     CreateDestDir(PathBuf),
     Skip,
     Delete,
@@ -89,7 +90,7 @@ pub enum Kind {
         prev: Box<Self>,
         prev_progress: Box<RefCell<Progress>>,
         // These should be processed FILO, just like outcomes from progress.log
-        pending_dir_info: RefCell<Vec<(PathBuf, FileInfo)>>,
+        pending_dir_info: RefCell<Vec<(Arc<Path>, FileInfo)>>,
     },
     Trash,
     Delete,
@@ -131,7 +132,7 @@ impl Kind {
 // We DFS and when we finish with a directory we process that directory.
 #[derive(Debug)]
 struct Directory {
-    abs_path: PathBuf,
+    abs_path: Arc<Path>,
     // Only set for copy/move
     dest: PathBuf,
     // We'll open at most one directory at a time for each level of depth.
@@ -169,7 +170,7 @@ enum Asking {
 pub struct Progress {
     dirs: Vec<Directory>,
     // Set for every operation except undo, which plays back outcomes instead.
-    files: Vec<PathBuf>,
+    files: VecDeque<Arc<Path>>,
 
     log: Vec<Outcome>,
 
@@ -193,13 +194,13 @@ pub struct Progress {
 #[derive(Debug)]
 enum NextCopyMove {
     FinishedDir(Directory),
-    Files(PathBuf, PathBuf),
+    Files(Arc<Path>, PathBuf),
 }
 
 #[derive(Debug)]
 enum NextRemove {
     FinishedDir(Directory),
-    File(PathBuf),
+    File(Arc<Path>),
 }
 
 impl Progress {
@@ -217,17 +218,20 @@ impl Progress {
                     }
                 };
 
-                return Some(NextCopyMove::Files(dir.abs_path.join(&name), dir.dest.join(name)));
+                return Some(NextCopyMove::Files(
+                    dir.abs_path.join(&name).into(),
+                    dir.dest.join(name),
+                ));
             }
 
             return Some(NextCopyMove::FinishedDir(self.dirs.pop().unwrap()));
         }
 
-        let mut src = self.files.pop()?;
+        let mut src = self.files.pop_front()?;
 
         while src.file_name().is_none() {
             error!("Tried to move file without filename");
-            src = self.files.pop()?;
+            src = self.files.pop_front()?;
         }
 
         let name = src.file_name().unwrap();
@@ -250,13 +254,13 @@ impl Progress {
                     }
                 };
 
-                return Some(NextRemove::File(path));
+                return Some(NextRemove::File(path.into()));
             }
 
             return Some(NextRemove::FinishedDir(self.dirs.pop().unwrap()));
         }
 
-        Some(NextRemove::File(self.files.pop()?))
+        Some(NextRemove::File(self.files.pop_front()?))
     }
 
     fn push_outcome(&mut self, action: Outcome) {
@@ -367,7 +371,7 @@ pub struct Operation {
 }
 
 struct ReadyCopyMove {
-    src: PathBuf,
+    src: Arc<Path>,
     dst: PathBuf,
     overwrite: bool,
 }
@@ -386,7 +390,7 @@ enum Status {
 }
 
 impl Operation {
-    fn new(tab: TabId, kind: Kind, files: Vec<PathBuf>) -> Option<Rc<Self>> {
+    fn new(tab: TabId, kind: Kind, files: VecDeque<Arc<Path>>) -> Option<Rc<Self>> {
         if files.is_empty() {
             warn!("Got empty file operation {}, ignoring.", kind.str());
             return None;
@@ -510,7 +514,7 @@ impl Operation {
                 None => return Status::Done,
             };
 
-            if src == dst {
+            if *src == *dst {
                 info!("Skipping no-op move for {src:?}");
                 self.progress.borrow_mut().push_outcome(Outcome::Skip);
                 continue;
@@ -594,7 +598,7 @@ impl Operation {
                 None => return Status::Done,
             };
 
-            if src == dst {
+            if *src == *dst {
                 let Some(new) = self.progress.borrow_mut().new_name_for(&dst, Fragment::Copy)
                 else {
                     return Status::Done;
@@ -673,7 +677,7 @@ impl Operation {
         );
     }
 
-    fn prepare_copymove(self: &Rc<Self>, src: PathBuf, mut dst: PathBuf) -> CopyMovePrep {
+    fn prepare_copymove(self: &Rc<Self>, src: Arc<Path>, mut dst: PathBuf) -> CopyMovePrep {
         if src.is_dir() && !src.is_symlink() {
             return self.prepare_dest_dir(src, dst);
         }
@@ -736,7 +740,7 @@ impl Operation {
         CopyMovePrep::Ready(ReadyCopyMove { src, dst, overwrite })
     }
 
-    fn prepare_dest_dir(self: &Rc<Self>, src: PathBuf, dst: PathBuf) -> CopyMovePrep {
+    fn prepare_dest_dir(self: &Rc<Self>, src: Arc<Path>, dst: PathBuf) -> CopyMovePrep {
         let mut progress = self.progress.borrow_mut();
 
         let original_info = if dst.exists() {
@@ -842,7 +846,7 @@ impl Operation {
         Status::AsyncScheduled
     }
 
-    fn do_trash(self: &Rc<Self>, path: PathBuf) {
+    fn do_trash(self: &Rc<Self>, path: Arc<Path>) {
         let s = self.clone();
         gio::File::for_path(&path).trash_async(
             glib::Priority::LOW,
@@ -907,7 +911,7 @@ impl Operation {
         Status::AsyncScheduled
     }
 
-    fn do_delete(self: &Rc<Self>, path: PathBuf, was_dir: bool) {
+    fn do_delete(self: &Rc<Self>, path: Arc<Path>, was_dir: bool) {
         let s = self.clone();
         gio::File::for_path(&path).delete_async(
             glib::Priority::LOW,
@@ -947,7 +951,7 @@ impl Operation {
             return Status::Done;
         }
 
-        let source = self.progress.borrow_mut().files.pop().unwrap();
+        let source = self.progress.borrow_mut().files.pop_front().unwrap();
         let dest = new_path.to_path_buf();
 
         let s = self.clone();
@@ -998,7 +1002,12 @@ impl Gui {
         });
     }
 
-    pub(super) fn start_operation(self: &Rc<Self>, tab: TabId, kind: Kind, files: Vec<PathBuf>) {
+    pub(super) fn start_operation(
+        self: &Rc<Self>,
+        tab: TabId,
+        kind: Kind,
+        files: VecDeque<Arc<Path>>,
+    ) {
         let Some(op) = Operation::new(tab, kind, files) else {
             return error!("Failed to start operation");
         };

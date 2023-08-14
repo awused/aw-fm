@@ -138,7 +138,6 @@ impl Gui {
 
         let end_pos = if let Some(stem) = path.file_stem() {
             stem.to_string_lossy().chars().count() as i32
-            // entry.select_region(0, stem.to_string_lossy().chars().count() as i32);
         } else {
             -1
         };
@@ -158,7 +157,7 @@ impl Gui {
                 g.start_operation(
                     tab,
                     Kind::Rename(parent.join(new_name)),
-                    vec![path.to_path_buf()],
+                    vec![path.clone()].into(),
                 )
             });
         });
