@@ -163,6 +163,15 @@ pub(super) struct Tab {
     search: Option<Search>,
 }
 
+#[derive(Debug)]
+pub(super) struct ClosedTab {
+    id: TabUid,
+    pub after: Option<TabId>,
+    current: HistoryEntry,
+    past: Vec<HistoryEntry>,
+    future: Vec<HistoryEntry>,
+}
+
 impl Tab {
     pub const fn id(&self) -> TabId {
         self.id.copy()
@@ -220,7 +229,7 @@ impl Tab {
             search: None,
         };
 
-        t.copy_from_donor(existing_tabs, &[]);
+        t.copy_flat_from_donor(existing_tabs, &[]);
 
         (t, element)
     }
@@ -257,7 +266,39 @@ impl Tab {
         )
     }
 
-    fn copy_from_donor(&mut self, left: &[Self], right: &[Self]) -> bool {
+    pub fn reopen(closed: ClosedTab, existing_tabs: &[Self]) -> (Self, TabElement) {
+        debug!("Reopening closed tab {closed:?}");
+        let settings = gui_run(|g| g.database.get(closed.current.location.clone()));
+
+        let element = TabElement::new(closed.id.copy(), &closed.current.location);
+        let dir = FlatDir::new(closed.current.location);
+        let contents = Contents::new(settings.sort);
+
+
+        let mut t = Self {
+            id: closed.id,
+            dir,
+            pane: MP::Closed(closed.current.state),
+
+            settings,
+            contents,
+            past: closed.past,
+            future: closed.future,
+            element: element.clone(),
+            search: None,
+        };
+
+        t.copy_flat_from_donor(existing_tabs, &[]);
+
+        // Open search, if applicable, after copying flat state.
+        if let Some(query) = closed.current.search {
+            t.open_search(query);
+        }
+
+        (t, element)
+    }
+
+    fn copy_flat_from_donor(&mut self, left: &[Self], right: &[Self]) -> bool {
         for t in left.iter().chain(right) {
             // Check for value equality, not reference equality
             if **self.dir.path() == **t.dir.path() {
@@ -595,7 +636,7 @@ impl Tab {
         self.pane.overwrite_state(PaneState::for_jump(target.scroll));
         self.dir = FlatDir::new(target.dir);
 
-        if !self.copy_from_donor(left, right) {
+        if !self.copy_flat_from_donor(left, right) {
             // We couldn't find any state to steal, so we know we're the only matching tab.
 
             let old_settings = self.settings;
@@ -661,14 +702,14 @@ impl Tab {
         }
     }
 
-    pub fn seek(&mut self, fragment: String) {
+    fn seek_inner(&mut self, fragment: &str, range: impl Iterator<Item = u32>) {
         // Smart case seeking?
         // Prefix instead?
         let fragment = fragment.to_lowercase();
         let contents =
             if let Some(search) = &self.search { search.contents() } else { &self.contents };
 
-        for i in 0..contents.selection.n_items() {
+        for i in range {
             let eo = contents.selection.item(i).and_downcast::<EntryObject>().unwrap();
             if !eo.get().name.lowercase().contains(&fragment) {
                 continue;
@@ -688,6 +729,38 @@ impl Tab {
 
             self.apply_pane_state();
             return;
+        }
+    }
+
+    pub fn seek(&mut self, fragment: &str) {
+        let contents =
+            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+        self.seek_inner(fragment, 0..contents.selection.n_items());
+    }
+
+    pub fn seek_next(&mut self, fragment: &str) {
+        let contents =
+            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+
+        // No real fallback if there's no selection
+        let sel = contents.selection.selection();
+        if !sel.is_empty() {
+            self.seek_inner(fragment, sel.nth(0) + 1..contents.selection.n_items());
+        } else {
+            self.seek_inner(fragment, 0..contents.selection.n_items());
+        }
+    }
+
+    pub fn seek_prev(&mut self, fragment: &str) {
+        let contents =
+            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+
+        // No real fallback if there's no selection
+        let sel = contents.selection.selection();
+        if !sel.is_empty() {
+            self.seek_inner(fragment, (0..sel.nth(0)).rev());
+        } else {
+            self.seek_inner(fragment, 0..contents.selection.n_items());
         }
     }
 
@@ -728,7 +801,7 @@ impl Tab {
             return;
         };
 
-        let target = NavTarget::assume_dir(parent);
+        let target = NavTarget::assume_jump(parent, self.dir());
         self.navigate(left, right, target);
     }
 
@@ -1004,6 +1077,17 @@ impl Tab {
     pub fn close_pane(&mut self) {
         drop(self.take_pane());
         self.element.set_active(false);
+    }
+
+    pub fn close(self, after: Option<TabId>) -> ClosedTab {
+        let current = self.current_history();
+        ClosedTab {
+            id: self.id,
+            after,
+            current,
+            past: self.past,
+            future: self.future,
+        }
     }
 
     pub fn next_of_kin_by_pane(&self) -> Option<TabId> {

@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::fmt::Write;
 use std::ops::Deref;
 
-use gtk::gdk::{DragAction, Key};
+use gtk::gdk::{DragAction, Key, ModifierType};
 use gtk::glib::Propagation;
 use gtk::prelude::{Cast, CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -171,7 +171,7 @@ impl PaneElement {
             let seek = &pane.imp().seek;
             let stack = &pane.imp().stack;
 
-            if !mods.is_empty() {
+            if !mods.difference(ModifierType::SHIFT_MASK).is_empty() {
                 return Propagation::Proceed;
             }
 
@@ -187,6 +187,20 @@ impl PaneElement {
                     true
                 } else if key == Key::Escape {
                     seek.set_text("");
+                    true
+                } else if key == Key::Tab {
+                    let t = seek.text();
+                    if mods.is_empty() {
+                        debug!("Seek next \"{t}\" in {tab:?}");
+                        tabs_run(move |tlist| {
+                            tlist.find_mut(tab).unwrap().seek_next(&t);
+                        });
+                    } else if mods.contains(ModifierType::SHIFT_MASK) {
+                        tabs_run(move |tlist| {
+                            debug!("Seek prev \"{t}\" in {tab:?}");
+                            tlist.find_mut(tab).unwrap().seek_prev(&t);
+                        });
+                    }
                     true
                 } else {
                     false
@@ -223,9 +237,9 @@ impl PaneElement {
                 stack.set_visible_child_name(&Seek);
             }
 
-            debug!("Do seek {t} in {tab:?}");
+            debug!("Seek to \"{t}\" in {tab:?}");
             tabs_run(move |tlist| {
-                tlist.find_mut(tab).unwrap().seek(t);
+                tlist.find_mut(tab).unwrap().seek(&t);
             });
 
             Propagation::Stop

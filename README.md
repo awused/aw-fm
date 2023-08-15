@@ -5,10 +5,6 @@ Awused's personal gui file manager.
 It is a simple file manager designed to be fast and efficient at doing what I
 actually do.
 
-There are many rough edges but as of writing this, it's less than four weeks old
-and just barely usable now that custom actions have been implemented. Expect many
-rough edges.
-
 ## Features
 
 * Fast and efficient
@@ -137,6 +133,8 @@ specify them.
 * `CloseTab`, `ClosePane`, `CloseActive`
   * Close the active tab, pane, or both.
   * All panes can be closed without closing all tabs.
+* `ReopenTab`
+  * Reopens the last closed tabs in reverse order.
 * `Split horizontal|vertical`
   * Splits the current tab in two.
   * The new tab is on the right or bottom of the split.

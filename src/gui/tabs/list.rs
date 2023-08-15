@@ -12,7 +12,7 @@ use gtk::{NoSelection, Orientation, SignalListItemFactory};
 
 use super::element::TabElement;
 use super::id::TabId;
-use super::tab::Tab;
+use super::tab::{ClosedTab, Tab};
 use crate::com::{
     DirSnapshot, DisplayMode, EntryObject, SearchSnapshot, SearchUpdate, SortDir, SortMode,
     SortSettings, Update,
@@ -41,18 +41,19 @@ pub struct TabsList {
     // TODO -- limit number of tabs to 255 or so?
     tabs: Vec<Tab>,
 
+    closed: Vec<ClosedTab>,
+
     // There is always one active tab or no visible tabs.
     // There may be tabs that are not visible.
     active: Option<TabId>,
 
     tab_elements: ListStore,
-    _tabs_container: gtk::ListView,
     pane_container: gtk::Box,
 }
 
 impl TabsList {
     pub fn new(window: &MainWindow) -> Self {
-        let tabs_container = window.imp().tabs.clone();
+        let tabs_container = &window.imp().tabs;
         let tab_elements = ListStore::new::<TabElement>();
 
 
@@ -83,10 +84,10 @@ impl TabsList {
 
         Self {
             tabs: Vec::new(),
+            closed: Vec::new(),
             active: None,
 
             tab_elements,
-            _tabs_container: tabs_container,
             pane_container: window.imp().panes.clone(),
         }
     }
@@ -361,6 +362,27 @@ impl TabsList {
         id
     }
 
+    pub fn reopen(&mut self) {
+        let Some(closed) = self.closed.pop() else {
+            return debug!("No closed tab to reopen");
+        };
+        info!("Reopening closed tab");
+
+        let index = closed
+            .after
+            .and_then(|a| self.element_position(a).map(|i| i + 1))
+            .unwrap_or_default();
+
+        let (new_tab, element) = Tab::reopen(closed, &self.tabs);
+
+        let id = new_tab.id();
+        self.tabs.push(new_tab);
+
+        self.tab_elements.insert(index, &element);
+
+        self.switch_active_tab(id)
+    }
+
     // For now, tabs always open after the active tab
     // !activate -> background tab
     pub fn open_tab<P: AsRef<Path>>(&mut self, path: P, activate: bool) {
@@ -518,8 +540,22 @@ impl TabsList {
             }
         }
 
-        self.tabs.swap_remove(index);
+        let after = if eindex > 0 {
+            self.tab_elements
+                .item(eindex - 1)
+                .and_downcast::<TabElement>()
+                .unwrap()
+                .imp()
+                .tab
+                .get()
+                .copied()
+        } else {
+            None
+        };
+
+        let closed = self.tabs.swap_remove(index).close(after);
         self.tab_elements.remove(eindex);
+        self.closed.push(closed);
     }
 
     // Helper function for common cases.

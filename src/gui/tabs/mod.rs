@@ -143,6 +143,11 @@ impl NavTarget {
         Self { dir: path.into(), scroll: None }
     }
 
+    // Will cause an error later if path isn't a directory, jump missing causes no real problems.
+    fn assume_jump<P: AsRef<Path> + Into<Arc<Path>>>(path: P, jump: Arc<Path>) -> Self {
+        Self { dir: path.into(), scroll: Some(jump) }
+    }
+
     fn initial(list: &TabsList) -> Option<Self> {
         let path = OPTIONS
             .file_name

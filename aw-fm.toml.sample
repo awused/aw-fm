@@ -43,6 +43,7 @@ shortcuts = [
   {key = "H", modifiers = "Control", action = "Home" },
   {key = "T", modifiers = "Control", action = "NewTab"},
   {key = "T", modifiers = "Alt", action = "NewBackgroundTab"},
+  {key = "T", modifiers = "Control,Shift", action = "ReopenTab"},
 
   {key = "W", modifiers = "Control", action = "CloseTab"},
   {key = "W", modifiers = "Control, Shift", action = "ClosePane"},
@@ -83,6 +84,12 @@ shortcuts = [
   {key = "F1", action = "LoadSession one"},
   {key = "F1", modifiers="Control", action = "SaveSession one"},
   {key = "F1", modifiers="Alt", action = "DeleteSession one"},
+  {key = "F2", action = "LoadSession two"},
+  {key = "F2", modifiers="Control", action = "SaveSession two"},
+  {key = "F2", modifiers="Alt", action = "DeleteSession two"},
+  {key = "F3", action = "LoadSession three"},
+  {key = "F3", modifiers="Control", action = "SaveSession three"},
+  {key = "F3", modifiers="Alt", action = "DeleteSession three"},
 ]
 
 # Bookmarks

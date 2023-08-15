@@ -343,6 +343,7 @@ impl Gui {
             }
             "NewTab" => return tabs.new_tab(true),
             "NewBackgroundTab" => return tabs.new_tab(false),
+            "ReopenTab" => return tabs.reopen(),
 
             "Refresh" => return tabs.refresh(),
             "CloseTab" => return tabs.active_close_tab(),
