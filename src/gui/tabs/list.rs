@@ -746,6 +746,17 @@ impl TabsList {
         self.find(active).unwrap().rename();
     }
 
+    pub fn active_create(&self, folder: bool) {
+        let Some(active) = self.active else {
+            return warn!(
+                "New{} called with no open panes",
+                if folder { "Folder" } else { "File" }
+            );
+        };
+
+        self.find(active).unwrap().create(folder);
+    }
+
     pub fn reorder(&mut self, moved: TabId, dest: TabId, after: bool) {
         let src = self.element_position(moved).unwrap();
 

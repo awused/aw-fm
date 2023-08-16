@@ -178,17 +178,7 @@ impl PaneElement {
             let seek_visible = stack.visible_child_name().map_or(false, |n| n == *Seek);
 
             if seek_visible {
-                let handled = if key == Key::BackSpace {
-                    let t = seek.text();
-                    let mut chars = t.chars();
-                    chars.next_back();
-                    seek.set_text(chars.as_str());
-                    // No need to do any seek here?
-                    true
-                } else if key == Key::Escape {
-                    seek.set_text("");
-                    true
-                } else if key == Key::Tab || key == Key::ISO_Left_Tab {
+                if key == Key::Tab || key == Key::ISO_Left_Tab {
                     let t = seek.text();
                     if mods.is_empty() {
                         debug!("Seek next \"{t}\" in {tab:?}");
@@ -201,6 +191,18 @@ impl PaneElement {
                             tlist.find_mut(tab).unwrap().seek_prev(&t);
                         });
                     }
+                    return Propagation::Stop;
+                }
+
+                let handled = if key == Key::BackSpace {
+                    let t = seek.text();
+                    let mut chars = t.chars();
+                    chars.next_back();
+                    seek.set_text(chars.as_str());
+                    // No need to do any seek here?
+                    true
+                } else if key == Key::Escape {
+                    seek.set_text("");
                     true
                 } else {
                     false

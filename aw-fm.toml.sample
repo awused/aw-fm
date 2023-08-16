@@ -37,6 +37,9 @@ shortcuts = [
   {key = "X", modifiers = "Control", action = "Cut"},
   {key = "V", modifiers = "Control", action = "Paste"},
 
+  {key = "N", modifiers = "Control,Shift", action = "NewFolder"},
+  {key = "N", modifiers = "Control", action = "NewFile"},
+
   # {key = "P", modifiers = "Control", action = "Navigate /home/" },
   # {key = "P", modifiers = "Alt", action = "Script /path/to/rofi-jump-home.sh"},
 

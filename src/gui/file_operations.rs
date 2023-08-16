@@ -84,6 +84,9 @@ pub enum Kind {
     Copy(Arc<Path>),
     Rename(PathBuf),
 
+    MakeDir(PathBuf),
+    MakeFile(PathBuf),
+
     // In theory, at least, it should be possible to redo an undo.
     // Probably won't support this, but keep the skeleton intact.
     Undo {
@@ -108,6 +111,8 @@ impl Kind {
             Self::Move(_) => "move",
             Self::Copy(_) => "copy",
             Self::Rename(_) => "rename",
+            Self::MakeDir(_) => "makedir",
+            Self::MakeFile(_) => "makefile",
             Self::Undo { .. } => "undo",
             Self::Trash => "trash",
             Self::Delete => "delete",
@@ -118,7 +123,12 @@ impl Kind {
         match self {
             Self::Move(_) => Fragment::Moved,
             Self::Copy(_) => Fragment::Copied,
-            Self::Rename(_) | Self::Undo { .. } | Self::Trash | Self::Delete => unreachable!(),
+            Self::Rename(_)
+            | Self::MakeDir(_)
+            | Self::MakeFile(_)
+            | Self::Undo { .. }
+            | Self::Trash
+            | Self::Delete => unreachable!(),
         }
     }
 }
@@ -170,7 +180,7 @@ enum Asking {
 pub struct Progress {
     dirs: Vec<Directory>,
     // Set for every operation except undo, which plays back outcomes instead.
-    files: VecDeque<Arc<Path>>,
+    source_files: VecDeque<Arc<Path>>,
 
     log: Vec<Outcome>,
 
@@ -227,11 +237,11 @@ impl Progress {
             return Some(NextCopyMove::FinishedDir(self.dirs.pop().unwrap()));
         }
 
-        let mut src = self.files.pop_front()?;
+        let mut src = self.source_files.pop_front()?;
 
         while src.file_name().is_none() {
             error!("Tried to move file without filename");
-            src = self.files.pop_front()?;
+            src = self.source_files.pop_front()?;
         }
 
         let name = src.file_name().unwrap();
@@ -260,7 +270,7 @@ impl Progress {
             return Some(NextRemove::FinishedDir(self.dirs.pop().unwrap()));
         }
 
-        Some(NextRemove::File(self.files.pop_front()?))
+        Some(NextRemove::File(self.source_files.pop_front()?))
     }
 
     fn push_outcome(&mut self, action: Outcome) {
@@ -390,29 +400,38 @@ enum Status {
 }
 
 impl Operation {
-    fn new(tab: TabId, kind: Kind, files: VecDeque<Arc<Path>>) -> Option<Rc<Self>> {
-        if files.is_empty() {
-            warn!("Got empty file operation {}, ignoring.", kind.str());
-            return None;
-        }
-
+    fn new(tab: TabId, kind: Kind, source_files: VecDeque<Arc<Path>>) -> Option<Rc<Self>> {
         // Abort if any of them are strictly invalid.
         // Moves into the same dir will be skipped later.
         match &kind {
             Kind::Move(p) | Kind::Copy(p) => {
-                if let Some(invalid) = files.iter().find(|f| p.starts_with(f)) {
+                if source_files.is_empty() {
+                    warn!("Got empty file operation {}, ignoring.", kind.str());
+                    return None;
+                }
+
+                if let Some(invalid) = source_files.iter().find(|f| p.starts_with(f)) {
                     show_warning(format!("Invalid {kind} of {invalid:?} into {p:?}"));
                     return None;
                 }
             }
             Kind::Rename(p) => {
-                if files.len() != 1 {
-                    show_warning(format!("Got invalid rename of {} files", files.len()));
+                if source_files.len() != 1 {
+                    show_warning(format!("Got invalid rename of {} files", source_files.len()));
                     return None;
                 }
 
-                if files[0].parent() != p.parent() {
+                if source_files[0].parent() != p.parent() {
                     show_warning("Got invalid rename: destination directory not the same");
+                    return None;
+                }
+            }
+            Kind::MakeDir(_) | Kind::MakeFile(_) => {
+                if !source_files.is_empty() {
+                    show_warning(format!(
+                        "Got invalid MakeFile/MakeFolder with {} source files",
+                        source_files.len()
+                    ));
                     return None;
                 }
             }
@@ -435,7 +454,7 @@ impl Operation {
             });
 
             let progress = Progress {
-                files,
+                source_files,
                 dirs: Vec::new(),
 
                 log: Vec::new(),
@@ -479,6 +498,8 @@ impl Operation {
             Kind::Move(p) => self.process_next_move(p),
             Kind::Copy(p) => self.process_next_copy(p),
             Kind::Rename(p) => self.process_rename(p),
+            Kind::MakeDir(p) => self.process_make_dir(p),
+            Kind::MakeFile(p) => self.process_make_file(p),
             Kind::Undo { .. } => todo!(),
             Kind::Trash => self.process_next_trash(),
             Kind::Delete => self.process_next_delete(),
@@ -951,7 +972,7 @@ impl Operation {
             return Status::Done;
         }
 
-        let source = self.progress.borrow_mut().files.pop_front().unwrap();
+        let source = self.progress.borrow_mut().source_files.pop_front().unwrap();
         let dest = new_path.to_path_buf();
 
         let s = self.clone();
@@ -979,6 +1000,50 @@ impl Operation {
         Status::AsyncScheduled
     }
 
+    fn process_make_dir(self: &Rc<Self>, new_path: &Path) -> Status {
+        if new_path.exists() {
+            show_warning(format!("{new_path:?} already exists"));
+            self.progress.borrow_mut().push_outcome(Outcome::Skip);
+            return Status::Done;
+        }
+
+        match std::fs::create_dir(new_path) {
+            Ok(_) => {
+                trace!("Created directory {new_path:?}");
+                self.progress
+                    .borrow_mut()
+                    .push_outcome(Outcome::CreateDestDir(new_path.to_path_buf()));
+            }
+            Err(e) => {
+                show_warning(format!("Failed to create {new_path:?}: {e}"));
+                self.progress.borrow_mut().push_outcome(Outcome::Skip);
+            }
+        }
+
+        Status::Done
+    }
+
+    fn process_make_file(self: &Rc<Self>, new_path: &Path) -> Status {
+        if new_path.exists() {
+            show_warning(format!("{new_path:?} already exists"));
+            self.progress.borrow_mut().push_outcome(Outcome::Skip);
+            return Status::Done;
+        }
+
+        match std::fs::File::create(new_path) {
+            Ok(_) => {
+                trace!("Created file {new_path:?}");
+                self.progress.borrow_mut().push_outcome(Outcome::Create(new_path.to_path_buf()));
+            }
+            Err(e) => {
+                show_warning(format!("Failed to create {new_path:?}: {e}"));
+                self.progress.borrow_mut().push_outcome(Outcome::Skip);
+            }
+        }
+
+        Status::Done
+    }
+
     fn cancel(&self) {
         info!("Cancelling operation {:?}", self.kind,);
         self.cancellable.cancel();
@@ -993,9 +1058,11 @@ impl Gui {
         };
         let op = ops.swap_remove(index);
 
-        // Allow file system + notifies to settle for 10 + 2ms
-        // We dedupe notifications for at most 10ms, plus some margin
-        glib::timeout_add_local_once(Duration::from_millis(12), move || {
+        // Allow file system + notifies to settle for 10 + 6ms
+        // We dedupe notifications for at most 10ms, plus some margin, aiming for under 1 frame at
+        // 60fps.
+        // If this isn't enough it'll have to be explicit flushing and callbacks.
+        glib::timeout_add_local_once(Duration::from_millis(16), move || {
             tabs_run(|tlist| {
                 tlist.scroll_to_completed(op.tab, &op.kind, &op.progress.borrow().log)
             });

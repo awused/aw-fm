@@ -1,4 +1,4 @@
-use std::collections::hash_map;
+use std::collections::{hash_map, VecDeque};
 use std::ffi::OsString;
 use std::path::Path;
 use std::rc::Rc;
@@ -148,8 +148,7 @@ impl Gui {
 
             let new_name = e.text();
             if new_name.is_empty() || new_name.contains('/') || new_name.contains('\\') {
-                show_warning("Invalid name for file \"{new_name}\"");
-                return;
+                return show_warning("Invalid name for file \"{new_name}\"");
             }
 
             let parent = path.parent().unwrap();
@@ -176,6 +175,60 @@ impl Gui {
 
         entry.set_enable_undo(true);
         entry.select_region(0, end_pos);
+    }
+
+    pub(super) fn create_dialog(self: &Rc<Self>, tab: TabId, dir: Arc<Path>, folder: bool) {
+        let dialog = gtk::Window::builder()
+            .title(if folder { "Create Folder" } else { "Create File" })
+            .transient_for(&self.window)
+            .modal(true)
+            .build();
+
+        self.close_on_quit_or_esc(&dialog);
+
+        dialog.set_default_width(800);
+
+        let vbox = gtk::Box::new(Orientation::Vertical, 12);
+
+        let label = gtk::Label::new(Some(&format!(
+            "Create new {} in {dir:?}",
+            if folder { "folder" } else { "file" }
+        )));
+
+        let entry = gtk::Entry::new();
+
+        let d = dialog.downgrade();
+        entry.connect_activate(move |e| {
+            d.upgrade().unwrap().destroy();
+
+            let new_name = e.text();
+            if new_name.is_empty() || new_name.contains('/') || new_name.contains('\\') {
+                return show_warning("Invalid name for file \"{new_name}\"");
+            }
+
+            let path = dir.join(new_name);
+            gui_run(|g| {
+                g.start_operation(
+                    tab,
+                    if folder { Kind::MakeDir(path) } else { Kind::MakeFile(path) },
+                    VecDeque::new(),
+                )
+            });
+        });
+
+        vbox.append(&label);
+        vbox.append(&entry);
+
+        dialog.set_child(Some(&vbox));
+
+        dialog.connect_close_request(move |d| {
+            d.destroy();
+            Propagation::Proceed
+        });
+
+        dialog.set_visible(true);
+
+        entry.set_enable_undo(true);
     }
 
     fn close_on_quit_or_esc<T: WidgetExt>(self: &Rc<Self>, w: &T) {
@@ -359,6 +412,8 @@ impl Gui {
             "Delete" => return tabs.active_delete(),
 
             "Rename" => return tabs.active_rename(),
+            "NewFolder" => return tabs.active_create(true),
+            "NewFile" => return tabs.active_create(false),
 
             "Search" => return tabs.active_search(""),
             _ => true,

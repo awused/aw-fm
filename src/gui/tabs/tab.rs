@@ -1358,6 +1358,10 @@ impl Tab {
         gui_run(|g| g.rename_dialog(self.id(), path));
     }
 
+    pub fn create(&self, folder: bool) {
+        gui_run(|g| g.create_dialog(self.id(), self.dir(), folder));
+    }
+
     pub fn scroll_to_completed(&mut self, kind: &Kind, outcomes: &[Outcome]) {
         if !self.loaded() {
             info!("Not scrolling to completed operation in tab that is not loaded {:?}", self.id);
@@ -1381,12 +1385,12 @@ impl Tab {
                     return;
                 }
             }
-            Kind::Rename(f) => {
-                if f.parent() == Some(tab_dir) {
+            Kind::Rename(f) | Kind::MakeDir(f) | Kind::MakeFile(f) => {
+                if f.parent() != Some(tab_dir) {
                     warn!(
-                        "Ignoring scroll to completed rename: tab dir {tab_dir:?} not equal to \
-                         operation path {:?}. This is unusual.",
-                        f.parent().unwrap()
+                        "Ignoring scroll to completed rename/creation: tab dir {tab_dir:?} not \
+                         equal to operation path {:?}. This is unusual.",
+                        f.parent()
                     );
                     return;
                 }
