@@ -81,16 +81,23 @@
 #
 # priority=0
 #
+## Whether to read stdout of the script as a series of commands to execute.
+## Use this to have the script control something in aw-fm.
+## true/false
+#
+# parse_output=false
+#
 #**aw-fm-settings-end**
 
 
 # Example settings for a script that can run on any single directory, including the current
-# directory.
+# directory. The output will be parsed as commands.
 
 #**aw-fm-settings-begin**
 # name=Directories
 # files=false
 # selection=maybe_one
+# parse_output=true
 #**aw-fm-settings-end**
 
 # A script that can run on multiple mp3 files.

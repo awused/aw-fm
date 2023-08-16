@@ -119,6 +119,7 @@ struct ActionSettings {
     regex: Option<Regex>,
     selection: Selection,
     priority: i32,
+    parse_output: bool,
 }
 
 impl PartialEq for ActionSettings {
@@ -140,7 +141,7 @@ impl Ord for ActionSettings {
 
 thread_local! {
     static SETTINGS_RE: Lazy<regex::Regex> = Lazy::new(||
-        regex::Regex::new(r"(name|directories|files|mimetypes|extensions|regex|selection|priority)=(.*)$")
+        regex::Regex::new(r"(name|directories|files|mimetypes|extensions|regex|selection|priority|parse_output)=(.*)$")
             .unwrap());
 }
 
@@ -170,6 +171,7 @@ impl ActionSettings {
         let mut regex = None;
         let mut selection = Selection::Any;
         let mut priority = 0;
+        let mut parse_output = false;
 
         for line in lines {
             if line.contains("**aw-fm-settings-end**") {
@@ -182,6 +184,7 @@ impl ActionSettings {
                     regex,
                     selection,
                     priority,
+                    parse_output,
                 };
                 debug!("Read script from {path:?}: {s:#?}");
                 return Some(s);
@@ -231,6 +234,12 @@ impl ActionSettings {
                         .map_err(|_e| error!("Invalid settings block in {path:?}: got \"{line}\""))
                         .ok()?;
                 }
+                "parse_output" => {
+                    parse_output = rest
+                        .parse::<bool>()
+                        .map_err(|_e| error!("Invalid settings block in {path:?}: got \"{line}\""))
+                        .ok()?
+                }
                 _ => {}
             }
         }
@@ -249,6 +258,8 @@ impl ActionSettings {
             regex: None,
             selection,
             priority: 0,
+            // Not functional at all here
+            parse_output: false,
         };
         debug!("Constructed filterable action from context menu entry: {s:#?}");
         s
@@ -388,9 +399,13 @@ impl CustomAction {
 
         let action = SimpleAction::new(&format!("custom-{n}"), None);
         let g = g.clone();
-        let exe = path.clone();
+        let cmd = if settings.parse_output {
+            format!("Script {}", path.to_string_lossy())
+        } else {
+            format!("Execute {}", path.to_string_lossy())
+        };
         action.connect_activate(move |_a, _v| {
-            g.run_command(&format!("Script {}", exe.to_string_lossy()));
+            g.run_command(&cmd);
         });
 
         group.add_action(&action);
