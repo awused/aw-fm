@@ -188,7 +188,7 @@ impl PaneElement {
                 } else if key == Key::Escape {
                     seek.set_text("");
                     true
-                } else if key == Key::Tab {
+                } else if key == Key::Tab || key == Key::ISO_Left_Tab {
                     let t = seek.text();
                     if mods.is_empty() {
                         debug!("Seek next \"{t}\" in {tab:?}");
