@@ -53,8 +53,8 @@ pub enum ManagerAction {
     Unwatch(Arc<Path>),
     Search(Arc<Path>, Arc<AtomicBool>),
     EndSearch(Arc<AtomicBool>),
-    Execute(String, Vec<(String, OsString)>),
-    Script(String, Vec<(String, OsString)>),
+    Execute(Arc<Path>, Vec<(String, OsString)>),
+    Script(Arc<Path>, Vec<(String, OsString)>),
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]

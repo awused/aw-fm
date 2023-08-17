@@ -687,7 +687,7 @@ impl Tab {
         } else {
             &self.contents.selection
         };
-        applications::activate(self.id(), &display, selection);
+        applications::activate(self.id(), &display, selection.into());
     }
 
     pub fn select_if_not(&self, eo: EntryObject) {

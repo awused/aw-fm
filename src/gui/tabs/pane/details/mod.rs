@@ -78,9 +78,9 @@ impl DetailsView {
 
         column_view.connect_activate(move |cv, _a| {
             let display = cv.display();
-            let model = cv.model().and_downcast::<MultiSelection>().unwrap();
+            let model = &cv.model().and_downcast::<MultiSelection>().unwrap();
 
-            applications::activate(tab, &display, &model)
+            applications::activate(tab, &display, model.into())
         });
 
         setup_view_controllers(tab, &column_view, deny_view_click);

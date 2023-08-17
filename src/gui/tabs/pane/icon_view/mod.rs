@@ -89,9 +89,9 @@ impl IconView {
 
         grid.connect_activate(move |gv, _a| {
             let display = gv.display();
-            let model = gv.model().and_downcast::<MultiSelection>().unwrap();
+            let model = &gv.model().and_downcast::<MultiSelection>().unwrap();
 
-            applications::activate(tab, &display, &model)
+            applications::activate(tab, &display, model.into())
         });
 
 

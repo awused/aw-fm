@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use gtk::glib;
@@ -11,11 +12,11 @@ use crate::com::GuiAction;
 
 
 impl Manager {
-    pub(super) fn execute(&self, cmd: String, gui_env: Vec<(String, OsString)>) {
+    pub(super) fn execute(&self, cmd: Arc<Path>, gui_env: Vec<(String, OsString)>) {
         tokio::task::spawn_local(execute(cmd, gui_env, self.gui_sender.clone(), false));
     }
 
-    pub(super) fn script(&self, cmd: String, gui_env: Vec<(String, OsString)>) {
+    pub(super) fn script(&self, cmd: Arc<Path>, gui_env: Vec<(String, OsString)>) {
         tokio::task::spawn_local(execute(cmd, gui_env, self.gui_sender.clone(), true));
     }
 }
@@ -24,30 +25,29 @@ impl Manager {
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 async fn execute(
-    cmdstr: String,
+    cmd: Arc<Path>,
     env: Vec<(String, OsString)>,
     gui_chan: glib::Sender<GuiAction>,
     run_output: bool,
 ) {
-    let p: &Path = Path::new(cmdstr.as_str());
-    let mut comp = p.components();
+    let mut comp = cmd.components();
     if comp.next().is_some() && comp.next().is_some() {
-        if let Ok(canon) = p.canonicalize() {
+        if let Ok(canon) = cmd.canonicalize() {
             if !canon.is_absolute() {
-                let msg = format!("Relative paths are not allowed, got: {cmdstr}");
+                let msg = format!("Relative paths are not allowed, got: {cmd:?}");
                 error!("{msg}");
                 drop(gui_chan.send(GuiAction::ConveyError(msg)));
                 return;
             }
         } else {
-            let msg = format!("Could not get canonical path for {cmdstr}");
+            let msg = format!("Could not get canonical path for {cmd:?}");
             error!("{msg}");
             drop(gui_chan.send(GuiAction::ConveyError(msg)));
             return;
         }
     }
 
-    let mut cmd = tokio::process::Command::new(cmdstr.clone());
+    let mut cmd = tokio::process::Command::new(&*cmd);
 
     #[cfg(target_family = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
@@ -58,11 +58,11 @@ async fn execute(
     let output = select! {
         output = &mut fut => output,
         _ = closing::closed_fut() => {
-            warn!("Waiting to exit for up to 60 seconds until external command completes: {cmdstr}");
+            warn!("Waiting to exit for up to 60 seconds until external command completes: {cmd:?}");
             if run_output {
                 drop(tokio::time::timeout(Duration::from_secs(60), fut).await);
             }
-            warn!("Command blocking exit completed or killed: {cmdstr}");
+            warn!("Command blocking exit completed or killed: {cmd:?}");
             return;
         },
     };
@@ -88,7 +88,7 @@ async fn execute(
                 return;
             }
 
-            let msg = format!("Executable {cmdstr} exited with error code {:?}", output.status);
+            let msg = format!("Executable {cmd:?} exited with error code {:?}", output.status);
             error!("{msg}");
             drop(gui_chan.send(GuiAction::ConveyError(msg)));
 
@@ -96,7 +96,7 @@ async fn execute(
             warn!("stderr: {:?}", String::from_utf8_lossy(&output.stderr));
         }
         Err(e) => {
-            let msg = format!("Executable {cmdstr} failed to start with error {e:?}");
+            let msg = format!("Executable {cmd:?} failed to start with error {e}");
             error!("{msg}");
             drop(gui_chan.send(GuiAction::ConveyError(msg)));
         }

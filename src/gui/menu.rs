@@ -4,9 +4,10 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::os::unix::prelude::{OsStrExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use ahash::AHashMap;
 use gtk::gio::{Menu, MenuItem, SimpleAction, SimpleActionGroup};
@@ -141,8 +142,9 @@ impl Ord for ActionSettings {
 
 thread_local! {
     static SETTINGS_RE: Lazy<regex::Regex> = Lazy::new(||
-        regex::Regex::new(r"(name|directories|files|mimetypes|extensions|regex|selection|priority|parse_output)=(.*)$")
-            .unwrap());
+        regex::Regex::new(
+            r"(name|directories|files|mimetypes|extensions|regex|selection|priority|parse_output)=(.*)$")
+                .unwrap());
 }
 
 impl ActionSettings {
@@ -347,7 +349,7 @@ impl ActionSettings {
 
 #[derive(Debug, PartialEq, Eq)]
 struct CustomAction {
-    path: PathBuf,
+    path: Option<Arc<Path>>,
 
     settings: ActionSettings,
 
@@ -368,7 +370,7 @@ impl Ord for CustomAction {
 
 impl CustomAction {
     fn create_script(
-        path: PathBuf,
+        path: Arc<Path>,
         g: &Rc<Gui>,
         group: &SimpleActionGroup,
         n: usize,
@@ -399,18 +401,18 @@ impl CustomAction {
 
         let action = SimpleAction::new(&format!("custom-{n}"), None);
         let g = g.clone();
-        let cmd = if settings.parse_output {
-            format!("Script {}", path.to_string_lossy())
-        } else {
-            format!("Execute {}", path.to_string_lossy())
-        };
+        let p = path.clone();
         action.connect_activate(move |_a, _v| {
-            g.run_command(&cmd);
+            if settings.parse_output {
+                g.send_manager(crate::com::ManagerAction::Script(p.clone(), g.get_env()))
+            } else {
+                g.send_manager(crate::com::ManagerAction::Execute(p.clone(), g.get_env()))
+            }
         });
 
         group.add_action(&action);
 
-        Some(Self { path, settings, action })
+        Some(Self { path: Some(path), settings, action })
     }
 
     fn create_action(
@@ -431,12 +433,16 @@ impl CustomAction {
 
         group.add_action(&action);
 
-        Self { path: PathBuf::new(), settings, action }
+        Self { path: None, settings, action }
     }
 
     fn display_name(&self) -> Cow<'_, str> {
         self.settings.name.as_ref().map_or_else(
-            || self.path.file_name().unwrap_or(self.path.as_os_str()).to_string_lossy(),
+            || {
+                self.path.as_ref().map_or(Cow::Borrowed(""), |p| {
+                    p.file_name().unwrap_or(p.as_os_str()).to_string_lossy()
+                })
+            },
             |s| Cow::Borrowed(&**s),
         )
     }
@@ -534,7 +540,7 @@ impl GuiMenu {
                 }
             })
             .enumerate()
-            .filter_map(|(n, f)| CustomAction::create_script(f, g, group, n))
+            .filter_map(|(n, f)| CustomAction::create_script(f.into(), g, group, n))
             .collect();
 
         actions.sort();

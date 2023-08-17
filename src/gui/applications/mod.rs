@@ -3,15 +3,17 @@ use std::cell::RefCell;
 use ahash::AHashMap;
 use gtk::gdk::Display;
 use gtk::gio::{AppInfo, File};
+use gtk::glib;
 use gtk::prelude::{AppInfoExt, DisplayExt, GdkAppLaunchContextExt};
-use gtk::traits::SelectionModelExt;
-use gtk::{glib, MultiSelection};
 
 use super::tabs::id::TabId;
 use super::{show_error, show_warning, tabs_run, Selected};
-use crate::com::EntryObject;
+use crate::com::{EntryKind, EntryObject};
+use crate::gui::gui_run;
 
+mod open_with;
 
+// Only open new tabs if the number of directories is below this number.
 static DIR_OPEN_LIMIT: usize = 10;
 
 thread_local! {
@@ -72,9 +74,8 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
 
 static BOTH_ERROR: &str = "Can't launch directories and files together";
 
-pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
-    let selected = selection.selection();
-    if selected.size() == 0 {
+pub(super) fn activate(tab: TabId, display: &Display, selected: Selected<'_>) {
+    if selected.len() == 0 {
         warn!("Activated with no items");
     }
 
@@ -82,7 +83,7 @@ pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
     let mut directories = Vec::new();
     let mut files = Vec::new();
 
-    for eo in Selected::from(selection) {
+    for eo in selected {
         if eo.get().dir() {
             directories.push(eo.get().abs_path.clone());
         } else {
@@ -91,6 +92,29 @@ pub fn activate(tab: TabId, display: &Display, selection: &MultiSelection) {
 
         if !files.is_empty() && !directories.is_empty() {
             return show_warning(BOTH_ERROR);
+        }
+    }
+
+    if files.len() == 1 {
+        let e = files[0].get();
+        if let EntryKind::File { executable: true, .. } = &e.kind {
+            // Could build some kind of whitelist/blacklist for trusted files.
+            info!("Executing file {:?}", e.abs_path);
+            drop(e);
+
+            let f = files.pop().unwrap();
+
+            // Can be called while the TabsList lock is held.
+            glib::idle_add_local_once(move || {
+                gui_run(|g| {
+                    g.send_manager(crate::com::ManagerAction::Execute(
+                        f.get().abs_path.clone(),
+                        g.get_env(),
+                    ))
+                })
+            });
+
+            return;
         }
     }
 

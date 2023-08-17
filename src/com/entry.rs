@@ -10,9 +10,10 @@ use ahash::AHashMap;
 use gtk::gdk::Texture;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
-    self, Cancellable, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
-    FILE_ATTRIBUTE_STANDARD_ICON, FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
-    FILE_ATTRIBUTE_STANDARD_TYPE, FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+    self, Cancellable, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE,
+    FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE, FILE_ATTRIBUTE_STANDARD_ICON,
+    FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE, FILE_ATTRIBUTE_STANDARD_TYPE,
+    FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
     FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
 };
 use gtk::glib::{self, GStr, Object, Variant, WeakRef};
@@ -38,6 +39,7 @@ static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
         FILE_ATTRIBUTE_TIME_MODIFIED,
         FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
         FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
+        FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE,
     ]
     .map(GStr::as_str)
     .join(",")
@@ -69,7 +71,7 @@ impl fmt::Debug for FileTime {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
-    File { size: u64 },
+    File { size: u64, executable: bool },
     Directory { contents: Option<u64> },
     Uninitialized, // Broken {}
 }
@@ -129,7 +131,7 @@ impl Entry {
             (Uninitialized, _) | (_, Uninitialized) => unreachable!(),
             (File { .. }, Directory { .. }) => return Ordering::Greater,
             (Directory { .. }, File { .. }) => return Ordering::Less,
-            (File { size: self_size }, File { size: other_size })
+            (File { size: self_size, .. }, File { size: other_size, .. })
             | (Directory { contents: Some(self_size) }, Directory { contents: Some(other_size) }) => {
                 self_size.cmp(other_size)
             }
@@ -206,7 +208,10 @@ impl Entry {
                 EntryKind::Directory { contents: Some(size.saturating_sub(2)) }
             }
         } else {
-            EntryKind::File { size }
+            EntryKind::File {
+                size,
+                executable: info.boolean(FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE),
+            }
         };
 
 
@@ -254,7 +259,7 @@ impl Entry {
     // This could be a compact string/small string but possibly not worth the dependency on its own
     pub fn short_size_string(&self) -> String {
         match self.kind {
-            EntryKind::File { size } => humansize::format_size(size, humansize::WINDOWS),
+            EntryKind::File { size, .. } => humansize::format_size(size, humansize::WINDOWS),
             EntryKind::Directory { contents: Some(contents) } => format!("{contents}"),
             EntryKind::Directory { contents: None } => "...".into(),
             EntryKind::Uninitialized => unreachable!(),
@@ -263,7 +268,7 @@ impl Entry {
 
     pub fn long_size_string(&self) -> String {
         match self.kind {
-            EntryKind::File { size } => humansize::format_size(size, humansize::WINDOWS),
+            EntryKind::File { size, .. } => humansize::format_size(size, humansize::WINDOWS),
             EntryKind::Directory { contents: Some(contents) } => format!("{contents} items"),
             EntryKind::Directory { contents: None } => "... items".into(),
             EntryKind::Uninitialized => unreachable!(),
@@ -276,7 +281,7 @@ impl Entry {
 
     pub fn raw_size(&self) -> u64 {
         match self.kind {
-            EntryKind::File { size } => size,
+            EntryKind::File { size, .. } => size,
             EntryKind::Directory { contents } => contents.unwrap_or_default(),
             EntryKind::Uninitialized => unreachable!(),
         }

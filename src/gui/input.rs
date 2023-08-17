@@ -1,6 +1,6 @@
 use std::collections::{hash_map, VecDeque};
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -31,7 +31,6 @@ mod help;
 #[derive(Debug, Default)]
 pub(super) struct OpenDialogs {
     help: Option<gtk::Window>,
-    // rename: bool,
 }
 
 impl Gui {
@@ -359,13 +358,17 @@ impl Gui {
 
                 "Execute" => {
                     drop(tabs);
-                    return self
-                        .send_manager(ManagerAction::Execute(arg.to_string(), self.get_env()));
+                    return self.send_manager(ManagerAction::Execute(
+                        PathBuf::from(arg).into(),
+                        self.get_env(),
+                    ));
                 }
                 "Script" => {
                     drop(tabs);
-                    return self
-                        .send_manager(ManagerAction::Script(arg.to_string(), self.get_env()));
+                    return self.send_manager(ManagerAction::Script(
+                        PathBuf::from(arg).into(),
+                        self.get_env(),
+                    ));
                 }
 
                 _ => true,
@@ -424,7 +427,7 @@ impl Gui {
         self.warning(&e);
     }
 
-    fn get_env(&self) -> Vec<(String, OsString)> {
+    pub(super) fn get_env(&self) -> Vec<(String, OsString)> {
         self.tabs.borrow().get_env()
     }
 }
