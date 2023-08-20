@@ -80,7 +80,7 @@ impl DetailsView {
             let display = cv.display();
             let model = &cv.model().and_downcast::<MultiSelection>().unwrap();
 
-            applications::activate(tab, &display, model.into())
+            applications::open(tab, &display, model.into(), true)
         });
 
         setup_view_controllers(tab, &column_view, deny_view_click);

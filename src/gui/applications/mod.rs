@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use ahash::AHashMap;
 use gtk::gdk::Display;
@@ -6,11 +7,13 @@ use gtk::gio::{AppInfo, File};
 use gtk::glib;
 use gtk::prelude::{AppInfoExt, DisplayExt, GdkAppLaunchContextExt};
 
+use self::open_with::OpenWith;
 use super::tabs::id::TabId;
-use super::{show_error, show_warning, tabs_run, Selected};
+use super::{show_error, show_warning, tabs_run, Gui, Selected};
 use crate::com::{EntryKind, EntryObject};
 use crate::gui::gui_run;
 
+mod application;
 mod open_with;
 
 // Only open new tabs if the number of directories is below this number.
@@ -74,7 +77,7 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
 
 static BOTH_ERROR: &str = "Can't launch directories and files together";
 
-pub(super) fn activate(tab: TabId, display: &Display, selected: Selected<'_>) {
+pub(super) fn open(tab: TabId, display: &Display, selected: Selected<'_>, execute: bool) {
     if selected.len() == 0 {
         warn!("Activated with no items");
     }
@@ -95,7 +98,7 @@ pub(super) fn activate(tab: TabId, display: &Display, selected: Selected<'_>) {
         }
     }
 
-    if files.len() == 1 {
+    if execute && files.len() == 1 {
         let e = files[0].get();
         if let EntryKind::File { executable: true, .. } = &e.kind {
             // Could build some kind of whitelist/blacklist for trusted files.
@@ -142,4 +145,10 @@ pub(super) fn activate(tab: TabId, display: &Display, selected: Selected<'_>) {
             }
         })
     });
+}
+
+impl Gui {
+    pub(super) fn open_with(self: &Rc<Self>, selected: Selected<'_>) {
+        OpenWith::open(self, selected);
+    }
 }

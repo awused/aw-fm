@@ -2,15 +2,19 @@ use std::rc::Rc;
 
 use ahash::AHashSet;
 use gtk::gdk::Display;
-use gtk::gio::{AppInfo, ListStore};
-use gtk::prelude::{AppInfoExt, ListModelExt};
+use gtk::gio::{AppInfo, File, ListStore};
+use gtk::prelude::{
+    AppInfoExt, Cast, CastNone, DisplayExt, GdkAppLaunchContextExt, ListModelExt, ObjectExt,
+};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{CheckButtonExt, WidgetExt};
-use gtk::{gio, glib, SingleSelection};
+use gtk::traits::{ButtonExt, CheckButtonExt, GtkWindowExt, ListItemExt, WidgetExt};
+use gtk::{glib, SingleSelection};
 
+use super::application::Application;
 use super::cached_lookup;
-use crate::gui::tabs::id::TabId;
-use crate::gui::{Gui, Selected};
+use crate::com::EntryObject;
+use crate::gui::applications::DEFAULT_CACHE;
+use crate::gui::{show_error, show_warning, Gui, Selected};
 
 glib::wrapper! {
     pub struct OpenWith(ObjectSubclass<imp::OpenWith>)
@@ -24,19 +28,18 @@ struct PartitionedAppInfos {
     hidden: Vec<AppInfo>,
 }
 
+// TODO -- create from CLI command
+
 impl OpenWith {
-    pub(super) fn new(
-        gui: &Rc<Gui>,
-        tab: TabId,
-        display: &Display,
-        selected: Selected<'_>,
-    ) -> Option<Self> {
+    pub(super) fn open(gui: &Rc<Gui>, selected: Selected<'_>) {
         if selected.len() == 0 {
-            warn!("OpenWith called with no selection");
-            return None;
+            return warn!("OpenWith called with no selection");
         }
 
         let s: Self = glib::Object::new();
+        let imp = s.imp();
+
+        gui.close_on_quit_or_esc(&s);
 
         let entries: Vec<_> = selected.collect();
         let mut mimetypes = Vec::new();
@@ -58,15 +61,16 @@ impl OpenWith {
             format!("Choose an application for the {} selected files", entries.len())
         };
 
-        s.imp().top_text.set_text(&top_text);
+        imp.top_text.set_text(&top_text);
 
         if mimetypes.len() == 1 && !entries[0].get().dir() {
-            s.imp().set_default.set_label(Some(&format!("Always use for {}", mimetypes[0])));
+            imp.set_default.set_label(Some(&format!("Always use for {}", mimetypes[0])));
         } else {
-            s.imp().set_default.set_visible(false);
+            imp.set_default.set_visible(false);
         };
 
         // TODO [gtk4.12] section headers
+        // let flatten_list = gtk::FlattenListModel::new(model);
         let apps = partition_app_infos(&mimetypes);
 
         let list = ListStore::new::<AppInfo>();
@@ -91,23 +95,83 @@ impl OpenWith {
         }
 
         let factory = gtk::SignalListItemFactory::new();
-        factory.connect_setup(|_factory, item| {});
+        factory.connect_setup(|_factory, item| {
+            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+            let row = Application::default();
 
+            item.set_activatable(false);
+            item.set_child(Some(&row));
+        });
 
-        s.imp().mimetypes.set(mimetypes).unwrap();
-        s.imp().files.set(entries).unwrap();
+        factory.connect_bind(|_factory, item| {
+            let item = item.downcast_ref::<gtk::ListItem>().unwrap();
+            let info = item.item().and_downcast::<AppInfo>().unwrap();
 
-        Some(s)
+            let child = item.child().and_downcast::<Application>().unwrap();
+            child.set_info(&info);
+        });
+
+        imp.list.set_model(Some(&selection));
+        imp.list.set_factory(Some(&factory));
+
+        let w = s.downgrade();
+        imp.cancel.connect_clicked(move |_b| {
+            w.upgrade().unwrap().close();
+        });
+
+        let w = s.downgrade();
+        let display = gui.window.display();
+        imp.open.connect_clicked(move |_b| {
+            let s = w.upgrade().unwrap();
+
+            s.open_application(&display, &mimetypes, &entries);
+            s.close();
+        });
+
+        s.set_transient_for(Some(&gui.window));
+        s.set_visible(true);
+    }
+
+    fn open_application(&self, display: &Display, mimetypes: &[String], files: &[EntryObject]) {
+        let imp = self.imp();
+
+        let model = imp.list.model().and_downcast::<SingleSelection>().unwrap();
+        let Some(app) = model.selected_item().and_downcast::<AppInfo>() else {
+            return show_warning("No selected application");
+        };
+
+        debug!("Opening {} files with {:?}", files.len(), app.id());
+
+        if imp.set_default.is_active() {
+            if mimetypes.len() != 1 {
+                return show_error(format!(
+                    "Cannot set default application for {} mimetypes, this should never happen",
+                    mimetypes.len()
+                ));
+            }
+
+            info!("Setting default application for {} to {:?}", mimetypes[0], app.id());
+
+            if let Err(e) = app.set_as_default_for_type(&mimetypes[0]) {
+                show_error(format!("Error setting default application for {}: {e}", mimetypes[0]));
+            }
+
+            DEFAULT_CACHE.with(|c| c.borrow_mut().remove(&mimetypes[0]));
+        }
+
+        let context = display.app_launch_context();
+        context.set_timestamp(gtk::gdk::CURRENT_TIME);
+
+        let files: Vec<_> = files.iter().map(|f| File::for_path(&f.get().abs_path)).collect();
+        if let Err(e) = app.launch(&files, Some(&context)) {
+            show_error(format!("Application launch error: {app:?} {e:?}"));
+        }
     }
 }
 
 mod imp {
-    use std::cell::OnceCell;
-
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
-
-    use crate::com::EntryObject;
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "open_with.ui")]
@@ -116,13 +180,16 @@ mod imp {
         pub top_text: TemplateChild<gtk::Label>,
 
         #[template_child]
-        pub scroller: TemplateChild<gtk::ScrolledWindow>,
+        pub list: TemplateChild<gtk::ListView>,
 
         #[template_child]
         pub set_default: TemplateChild<gtk::CheckButton>,
 
-        pub mimetypes: OnceCell<Vec<String>>,
-        pub files: OnceCell<Vec<EntryObject>>,
+        #[template_child]
+        pub cancel: TemplateChild<gtk::Button>,
+
+        #[template_child]
+        pub open: TemplateChild<gtk::Button>,
     }
 
     #[glib::object_subclass]

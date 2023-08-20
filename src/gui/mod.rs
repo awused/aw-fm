@@ -144,9 +144,9 @@ impl Gui {
         let style = include_str!("style.css");
         if let Some(bg) = CONFIG.background_colour {
             window.remove_css_class("background");
-            window.add_css_class("main-nobg");
+            window.imp().overlay.add_css_class("main-nobg");
 
-            provider.load_from_data(&format!("{style}\n window {{ background: {bg}; }}"));
+            provider.load_from_data(&format!("{style}\n window.main {{ background: {bg}; }}"));
         } else {
             provider.load_from_data(style);
         }

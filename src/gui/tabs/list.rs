@@ -574,13 +574,27 @@ impl TabsList {
     }
 
     pub fn activate(&mut self) {
-        if let Some(active) = self.active {
-            let Some(index) = self.position(active) else {
-                unreachable!("Couldn't find tab for {active:?}");
-            };
+        let Some(active) = self.active else {
+            return warn!("Activate called with no active tab");
+        };
 
-            self.tabs[index].activate();
-        }
+        self.find(active).unwrap().activate();
+    }
+
+    pub fn active_open_default(&mut self) {
+        let Some(active) = self.active else {
+            return warn!("OpenDefault called with no active tab");
+        };
+
+        self.find(active).unwrap().open_default();
+    }
+
+    pub fn active_open_with(&mut self) {
+        let Some(active) = self.active else {
+            return warn!("OpenWith called with no active tab");
+        };
+
+        self.find(active).unwrap().open_with();
     }
 
     pub fn active_copy(&self) {

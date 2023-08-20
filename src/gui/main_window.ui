@@ -10,7 +10,7 @@
     </style>
 
     <child>
-      <object class="GtkOverlay">
+      <object class="GtkOverlay" id="overlay">
 
         <child>
           <object class="GtkBox">

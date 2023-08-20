@@ -112,8 +112,7 @@ impl Gui {
 
     pub(super) fn rename_dialog(self: &Rc<Self>, tab: TabId, path: Arc<Path>) {
         let Some(fname) = path.file_name() else {
-            info!("Can't rename without file name");
-            return;
+            return info!("Can't rename without file name");
         };
 
         let dialog = gtk::Window::builder()
@@ -230,7 +229,7 @@ impl Gui {
         entry.set_enable_undo(true);
     }
 
-    fn close_on_quit_or_esc<T: WidgetExt>(self: &Rc<Self>, w: &T) {
+    pub(super) fn close_on_quit_or_esc<T: WidgetExt>(self: &Rc<Self>, w: &T) {
         let key = gtk::EventControllerKey::new();
         let g = self.clone();
         key.connect_key_pressed(move |e, key, _b, mods| {
@@ -389,6 +388,8 @@ impl Gui {
             }
             "Help" => return self.help_dialog(),
             "Activate" => return tabs.activate(),
+            "OpenDefault" => return tabs.active_open_default(),
+            "OpenWith" => return tabs.active_open_with(),
 
             "Copy" => return tabs.active_copy(),
             "Cut" => return tabs.active_cut(),

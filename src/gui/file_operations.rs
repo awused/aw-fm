@@ -1058,11 +1058,10 @@ impl Gui {
         };
         let op = ops.swap_remove(index);
 
-        // Allow file system + notifies to settle for 10 + 6ms
-        // We dedupe notifications for at most 10ms, plus some margin, aiming for under 1 frame at
-        // 60fps.
-        // If this isn't enough it'll have to be explicit flushing and callbacks.
-        glib::timeout_add_local_once(Duration::from_millis(16), move || {
+        // Allow file system + notifies to settle.
+        // We dedupe notifications for at most 10ms, plus some margin.
+        // TODO -- explicit flushes and maybe an explicit read.
+        glib::timeout_add_local_once(Duration::from_millis(25), move || {
             tabs_run(|tlist| {
                 tlist.scroll_to_completed(op.tab, &op.kind, &op.progress.borrow().log)
             });

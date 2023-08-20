@@ -9,7 +9,7 @@ use gtk::gio::Cancellable;
 use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{SelectionModelExt, WidgetExt};
-use gtk::{AlertDialog, Orientation, PopoverMenu, Widget};
+use gtk::{AlertDialog, MultiSelection, Orientation, PopoverMenu, Widget};
 use MaybePane as MP;
 
 use self::flat_dir::FlatDir;
@@ -195,6 +195,14 @@ impl Tab {
 
     pub fn matches_arc(&self, other: &Arc<Path>) -> bool {
         Arc::ptr_eq(self.dir.path(), other)
+    }
+
+    const fn visible_selection(&self) -> &MultiSelection {
+        if let Some(search) = &self.search {
+            &search.contents().selection
+        } else {
+            &self.contents.selection
+        }
     }
 
     fn matching_mut<'a>(&'a self, other: &'a mut [Self]) -> impl Iterator<Item = &mut Self> {
@@ -682,12 +690,16 @@ impl Tab {
 
     pub fn activate(&self) {
         let display = self.element.display();
-        let selection = if let Some(search) = &self.search {
-            &search.contents().selection
-        } else {
-            &self.contents.selection
-        };
-        applications::activate(self.id(), &display, selection.into());
+        applications::open(self.id(), &display, self.visible_selection().into(), true);
+    }
+
+    pub fn open_default(&self) {
+        let display = self.element.display();
+        applications::open(self.id(), &display, self.visible_selection().into(), false);
+    }
+
+    pub fn open_with(&self) {
+        gui_run(|g| g.open_with(self.visible_selection().into()));
     }
 
     pub fn select_if_not(&self, eo: EntryObject) {
@@ -1238,12 +1250,7 @@ impl Tab {
     }
 
     pub fn content_provider(&self, operation: Operation) -> SelectionProvider {
-        let selection = self
-            .search
-            .as_ref()
-            .map_or(&self.contents.selection, |s| &s.contents().selection);
-
-        SelectionProvider::new(operation, selection)
+        SelectionProvider::new(operation, self.visible_selection())
     }
 
     pub fn set_clipboard(&self, operation: Operation) {
@@ -1292,25 +1299,16 @@ impl Tab {
 
     pub fn trash(&self) {
         info!("Trashing selected files in {:?}", self.id);
-        let sel = if let Some(search) = &self.search {
-            &search.contents().selection
-        } else {
-            &self.contents.selection
-        };
-
-        let files = Selected::from(sel).map(|eo| eo.get().abs_path.clone()).collect();
+        let files = Selected::from(self.visible_selection())
+            .map(|eo| eo.get().abs_path.clone())
+            .collect();
         Self::run_deletion(self.id(), files, Kind::Trash);
     }
 
     pub fn delete(&self) {
         info!("Spawning deletion confirmation dialog in {:?}", self.id);
-        let sel = if let Some(search) = &self.search {
-            &search.contents().selection
-        } else {
-            &self.contents.selection
-        };
 
-        let files = Selected::from(sel);
+        let files = Selected::from(self.visible_selection());
         let query = if files.len() == 0 {
             return;
         } else if files.len() == 1 {
@@ -1342,13 +1340,7 @@ impl Tab {
     }
 
     pub fn rename(&self) {
-        let sel = if let Some(search) = &self.search {
-            &search.contents().selection
-        } else {
-            &self.contents.selection
-        };
-
-        let mut files = Selected::from(sel);
+        let mut files = Selected::from(self.visible_selection());
         if files.len() != 1 {
             return info!("Can't rename {} files", files.len());
         }
@@ -1429,9 +1421,7 @@ impl Tab {
             return;
         }
 
-        let contents =
-            if let Some(search) = &self.search { search.contents() } else { &self.contents };
-        let selection = &contents.selection;
+        let selection = self.visible_selection();
 
         // TODO [incremental] -- if incremental filtering, must disable it now.
         let mut scroll_target = None;
@@ -1469,6 +1459,8 @@ impl Tab {
 
         info!("Scrolling to {pos:?} after completed operation in {:?}", self.id);
 
+        let contents =
+            if let Some(search) = &self.search { search.contents() } else { &self.contents };
         let mut state = self.pane.clone_state(contents);
         state.scroll_pos = Some(pos);
         self.pane.overwrite_state(state);
@@ -1478,9 +1470,7 @@ impl Tab {
 
     pub fn context_menu(&self) -> PopoverMenu {
         info!("Spawning context menu for {:?}", self.id());
-        let contents =
-            if let Some(search) = &self.search { search.contents() } else { &self.contents };
-        let sel: Vec<EntryObject> = Selected::from(&contents.selection).collect();
+        let sel: Vec<EntryObject> = Selected::from(self.visible_selection()).collect();
 
         gui_run(|g| g.menu.get().unwrap().prepare(g, self.settings, sel, &self.dir()))
     }
@@ -1493,19 +1483,18 @@ impl Tab {
     }
 
     pub fn selection_env_str(&self) -> OsString {
-        let selection = self
-            .search
-            .as_ref()
-            .map_or(&self.contents.selection, |s| &s.contents().selection);
+        let mut selected = Selected::from(self.visible_selection());
 
-        let set = selection.selection();
         let mut out = OsString::new();
-        for i in 0..set.size() {
-            let entry = selection.item(set.nth(i as u32)).and_downcast::<EntryObject>().unwrap();
-            out.push(entry.get().abs_path.as_os_str());
-            if i + 1 != set.size() {
-                out.push("\n");
-            }
+        let Some(first) = selected.next() else {
+            return out;
+        };
+
+        out.push(first.get().abs_path.as_os_str());
+
+        for next in selected {
+            out.push("\n");
+            out.push(next.get().abs_path.as_os_str());
         }
 
         out

@@ -4,6 +4,7 @@
     <property name="title">Open With</property>
     <property name="default-width">800</property>
     <property name="default-height">600</property>
+    <property name="modal">true</property>
 
     <child>
       <object class="GtkBox">
@@ -16,14 +17,42 @@
         </child>
 
         <child>
-          <object class="GtkScrolledWindow" id="scroller">
+          <object class="GtkScrolledWindow">
             <property name="hscrollbar_policy">never</property>
             <property name="overlay_scrolling">false</property>
+
+            <child>
+              <object class="GtkListView" id="list">
+                <property name="vexpand">true</property>
+
+              </object>
+            </child>
+
           </object>
         </child>
 
         <child>
           <object class="GtkCheckButton" id="set_default">
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="halign">GTK_ALIGN_END</property>
+
+            <child>
+              <object class="GtkButton" id="cancel">
+                <property name="label">Cancel</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkButton" id="open">
+                <property name="label">Open</property>
+              </object>
+            </child>
+
           </object>
         </child>
       </object>

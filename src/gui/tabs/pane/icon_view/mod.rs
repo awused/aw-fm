@@ -91,7 +91,7 @@ impl IconView {
             let display = gv.display();
             let model = &gv.model().and_downcast::<MultiSelection>().unwrap();
 
-            applications::activate(tab, &display, model.into())
+            applications::open(tab, &display, model.into(), true)
         });
 
 

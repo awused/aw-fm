@@ -15,6 +15,7 @@ actually do.
   * A reasonably complete set of text commands to control the application.
   * Define custom shortcuts, custom bookmarks, and custom context menu actions.
 * A UI charitably described as minimal.
+  * Panes/splits work out of the box, but are maybe _too_ flexible.
 * Custom actions showing up in context menus.
   * Just flat scripts, easy to write and back up.
 * Not much more, anything I don't personally use doesn't get implemented.
@@ -83,8 +84,16 @@ specify them.
   * This shouldn't be necessary unless file system notifies are incomplete,
     like over NFS.
 * `Activate`
-  * The same as hitting enter or using "Open" in the menu on selected files.
-  * It is not recommended to bind this as a shortcut
+  * The same as hitting enter or double clicking on the selected file(s).
+  * This will run executable files or open non-executable files in their default
+    applications.
+  * It is not recommended to bind this as a shortcut.
+* `OpenDefault`
+  * Opens the selected files in their default applications.
+  * Will _not_ run executable files.
+* `OpenWith`
+  * Spawns a fairly standard "Open With" dialog to select the application.
+  * Allows changing the default application. <!-- or defining new applications. -->
 * `Cut`/`Copy`
   * Cuts or copies the current selection.
   * Will set the clipboard even if nothing is selected.

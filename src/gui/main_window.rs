@@ -23,6 +23,9 @@ mod imp {
     #[template(file = "main_window.ui")]
     pub struct MainWindow {
         #[template_child]
+        pub overlay: TemplateChild<gtk::Overlay>,
+
+        #[template_child]
         pub tabs: TemplateChild<gtk::ListView>,
 
         #[template_child]
