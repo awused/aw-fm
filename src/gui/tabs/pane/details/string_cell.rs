@@ -81,7 +81,6 @@ mod imp {
     use std::borrow::Cow;
     use std::cell::{Cell, RefCell};
 
-    use chrono::{Local, TimeZone};
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
@@ -133,12 +132,7 @@ mod imp {
                 EntryString::Unset => unreachable!(),
                 EntryString::Name => entry.name.to_string_lossy(),
                 EntryString::Size => Cow::Owned(entry.short_size_string()),
-                EntryString::Modified => {
-                    // Only use seconds for columns
-                    let localtime = Local.timestamp_opt(entry.mtime.sec as i64, 0).unwrap();
-                    let text = localtime.format("%Y-%m-%d %H:%M:%S");
-                    Cow::Owned(format!("{text}"))
-                }
+                EntryString::Modified => Cow::Owned(entry.mtime.seconds_string()),
             };
 
             if !matches!(self.contents.text(), Some(existing) if existing.as_str() == new_text) {

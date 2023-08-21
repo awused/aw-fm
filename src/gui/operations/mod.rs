@@ -18,12 +18,16 @@ use gtk::prelude::{CancellableExt, FileExt, FileExtManual};
 use once_cell::unsync::Lazy;
 use regex::bytes::{Captures, Match, Regex};
 
+use self::ask::{DirChoice, FileChoice};
 use super::tabs::id::TabId;
 use super::{gui_run, Gui};
 use crate::com::Update::Removed;
 use crate::com::{GuiAction, Update};
 use crate::config::{DirectoryCollision, FileCollision, CONFIG};
+use crate::gui::operations::ask::AskDialog;
 use crate::gui::{show_error, show_warning, tabs_run};
+
+mod ask;
 
 thread_local! {
     static COPY_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"^(.*)( \(copy (\d+)\))(\.[^/]+)?$").unwrap());
@@ -171,9 +175,21 @@ impl Directory {
 }
 
 #[derive(Debug)]
-enum Asking {
-    Directory(PathBuf, PathBuf),
-    File(PathBuf, PathBuf),
+enum Conflict {
+    // TODO -- support file -> folder and folder -> file, but only for Ask
+    // BothDirectories
+    // DirectorySource
+    // FileSource
+    Directory(Arc<Path>, PathBuf),
+    File(Arc<Path>, PathBuf),
+}
+
+impl Conflict {
+    const fn pair(&self) -> (&Arc<Path>, &PathBuf) {
+        match self {
+            Self::Directory(a, b) | Self::File(a, b) => (a, b),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -188,11 +204,13 @@ pub struct Progress {
     // Would be nice to compute this more eagerly so it gets ahead of the processing
     total: usize,
 
-    // For Ask
-    pending_pair: Option<Asking>,
+    pending_pair: Option<Conflict>,
 
     directory_collisions: DirectoryCollision,
     file_collisions: FileCollision,
+    // Used when "ask" is only setting a result for this particular file/folder.
+    directory_override_next: Option<DirectoryCollision>,
+    file_override_next: Option<FileCollision>,
 
     // Maps prefix + to last highest existing number
     collision_cache: AHashMap<(OsString, OsString), usize>,
@@ -215,6 +233,16 @@ enum NextRemove {
 
 impl Progress {
     fn next_copymove_pair(&mut self, dest_root: &Path) -> Option<NextCopyMove> {
+        #[allow(clippy::single_match)]
+        match self.pending_pair.take() {
+            Some(Conflict::Directory(src, dst) | Conflict::File(src, dst)) => {
+                return Some(NextCopyMove::Files(src, dst));
+            }
+            None => {
+                // Shutup clippy
+            }
+        }
+
         if let Some(dir) = &mut self.dirs.last_mut() {
             for next in dir.iter.by_ref() {
                 let name = match next {
@@ -358,6 +386,48 @@ impl Progress {
 
         None
     }
+
+    fn directory_strat(&mut self) -> DirectoryCollision {
+        self.directory_override_next.take().unwrap_or(self.directory_collisions)
+    }
+
+    fn set_directory_strat(&mut self, choice: DirChoice) {
+        match choice {
+            DirChoice::Skip(false) => {
+                self.directory_override_next = Some(DirectoryCollision::Skip);
+            }
+            DirChoice::Merge(false) => {
+                self.directory_override_next = Some(DirectoryCollision::Merge);
+            }
+            DirChoice::Skip(true) => {
+                self.directory_collisions = DirectoryCollision::Skip;
+            }
+            DirChoice::Merge(true) => {
+                self.directory_collisions = DirectoryCollision::Merge;
+            }
+            DirChoice::Rename(name) => todo!(),
+        }
+    }
+
+    fn file_strat(&mut self) -> FileCollision {
+        self.file_override_next.take().unwrap_or(self.file_collisions)
+    }
+
+    fn set_file_strat(&mut self, choice: FileChoice) {
+        match choice.collision() {
+            Some((true, c)) => return self.file_collisions = c,
+            Some((false, c)) => return self.file_override_next = Some(c),
+            None => {}
+        }
+
+        match choice {
+            FileChoice::Skip(_)
+            | FileChoice::Overwrite(_)
+            | FileChoice::AutoRename(_)
+            | FileChoice::Newer(_) => unreachable!(),
+            FileChoice::Rename(_) => todo!(),
+        }
+    }
 }
 
 impl Drop for Progress {
@@ -440,7 +510,7 @@ impl Operation {
 
 
         let rc = Rc::new_cyclic(|weak: &Weak<Self>| {
-            // Start with no timeout.
+            // Start with nothing shown.
             let w = weak.clone();
             let update_timeout = glib::timeout_add_local_once(Duration::from_secs(1), move || {
                 let Some(op) = w.upgrade() else {
@@ -465,6 +535,8 @@ impl Operation {
                 pending_pair: None,
                 directory_collisions: CONFIG.directory_collisions,
                 file_collisions: CONFIG.file_collisions,
+                directory_override_next: None,
+                file_override_next: None,
 
                 collision_cache: AHashMap::default(),
 
@@ -715,8 +787,8 @@ impl Operation {
                 ));
             }
 
-            match progress.file_collisions {
-                FileCollision::_Ask => todo!(),
+            match progress.file_strat() {
+                FileCollision::Ask => todo!(),
                 FileCollision::Overwrite => {
                     trace!("Overwriting target file {dst:?}");
                     overwrite = true;
@@ -773,8 +845,15 @@ impl Operation {
                 ));
             }
 
-            match progress.directory_collisions {
-                DirectoryCollision::_Ask => todo!(),
+            match progress.directory_strat() {
+                DirectoryCollision::Ask => {
+                    debug!("Conflict: {src:?}, existing directory {dst:?}");
+                    progress.pending_pair = Some(Conflict::Directory(src, dst));
+                    drop(progress);
+                    gui_run(|g| AskDialog::show(g, self.clone()));
+
+                    return CopyMovePrep::Asking;
+                }
                 DirectoryCollision::Merge => {
                     debug!("Merging {src:?} into existing directory {dst:?}");
                 }
@@ -952,7 +1031,7 @@ impl Operation {
                     //
                     // For a search-only deletion and silly rename this won't be enough, but that's
                     // enough of an edge case to not be a major concern.
-                    gui_run(|g| g.handle_update(GuiAction::Update(Update::Removed(path.into()))));
+                    gui_run(|g| g.handle_update(GuiAction::Update(Update::Removed(path))));
 
                     s.progress.borrow_mut().push_outcome(if was_dir {
                         Outcome::DeleteDir
@@ -1045,7 +1124,10 @@ impl Operation {
     }
 
     fn cancel(&self) {
-        info!("Cancelling operation {:?}", self.kind,);
+        info!("Cancelling operation {:?}", self.kind);
+        // Nothing was done for these, cancel them
+        self.progress.borrow_mut().pending_pair.take();
+        // TODO -- close the ask dialog if it is open
         self.cancellable.cancel();
     }
 }

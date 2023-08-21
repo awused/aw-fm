@@ -13,7 +13,7 @@ use gtk::{gdk, gio, glib, MultiSelection};
 use strum_macros::{EnumString, IntoStaticStr};
 
 use super::tabs::id::TabId;
-use crate::gui::{file_operations, gui_run, Selected};
+use crate::gui::{gui_run, operations, Selected};
 
 pub const SPECIAL: &str = "x-special/aw-fm-copied-files";
 pub const SPECIAL_MATE: &str = "x-special/mate-copied-files";
@@ -102,8 +102,8 @@ fn bytes_to_operation(tab: TabId, path: Arc<Path>, uri_list: bool, bytes: &[u8])
 
     glib::idle_add_once(move || {
         let kind = match operation {
-            Operation::Copy => file_operations::Kind::Copy(path),
-            Operation::Cut => file_operations::Kind::Move(path),
+            Operation::Copy => operations::Kind::Copy(path),
+            Operation::Cut => operations::Kind::Move(path),
         };
 
         gui_run(|g| g.start_operation(tab, kind, files));
@@ -205,7 +205,6 @@ pub fn handle_drop(drop_ev: &gdk::Drop, tab: TabId, path: Arc<Path>) -> bool {
     } else {
         actions
     };
-    println!("{actions}");
 
     let dr = drop_ev.clone();
     drop_ev.read_async(

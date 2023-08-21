@@ -23,7 +23,7 @@ use super::Gui;
 use crate::closing;
 use crate::com::{DisplayMode, ManagerAction, SortDir, SortMode};
 use crate::config::CONFIG;
-use crate::gui::file_operations::Kind;
+use crate::gui::operations::Kind;
 use crate::gui::{gui_run, show_warning};
 
 mod help;

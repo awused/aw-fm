@@ -57,7 +57,7 @@ pub struct ContextMenuEntry {
 #[serde(rename_all = "lowercase")]
 pub enum DirectoryCollision {
     #[default]
-    _Ask,
+    Ask,
     Merge,
     Skip,
 }
@@ -66,7 +66,7 @@ pub enum DirectoryCollision {
 #[serde(rename_all = "lowercase")]
 pub enum FileCollision {
     #[default]
-    _Ask,
+    Ask,
     Overwrite,
     Rename,
     Newer,

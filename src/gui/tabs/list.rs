@@ -19,8 +19,8 @@ use crate::com::{
 };
 use crate::database::Session;
 use crate::gui::clipboard::Operation;
-use crate::gui::file_operations::{Kind, Outcome};
 use crate::gui::main_window::MainWindow;
+use crate::gui::operations::{Kind, Outcome};
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
 use crate::gui::{gui_run, show_error, show_warning, tabs_run};

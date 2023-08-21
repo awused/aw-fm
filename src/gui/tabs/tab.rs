@@ -25,7 +25,7 @@ use crate::com::{
 };
 use crate::config::CONFIG;
 use crate::gui::clipboard::{handle_clipboard, handle_drop, Operation, SelectionProvider};
-use crate::gui::file_operations::{Kind, Outcome};
+use crate::gui::operations::{Kind, Outcome};
 use crate::gui::tabs::PartiallyAppliedUpdate;
 use crate::gui::{applications, gui_run, show_error, show_warning, Selected, Update};
 
@@ -723,11 +723,11 @@ impl Tab {
 
         for i in range {
             let eo = contents.selection.item(i).and_downcast::<EntryObject>().unwrap();
-            if !eo.get().name.lowercase().contains(&fragment) {
+            if !eo.matches_seek(&fragment) {
                 continue;
             }
 
-            // TODO [gtk4.12]-- explicitly focus
+            // TODO [gtk4.12]-- explicitly focus, which doesn't work yet.
             debug!("Seeking to {:?}", &*eo.get().name);
 
             contents.selection.select_item(i, true);

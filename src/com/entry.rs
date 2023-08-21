@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ahash::AHashMap;
+use chrono::{Local, TimeZone};
 use gtk::gdk::Texture;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
@@ -66,6 +67,14 @@ impl PartialOrd for FileTime {
 impl fmt::Debug for FileTime {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "time: {}, {}", self.sec, self.usec)
+    }
+}
+
+impl FileTime {
+    pub fn seconds_string(self) -> String {
+        let localtime = Local.timestamp_opt(self.sec as i64, 0).unwrap();
+        let text = localtime.format("%Y-%m-%d %H:%M:%S");
+        format!("{text}")
     }
 }
 
@@ -565,6 +574,7 @@ mod internal {
             }
         }
 
+        // Texture is refcounted, so this is cheap
         pub fn thumbnail(&self) -> Option<Texture> {
             let b = self.0.borrow();
             let thumb = &b.as_ref().unwrap().thumbnail;
@@ -718,6 +728,12 @@ impl EntryObject {
     }
 
     pub fn icon(&self) -> Icon {
+        // 5-6 microseconds, so doing it all up-front for a large directory would be too wasteful
+        // Memoizing it seems questionable given the low cost
         Icon::deserialize(&self.get().icon).unwrap()
+    }
+
+    pub fn matches_seek(&self, lowercase: &str) -> bool {
+        self.get().name.lowercase().contains(lowercase)
     }
 }

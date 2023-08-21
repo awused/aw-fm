@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="AwFmAskDialog" parent="GtkWindow">
+    <property name="title">Conflict</property>
+    <property name="default-width">600</property>
+    <property name="modal">true</property>
+
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">16</property>
+
+        <child>
+          <object class="GtkLabel" id="top_text">
+            <style>
+              <class name="title-4" />
+            </style>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="halign">center</property>
+            <style>
+              <class name="short-properties"/>
+            </style>
+
+            <child>
+              <object class="GtkImage" id="original_icon">
+                <property name="margin-top">6</property>
+                <property name="margin-bottom">6</property>
+                <property name="margin-start">6</property>
+                <property name="margin-end">6</property>
+                <property name="pixel-size">128</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="valign">center</property>
+
+                <child>
+                  <object class="GtkLabel">
+                    <property name="halign">start</property>
+                    <property name="label">Source</property>
+                    <style>
+                      <class name="title-4" />
+                    </style>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkLabel" id="original_size">
+                    <property name="halign">start</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkLabel" id="original_mtime">
+                    <property name="halign">start</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="halign">center</property>
+            <style>
+              <class name="short-properties"/>
+            </style>
+
+            <child>
+              <object class="GtkImage" id="new_icon">
+                <property name="margin-top">6</property>
+                <property name="margin-bottom">6</property>
+                <property name="margin-start">6</property>
+                <property name="margin-end">6</property>
+                <property name="pixel-size">128</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="valign">center</property>
+
+                <child>
+                  <object class="GtkLabel">
+                    <property name="halign">start</property>
+                    <property name="label">Destination</property>
+                    <style>
+                      <class name="title-4" />
+                    </style>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkLabel" id="new_size">
+                    <property name="halign">start</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkLabel" id="new_mtime">
+                    <property name="halign">start</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkCheckButton" id="use_rest">
+            <property name="halign">GTK_ALIGN_CENTER</property>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">8</property>
+            <property name="halign">GTK_ALIGN_END</property>
+
+            <child>
+              <object class="GtkButton" id="cancel">
+                <property name="label">Cancel</property>
+                <property name="width-request">96</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkButton" id="skip">
+                <property name="label">Skip</property>
+                <property name="width-request">96</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkButton" id="merge">
+                <property name="label">Merge</property>
+                <property name="width-request">96</property>
+                <property name="visible">false</property>
+              </object>
+            </child>
+
+            <!-- <child> -->
+            <!--   <object class="GtkButton" id="open"> -->
+            <!--     <property name="label">Open</property> -->
+            <!--   </object> -->
+            <!-- </child> -->
+
+          </object>
+        </child>
+
+      </object>
+    </child>
+  </template>
+</interface>
+

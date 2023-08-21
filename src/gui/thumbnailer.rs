@@ -3,8 +3,10 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
 
+use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailFactoryExt};
 use gtk::gdk::Texture;
-use gtk::glib::WeakRef;
+use gtk::gio::{Cancellable, File};
+use gtk::glib::{Quark, WeakRef};
 use gtk::prelude::FileExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -44,17 +46,17 @@ pub struct Thumbnailer {
 
     high: u16,
     low: u16,
+
+    sync_factory: DesktopThumbnailFactory,
 }
 
 impl Thumbnailer {
     pub fn new() -> Self {
         let high = CONFIG.max_thumbnailers as u16;
         let low = CONFIG.background_thumbnailers as u16;
+        let (sync_factory, factories) = SendFactory::make(high);
 
-        let pending = PendingThumbs {
-            factories: SendFactory::make(high),
-            ..PendingThumbs::default()
-        };
+        let pending = PendingThumbs { factories, ..PendingThumbs::default() };
 
         let pool = ThreadPoolBuilder::new()
             .thread_name(|n| format!("thumbnailer-{n}"))
@@ -63,7 +65,13 @@ impl Thumbnailer {
             .build()
             .unwrap();
 
-        Self { pending: pending.into(), pool, high, low }
+        Self {
+            pending: pending.into(),
+            pool,
+            high,
+            low,
+            sync_factory,
+        }
     }
 
     pub fn queue(&self, weak: WeakRef<EntryObject>, p: ThumbPriority, from_event: bool) {
@@ -207,9 +215,7 @@ impl Thumbnailer {
             //
             // Also can't trust mtime to make sense according to wall time or UTC time.
             if !from_event {
-                let existing = factory.lookup(&uri, mtime.sec);
-
-                if let Some(existing) = existing {
+                if let Some(existing) = factory.lookup(&uri, mtime.sec) {
                     let gfile = gtk::gio::File::for_path(existing);
                     match Texture::from_file(&gfile) {
                         Ok(tex) => {
@@ -251,6 +257,39 @@ impl Thumbnailer {
 
         self.pool.spawn(gen_thumb);
     }
+
+    // This is for dialogs and other places that may grab a very small number of thumbnails.
+    // In the worst case, this could be very slow and blocking the UI, but that should be rare.
+    //
+    // Worst-case we can make this async and parallel as well, but that shouldn't be necessary.
+    pub(super) fn sync_thumbnail(&self, p: &Path, mime: &str, mtime: FileTime) -> Option<Texture> {
+        info!("Synchronously loading a thumbnail for {p:?}");
+
+        let uri = File::for_path(p).uri();
+
+        if let Some(existing) = self.sync_factory.lookup(&uri, mtime.sec as i64) {
+            let thumb = gtk::gio::File::for_path(existing);
+            match Texture::from_file(&thumb) {
+                Ok(tex) => {
+                    return Some(tex);
+                }
+                Err(e) => {
+                    error!("Failed to load existing thumbnail: {e:?}");
+                    return None;
+                }
+            }
+        }
+
+        if self.sync_factory.has_valid_failed_thumbnail(&uri, mtime.sec as i64) {
+            return None;
+        }
+
+        if !self.sync_factory.can_thumbnail(&uri, mime, mtime.sec as i64) {
+            return None;
+        }
+
+        generate_and_save_thumbnail(&self.sync_factory, &uri, mime, mtime.sec, false)
+    }
 }
 
 
@@ -260,11 +299,8 @@ mod send {
     use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailSize};
     use gtk::gdk::Texture;
     use gtk::gio::glib::GString;
-    use gtk::gio::Cancellable;
     use gtk::glib::ffi::{g_thread_self, GThread};
-    use gtk::glib::Quark;
 
-    use crate::closing;
 
     #[derive(Debug)]
     pub(super) struct SendFactory(DesktopThumbnailFactory, *mut GThread);
@@ -300,18 +336,18 @@ mod send {
     }
 
     impl SendFactory {
-        pub fn make(n: u16) -> Vec<Self> {
+        pub fn make(n: u16) -> (DesktopThumbnailFactory, Vec<Self>) {
+            let f = DesktopThumbnailFactory::new(DesktopThumbnailSize::Normal);
             let mut factories = Vec::with_capacity(n as usize);
             if n > 0 {
                 let current_thread = unsafe { g_thread_self() };
-                let f = DesktopThumbnailFactory::new(DesktopThumbnailSize::Normal);
 
                 for _ in 0..n {
                     factories.push(Self(f.clone(), current_thread));
                 }
             }
 
-            factories
+            (f, factories)
         }
 
         pub fn lookup(&self, uri: &str, mtime_sec: u64) -> Option<GString> {
@@ -336,54 +372,61 @@ mod send {
             mtime_sec: u64,
             from_event: bool,
         ) -> Option<Texture> {
-            let generated = self.0.generate_thumbnail(uri, mime_type, None::<&Cancellable>);
+            super::generate_and_save_thumbnail(&self.0, uri, mime_type, mtime_sec, from_event)
+        }
+    }
+}
 
-            let pb = match generated {
-                Ok(pb) => pb,
-                Err(e) => {
-                    if closing::closed() {
-                        return None;
-                    }
+pub fn generate_and_save_thumbnail(
+    factory: &DesktopThumbnailFactory,
+    uri: &str,
+    mime_type: &str,
+    mtime_sec: u64,
+    from_event: bool,
+) -> Option<Texture> {
+    let generated = factory.generate_thumbnail(uri, mime_type, Cancellable::NONE);
 
-                    if e.domain() == Quark::from_str("g-exec-error-quark") {
-                        // These represent errors with the thumbnail process itself, such as being
-                        // killed. If the process exits on its own but fails the
-                        // domain will be g-spawn-exit-error-quark.
-                        error!("Thumbnailing failed abnormally for {uri:?} ({mime_type}): {e}");
-                        return None;
-                    }
-
-                    error!(
-                        "Failed to generate thumbnail for {uri:?} ({mime_type}) from_event: \
-                         {from_event}: {e}"
-                    );
-                    // Don't store failed thumbnails for updates from events, as the second-level
-                    // precision causes problems. This means it will be retried later, but that's
-                    // fine.
-                    if !from_event {
-                        if let Err(e) = self.0.create_failed_thumbnail(
-                            uri,
-                            mtime_sec as i64,
-                            None::<&Cancellable>,
-                        ) {
-                            // Not a serious error for aw-fm, we will still skip trying multiple
-                            // times, but it will be retried
-                            // unnecessarily in the future.
-                            error!("Failed to save failed thumbnail for {uri:?}: {e}");
-                        }
-                    }
-                    return None;
-                }
-            };
-
-            if let Err(e) = self.0.save_thumbnail(&pb, uri, mtime_sec as i64, None::<&Cancellable>)
-            {
-                error!("Failed to save thumbnail for {uri:?}: {e}");
-                // Don't try to save a failed thumbnail here. We can retry in the future.
+    let pb = match generated {
+        Ok(pb) => pb,
+        Err(e) => {
+            if closing::closed() {
                 return None;
             }
 
-            Some(Texture::for_pixbuf(&pb))
+            if e.domain() == Quark::from_str("g-exec-error-quark") {
+                // These represent errors with the thumbnail process itself, such as being
+                // killed. If the process exits on its own but fails the
+                // domain will be g-spawn-exit-error-quark.
+                error!("Thumbnailing failed abnormally for {uri:?} ({mime_type}): {e}");
+                return None;
+            }
+
+            error!(
+                "Failed to generate thumbnail for {uri:?} ({mime_type}) from_event: {from_event}: \
+                 {e}"
+            );
+            // Don't store failed thumbnails for updates from events, as the second-level
+            // precision causes problems. This means it will be retried later, but that's
+            // fine.
+            if !from_event {
+                if let Err(e) =
+                    factory.create_failed_thumbnail(uri, mtime_sec as i64, Cancellable::NONE)
+                {
+                    // Not a serious error for aw-fm, we will still skip trying multiple
+                    // times, but it will be retried
+                    // unnecessarily in the future.
+                    error!("Failed to save failed thumbnail for {uri:?}: {e}");
+                }
+            }
+            return None;
         }
+    };
+
+    if let Err(e) = factory.save_thumbnail(&pb, uri, mtime_sec as i64, Cancellable::NONE) {
+        error!("Failed to save thumbnail for {uri:?}: {e}");
+        // Don't try to save a failed thumbnail here. We can retry in the future.
+        return None;
     }
+
+    Some(Texture::for_pixbuf(&pb))
 }

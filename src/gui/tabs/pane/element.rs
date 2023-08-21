@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 use gtk::gdk::{DragAction, Key, ModifierType};
 use gtk::glib::Propagation;
-use gtk::prelude::{Cast, CastNone, ListModelExt};
+use gtk::prelude::{Cast, CastNone, ListModelExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
     EditableExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
@@ -51,15 +51,14 @@ pub(super) struct PaneSignals(SignalHolder<MultiSelection>, SignalHolder<MultiSe
 impl PaneElement {
     pub(super) fn new(tab: TabId, selection: &MultiSelection) -> (Self, PaneSignals) {
         let s: Self = glib::Object::new();
+        s.imp().tab.set(tab).unwrap();
+
         let signals = s.setup_signals(selection);
 
         s.add_controllers(tab);
 
-        let imp = s.imp();
-
-        imp.tab.set(tab).unwrap();
-        imp.text_entry.set_enable_undo(true);
-        imp.stack.set_visible_child_name(&Count);
+        s.imp().text_entry.set_enable_undo(true);
+        s.imp().stack.set_visible_child_name(&Count);
 
         s.connect_destroy(move |_| trace!("Pane for {tab:?} destroyed"));
         (s, signals)
@@ -168,123 +167,53 @@ impl PaneElement {
         let seek_controller = gtk::EventControllerKey::new();
         seek_controller.connect_key_pressed(move |kc, key, _, mods| {
             let pane = kc.widget().parent().and_downcast::<Self>().unwrap();
-            let seek = &pane.imp().seek;
-            let stack = &pane.imp().stack;
-
-            if !mods.difference(ModifierType::SHIFT_MASK).is_empty() {
-                return Propagation::Proceed;
-            }
-
-            let seek_visible = stack.visible_child_name().map_or(false, |n| n == *Seek);
-
-            if seek_visible {
-                if key == Key::Tab || key == Key::ISO_Left_Tab {
-                    let t = seek.text();
-                    if mods.is_empty() {
-                        debug!("Seek next \"{t}\" in {tab:?}");
-                        tabs_run(move |tlist| {
-                            tlist.find_mut(tab).unwrap().seek_next(&t);
-                        });
-                    } else if mods.contains(ModifierType::SHIFT_MASK) {
-                        tabs_run(move |tlist| {
-                            debug!("Seek prev \"{t}\" in {tab:?}");
-                            tlist.find_mut(tab).unwrap().seek_prev(&t);
-                        });
-                    }
-                    return Propagation::Stop;
-                }
-
-                let handled = if key == Key::BackSpace {
-                    let t = seek.text();
-                    let mut chars = t.chars();
-                    chars.next_back();
-                    seek.set_text(chars.as_str());
-                    // No need to do any seek here?
-                    true
-                } else if key == Key::Escape {
-                    seek.set_text("");
-                    true
-                } else {
-                    false
-                };
-
-                if handled {
-                    if seek.text().is_empty() {
-                        debug!("Closing seek in {tab:?}");
-                        if pane.imp().selection.text().is_empty() {
-                            stack.set_visible_child_name(&Count);
-                        } else {
-                            stack.set_visible_child_name(&Selection);
-                        }
-                    }
-                    return Propagation::Stop;
-                }
-            }
-
-            let Some(c) = key.to_unicode() else {
-                return Propagation::Proceed;
-            };
-
-            // Allow ^ for prefix matching?
-            if !c.is_alphanumeric() {
-                return Propagation::Proceed;
-            }
-
-            let mut t = seek.text().to_string();
-            t.push(c);
-            seek.set_text(&t);
-
-            if !seek_visible {
-                debug!("Opening seek in {tab:?}");
-                stack.set_visible_child_name(&Seek);
-            }
-
-            debug!("Seek to \"{t}\" in {tab:?}");
-            tabs_run(move |tlist| {
-                tlist.find_mut(tab).unwrap().seek(&t);
-            });
-
-            Propagation::Stop
+            pane.handle_seek(key, mods)
         });
 
         self.imp().scroller.add_controller(seek_controller);
     }
 
     pub(super) fn setup_signals(&self, selection: &MultiSelection) -> PaneSignals {
-        let count_label = &*self.imp().count;
-        let selection_label = &*self.imp().selection;
-        let stack = &*self.imp().stack;
+        self.imp().count.set_text(&format!("{} items", selection.n_items()));
 
-        let count = count_label.clone();
-
-        count.set_text(&format!("{} items", selection.n_items()));
-        let stk = stack.clone();
+        let w = self.downgrade();
         let count_signal = selection.connect_items_changed(move |list, _p, _a, _r| {
+            let s = w.upgrade().unwrap();
+            let imp = s.imp();
+
+            s.maybe_close_seek(list);
+
             // There is no selection_changed event on item removal
             // selection().size() is comparatively expensive but unavoidable.
-            if stk.visible_child_name().map_or(false, |n| n != *Count && n != *Seek)
+
+            if imp.stack.visible_child_name().map_or(false, |n| n != *Count && n != *Seek)
                 && (list.n_items() == 0 || list.selection().size() == 0)
             {
-                stk.set_visible_child_name(&Count);
+                imp.stack.set_visible_child_name(&Count);
             }
-            count.set_text(&format!("{} items", list.n_items()));
+
+            imp.count.set_text(&format!("{} items", list.n_items()));
         });
         let count_signal = SignalHolder::new(selection, count_signal);
 
-        let selected = selection_label.clone();
-        let stk = stack.clone();
+        let w = self.downgrade();
         let update_selected = move |selection: &MultiSelection, _p: u32, _n: u32| {
+            let s = w.upgrade().unwrap();
+            let imp = s.imp();
+
+            // Not perfectly efficient, but we'll only run Selected::from twice in the worst case.
+            s.maybe_close_seek(selection);
+
             let mut sel = Selected::from(selection);
             let len = sel.len();
             if len == 0 {
-                selected.set_text("");
+                imp.selection.set_text("");
 
-                if stk.visible_child_name().map_or(false, |n| n != *Count && n != *Seek) {
-                    stk.set_visible_child_name(&Count);
+                if imp.stack.visible_child_name().map_or(false, |n| n != *Count && n != *Seek) {
+                    imp.stack.set_visible_child_name(&Count);
                 }
                 return;
             }
-
 
             let text = if len == 1 {
                 let eo = sel.next().unwrap();
@@ -301,11 +230,11 @@ impl PaneElement {
                 selected_string(sel)
             };
 
-            selected.set_text(&text);
-            selected.set_tooltip_text(Some(&text));
+            imp.selection.set_text(&text);
+            imp.selection.set_tooltip_text(Some(&text));
 
-            if stk.visible_child_name().map_or(false, |n| n != *Selection && n != *Seek) {
-                stk.set_visible_child_name(&Selection);
+            if imp.stack.visible_child_name().map_or(false, |n| n != *Selection && n != *Seek) {
+                imp.stack.set_visible_child_name(&Selection);
             }
         };
 
@@ -316,6 +245,107 @@ impl PaneElement {
         let selection_signal = SignalHolder::new(selection, selection_signal);
 
         PaneSignals(count_signal, selection_signal)
+    }
+
+    fn maybe_close_seek(&self, list: &MultiSelection) {
+        let imp = self.imp();
+        let tab = *imp.tab.get().unwrap();
+
+        if imp.stack.visible_child_name().map_or(false, |n| n == *Seek) {
+            let mut sel = Selected::from(list);
+            if sel.len() == 0 {
+                imp.stack.set_visible_child_name(&Count);
+            } else if sel.len() > 1
+                || !sel.next().unwrap().matches_seek(&imp.seek.text().to_lowercase())
+            {
+                imp.stack.set_visible_child_name(&Selection);
+            } else {
+                return;
+            }
+
+            debug!("Closing seek in {tab:?}");
+            imp.seek.set_text("");
+        }
+    }
+
+    fn handle_seek(&self, key: Key, mods: ModifierType) -> Propagation {
+        let seek = &self.imp().seek;
+        let stack = &self.imp().stack;
+        let tab = *self.imp().tab.get().unwrap();
+
+        if !mods.difference(ModifierType::SHIFT_MASK).is_empty() {
+            return Propagation::Proceed;
+        }
+
+        let seek_visible = stack.visible_child_name().map_or(false, |n| n == *Seek);
+
+        if seek_visible {
+            if key == Key::Tab || key == Key::ISO_Left_Tab {
+                let t = seek.text();
+                if mods.is_empty() {
+                    debug!("Seek next \"{t}\" in {tab:?}");
+                    tabs_run(move |tlist| {
+                        tlist.find_mut(tab).unwrap().seek_next(&t);
+                    });
+                } else if mods.contains(ModifierType::SHIFT_MASK) {
+                    tabs_run(move |tlist| {
+                        debug!("Seek prev \"{t}\" in {tab:?}");
+                        tlist.find_mut(tab).unwrap().seek_prev(&t);
+                    });
+                }
+                return Propagation::Stop;
+            }
+
+            let handled = if key == Key::BackSpace {
+                let t = seek.text();
+                let mut chars = t.chars();
+                chars.next_back();
+                seek.set_text(chars.as_str());
+                // No need to do any seek here?
+                true
+            } else if key == Key::Escape {
+                seek.set_text("");
+                true
+            } else {
+                false
+            };
+
+            if handled {
+                if seek.text().is_empty() {
+                    debug!("Closing seek in {tab:?}");
+                    if self.imp().selection.text().is_empty() {
+                        stack.set_visible_child_name(&Count);
+                    } else {
+                        stack.set_visible_child_name(&Selection);
+                    }
+                }
+                return Propagation::Stop;
+            }
+        }
+
+        let Some(c) = key.to_unicode() else {
+            return Propagation::Proceed;
+        };
+
+        // Allow ^ for prefix matching?
+        if !c.is_alphanumeric() {
+            return Propagation::Proceed;
+        }
+
+        let mut t = seek.text().to_string();
+        t.push(c);
+        seek.set_text(&t);
+
+        if !seek_visible {
+            debug!("Opening seek in {tab:?}");
+            stack.set_visible_child_name(&Seek);
+        }
+
+        debug!("Seek to \"{t}\" in {tab:?}");
+        tabs_run(move |tlist| {
+            tlist.find_mut(tab).unwrap().seek(&t);
+        });
+        Propagation::Stop
     }
 }
 

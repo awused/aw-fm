@@ -10,8 +10,8 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib, Bitset, MultiSelection};
 use tokio::sync::mpsc::UnboundedSender;
 
-use self::file_operations::Operation;
 use self::main_window::MainWindow;
+use self::operations::Operation;
 use self::tabs::list::TabsList;
 use self::thumbnailer::Thumbnailer;
 use super::com::*;
@@ -21,10 +21,10 @@ use crate::database::DBCon;
 
 mod applications;
 mod clipboard;
-mod file_operations;
 mod input;
 mod main_window;
 mod menu;
+mod operations;
 mod tabs;
 mod thumbnailer;
 

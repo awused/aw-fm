@@ -151,10 +151,8 @@ context_menu = [
 
 # How to handle directory collisions during file operations.
 #
-# Allowed values are ask (UNIMPLEMENTED), merge, and skip.
-#
-# ask will be the default once it is implemented.
-directory_collisions = "merge"
+# Allowed values are ask, merge, and skip.
+directory_collisions = "ask"
 
 # How to handle file collisions when moving files.
 #
