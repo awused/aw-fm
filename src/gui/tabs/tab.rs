@@ -1394,15 +1394,14 @@ impl Tab {
             }
         }
 
-        // We expect these to normally be sorted by the same method as they came from.
-        // If not, it could be wrong, but it doesn't matter too much.
         let mut new_paths: AHashSet<&Path> = outcomes
             .iter()
             .filter_map(|out| match out {
                 Outcome::Move { dest, .. }
                 | Outcome::Create(dest)
                 | Outcome::CopyOverwrite(dest)
-                | Outcome::CreateDestDir(dest) => {
+                | Outcome::CreateDestDir(dest)
+                | Outcome::MergeDestDir(dest) => {
                     if Some(tab_dir) == dest.parent() {
                         return Some(&**dest);
                     }

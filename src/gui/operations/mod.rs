@@ -1,5 +1,4 @@
 // Until all the rest are implemented
-#![allow(unused)]
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -16,12 +15,11 @@ use gtk::gio::{self, Cancellable, FileCopyFlags, FileInfo, FileQueryInfoFlags};
 use gtk::glib::{self, SourceId};
 use gtk::prelude::{CancellableExt, FileExt, FileExtManual};
 use once_cell::unsync::Lazy;
-use regex::bytes::{Captures, Match, Regex};
+use regex::bytes::{Captures, Regex};
 
 use self::ask::{DirChoice, FileChoice};
 use super::tabs::id::TabId;
 use super::{gui_run, Gui};
-use crate::com::Update::Removed;
 use crate::com::{GuiAction, Update};
 use crate::config::{DirectoryCollision, FileCollision, CONFIG};
 use crate::gui::operations::ask::AskDialog;
@@ -75,6 +73,8 @@ pub enum Outcome {
     // Could unconditionally store FileInfo to restore it, probably not worth it.
     RemoveSourceDir(Arc<Path>, Option<FileInfo>),
     CreateDestDir(PathBuf),
+    // Nothing really happened here
+    MergeDestDir(PathBuf),
     Skip,
     Delete,
     DeleteDir,
@@ -93,6 +93,7 @@ pub enum Kind {
 
     // In theory, at least, it should be possible to redo an undo.
     // Probably won't support this, but keep the skeleton intact.
+    #[allow(unused)]
     Undo {
         prev: Box<Self>,
         prev_progress: Box<RefCell<Progress>>,
@@ -308,6 +309,7 @@ impl Progress {
             | Outcome::CopyOverwrite(_)
             | Outcome::Trash
             | Outcome::CreateDestDir(_)
+            | Outcome::MergeDestDir(_) // does this really count?
             | Outcome::Delete
             | Outcome::DeleteDir => {
                 self.total += 1;
@@ -788,7 +790,14 @@ impl Operation {
             }
 
             match progress.file_strat() {
-                FileCollision::Ask => todo!(),
+                FileCollision::Ask => {
+                    debug!("Conflict: {src:?}, existing file {dst:?}");
+                    progress.pending_pair = Some(Conflict::File(src, dst));
+                    drop(progress);
+                    gui_run(|g| AskDialog::show(g, self.clone()));
+
+                    return CopyMovePrep::Asking;
+                }
                 FileCollision::Overwrite => {
                     trace!("Overwriting target file {dst:?}");
                     overwrite = true;
@@ -856,6 +865,7 @@ impl Operation {
                 }
                 DirectoryCollision::Merge => {
                     debug!("Merging {src:?} into existing directory {dst:?}");
+                    progress.push_outcome(Outcome::MergeDestDir(dst.clone()));
                 }
                 DirectoryCollision::Skip => {
                     debug!("Skipping {} of directory {src:?} since {dst:?} exists", self.kind);

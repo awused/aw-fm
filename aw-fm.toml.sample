@@ -156,13 +156,11 @@ directory_collisions = "ask"
 
 # How to handle file collisions when moving files.
 #
-# Allowed values are ask (UNIMPLEMENTED), overwrite, skip, newer, and rename.
+# Allowed values are ask, overwrite, skip, newer, and rename.
 # newer will overwrite if the destination is strictly older and skip otherwise.
 # rename will keep the existing destination file as-is but add a suffix to the file name.
 # rename is assumed when copying a file on top of itself.
-#
-# ask will be the default once it is implemented.
-file_collisions = "skip"
+file_collisions = "ask"
 
 # Custom actions directory.
 # All executable contents with proper headers (see examples/sample-action.sh) are added as context

@@ -9,7 +9,7 @@ use gtk::glib::clone::Downgrade;
 use gtk::glib::{self, Object};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{ButtonExt, CheckButtonExt, GtkWindowExt, WidgetExt};
-use gtk::{IconTheme, Image};
+use gtk::Image;
 
 use super::Operation;
 use crate::com::{Entry, EntryObject};
@@ -66,25 +66,25 @@ impl AskDialog {
 
 
         match conflict {
-            Conflict::Directory(src, dst) => {
+            Conflict::Directory(..) => {
                 s.imp().use_rest.set_label(Some("Apply to all remaining directories"));
                 s.dir_buttons(&op);
             }
             Conflict::File(..) => {
                 s.imp().use_rest.set_label(Some("Apply to all remaining files"));
-                todo!()
+                s.file_buttons(&op);
             }
         }
 
         let o = op.clone();
-        s.connect_close_request(move |w| {
+        s.connect_close_request(move |_w| {
             o.cancel();
             glib::Propagation::Proceed
         });
 
         let o = op.clone();
         let w = s.downgrade();
-        s.imp().cancel.connect_clicked(move |c| {
+        s.imp().cancel.connect_clicked(move |_b| {
             let s = w.upgrade().unwrap();
             o.cancel();
             s.destroy();
@@ -102,7 +102,7 @@ impl AskDialog {
             Self::set_image(&self.imp().original_icon, &e, eo.imp().thumbnail());
             self.imp().original_size.set_text(&e.long_size_string());
             self.imp().original_mtime.set_text(&e.mtime.seconds_string())
-        } else if let Ok((e, needs_count)) = Entry::new(p.clone()) {
+        } else if let Ok((e, _needs_count)) = Entry::new(p.clone()) {
             Self::set_image(&self.imp().original_icon, &e, None);
             self.imp().original_size.set_text(&e.long_size_string());
             self.imp().original_mtime.set_text(&e.mtime.seconds_string())
@@ -117,7 +117,7 @@ impl AskDialog {
             Self::set_image(&self.imp().new_icon, &e, eo.imp().thumbnail());
             self.imp().new_size.set_text(&e.long_size_string());
             self.imp().new_mtime.set_text(&e.mtime.seconds_string())
-        } else if let Ok((e, needs_count)) = Entry::new(p.into()) {
+        } else if let Ok((e, _needs_count)) = Entry::new(p.into()) {
             Self::set_image(&self.imp().new_icon, &e, None);
             self.imp().new_size.set_text(&e.long_size_string());
             self.imp().new_mtime.set_text(&e.mtime.seconds_string())
@@ -132,14 +132,25 @@ impl AskDialog {
         }
 
         if !entry.dir() {
-            if let Some(tex) =
-                gui_run(|g| g.thumbnailer.sync_thumbnail(&entry.abs_path, &entry.mime, entry.mtime))
-            {
+            let tex = gui_run(|g| {
+                g.thumbnailer.sync_thumbnail(&entry.abs_path, &entry.mime, entry.mtime)
+            });
+
+            if let Some(tex) = tex {
                 return image.set_from_paintable(Some(&tex));
             }
         }
 
         image.set_from_gicon(&Icon::deserialize(&entry.icon).unwrap());
+    }
+
+    fn dir_strat(&self, op: &Rc<Operation>, choice: impl FnOnce(bool) -> DirChoice) {
+        let choice = choice(self.imp().use_rest.is_active());
+        info!("Selected {choice:?} for resolving directory conflict",);
+        self.destroy();
+
+        op.progress.borrow_mut().set_directory_strat(choice);
+        op.clone().process_next();
     }
 
     fn dir_buttons(&self, op: &Rc<Operation>) {
@@ -149,32 +160,57 @@ impl AskDialog {
         let o = op.clone();
         self.imp().skip.connect_clicked(move |_b| {
             let s = w.upgrade().unwrap();
-            info!(
-                "Selected skip({}) for resolving directory conflict",
-                s.imp().use_rest.is_active()
-            );
-            s.destroy();
-
-            o.progress
-                .borrow_mut()
-                .set_directory_strat(DirChoice::Skip(s.imp().use_rest.is_active()));
-            o.clone().process_next();
+            s.dir_strat(&o, DirChoice::Skip)
         });
 
         let w = self.downgrade();
         let o = op.clone();
         self.imp().merge.connect_clicked(move |_b| {
             let s = w.upgrade().unwrap();
-            info!(
-                "Selected merge({}) for resolving directory conflict",
-                s.imp().use_rest.is_active()
-            );
-            s.destroy();
+            s.dir_strat(&o, DirChoice::Merge)
+        });
+    }
 
-            o.progress
-                .borrow_mut()
-                .set_directory_strat(DirChoice::Merge(s.imp().use_rest.is_active()));
-            o.clone().process_next();
+    fn file_strat(&self, op: &Rc<Operation>, choice: impl FnOnce(bool) -> FileChoice) {
+        let choice = choice(self.imp().use_rest.is_active());
+        info!("Selected {choice:?} for resolving file conflict",);
+        self.destroy();
+
+        op.progress.borrow_mut().set_file_strat(choice);
+        op.clone().process_next();
+    }
+
+    fn file_buttons(&self, op: &Rc<Operation>) {
+        self.imp().newer.set_visible(true);
+        self.imp().auto_rename.set_visible(true);
+        self.imp().overwrite.set_visible(true);
+
+        let w = self.downgrade();
+        let o = op.clone();
+        self.imp().skip.connect_clicked(move |_b| {
+            let s = w.upgrade().unwrap();
+            s.file_strat(&o, FileChoice::Skip)
+        });
+
+        let w = self.downgrade();
+        let o = op.clone();
+        self.imp().newer.connect_clicked(move |_b| {
+            let s = w.upgrade().unwrap();
+            s.file_strat(&o, FileChoice::Newer)
+        });
+
+        let w = self.downgrade();
+        let o = op.clone();
+        self.imp().auto_rename.connect_clicked(move |_b| {
+            let s = w.upgrade().unwrap();
+            s.file_strat(&o, FileChoice::AutoRename)
+        });
+
+        let w = self.downgrade();
+        let o = op.clone();
+        self.imp().overwrite.connect_clicked(move |_b| {
+            let s = w.upgrade().unwrap();
+            s.file_strat(&o, FileChoice::Overwrite)
         });
     }
 }
@@ -206,6 +242,8 @@ mod imp {
         #[template_child]
         pub use_rest: TemplateChild<gtk::CheckButton>,
 
+        // #[template_child]
+        // pub manual_rename: TemplateChild<gtk::Button>,
         #[template_child]
         pub cancel: TemplateChild<gtk::Button>,
 
@@ -213,12 +251,13 @@ mod imp {
         pub skip: TemplateChild<gtk::Button>,
         #[template_child]
         pub merge: TemplateChild<gtk::Button>,
-        //     #[template_child]
-        //     pub newer: TemplateChild<gtk::Button>,
-        //     #[template_child]
-        //     pub rename: TemplateChild<gtk::Button>,
-        //     #[template_child]
-        //     pub auto_rename: TemplateChild<gtk::Button>,
+
+        #[template_child]
+        pub newer: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub auto_rename: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub overwrite: TemplateChild<gtk::Button>,
     }
 
     #[glib::object_subclass]
