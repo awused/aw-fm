@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::sync::Arc;
 
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use dirs::home_dir;
 use gtk::gio::ListStore;
 use gtk::prelude::{Cast, CastNone, ListModelExt, ListModelExtManual};
@@ -845,5 +845,30 @@ impl TabsList {
         }
 
         env
+    }
+
+    pub fn idle_unload(&mut self) {
+        let mut visible = AHashSet::new();
+        let mut unload = AHashSet::new();
+
+        for t in &self.tabs {
+            let d = t.dir();
+
+            if t.visible() {
+                unload.remove(&d);
+                visible.insert(d);
+            } else if !t.unloaded() && !visible.contains(&d) {
+                unload.insert(d);
+            }
+        }
+
+        for t in &mut self.tabs {
+            if unload.contains(&t.dir()) {
+                debug!("Unloading {:?}", t.id());
+                // We're going to remove all tabs matching this directory, so no need to
+                // coordinate.
+                t.unload_unchecked();
+            }
+        }
     }
 }

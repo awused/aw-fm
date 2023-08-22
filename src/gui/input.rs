@@ -4,12 +4,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ahash::AHashMap;
 use dirs::home_dir;
 use gtk::gdk::{Key, ModifierType};
 use gtk::glib::clone::Downgrade;
-use gtk::glib::Propagation;
+use gtk::glib::{self, Propagation};
 use gtk::pango::EllipsizeMode;
 use gtk::prelude::Cast;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -61,7 +62,47 @@ impl Gui {
 
         self.window.add_controller(key);
 
+        if let Some(idle) = CONFIG.idle_timeout {
+            self.setup_idle_unload(Duration::from_secs(idle.get()));
+        }
+
         self.setup_bookmarks();
+    }
+
+    fn setup_idle_unload(self: &Rc<Self>, idle: Duration) {
+        let focus = gtk::EventControllerFocus::new();
+
+        let g = self.clone();
+        focus.connect_enter(move |_| {
+            if let Some(timeout) = g.idle_timeout.take() {
+                timeout.remove();
+            }
+        });
+
+        let g = self.clone();
+        focus.connect_leave(move |_| {
+            let gui = g.clone();
+            let timeout = glib::timeout_add_local_once(idle, move || {
+                debug!("Performing idle unload");
+                gui.idle_timeout.take();
+                gui.tabs.borrow_mut().idle_unload();
+
+                // Wait a bit for everything to be dropped. 5 seconds is way too much, but
+                // it can't really hurt anything.
+                glib::timeout_add_local_once(Duration::from_secs(5), || {
+                    trace!("Explicitly trimming unused memory");
+                    unsafe {
+                        libc::malloc_trim(0);
+                    }
+                });
+            });
+
+            if let Some(old) = g.idle_timeout.replace(Some(timeout)) {
+                old.remove();
+            }
+        });
+
+        self.window.add_controller(focus);
     }
 
     fn setup_bookmarks(self: &Rc<Self>) {

@@ -46,6 +46,8 @@ child:selected image {
 
 gridview child box {
   border-spacing: 0;
+  /* 12px default, which is huge. 3px just barely fits one more row at 1440p + i3 gaps */
+  margin: 3px;
 }
 
 gridview>* {

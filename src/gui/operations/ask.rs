@@ -64,13 +64,14 @@ impl AskDialog {
         s.set_original(src);
         s.set_new(dst);
 
-
         match conflict {
             Conflict::Directory(..) => {
+                // TODO -- top_text
                 s.imp().use_rest.set_label(Some("Apply to all remaining directories"));
                 s.dir_buttons(&op);
             }
             Conflict::File(..) => {
+                // TODO -- top_text
                 s.imp().use_rest.set_label(Some("Apply to all remaining files"));
                 s.file_buttons(&op);
             }

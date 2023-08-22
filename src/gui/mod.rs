@@ -98,6 +98,7 @@ struct Gui {
     manager_sender: UnboundedSender<ManagerAction>,
 
     warning_timeout: DebugIgnore<Cell<Option<SourceId>>>,
+    idle_timeout: DebugIgnore<Cell<Option<SourceId>>>,
 }
 
 pub fn run(
@@ -180,6 +181,7 @@ impl Gui {
             manager_sender,
 
             warning_timeout: DebugIgnore::default(),
+            idle_timeout: DebugIgnore::default(),
         });
 
         let g = rc.clone();
@@ -247,6 +249,7 @@ impl Gui {
         self.window.connect_fullscreened_notify(move |_w| {
             g.window_state_changed();
         });
+
 
         self.window.set_visible(true);
     }

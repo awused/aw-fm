@@ -181,6 +181,10 @@ impl Tab {
         self.pane.has_pane()
     }
 
+    pub fn unloaded(&self) -> bool {
+        self.dir.state().unloaded()
+    }
+
     fn loading(&self) -> bool {
         self.dir.state().loading() || self.search.as_ref().map_or(false, Search::loading)
     }
@@ -1575,6 +1579,13 @@ mod flat_dir {
             match self {
                 Self::Unloaded => None,
                 Self::Loading { watch, .. } | Self::Loaded(watch) => Some(watch),
+            }
+        }
+
+        pub const fn unloaded(&self) -> bool {
+            match self {
+                Self::Unloaded => true,
+                Self::Loading { .. } | Self::Loaded(_) => false,
             }
         }
 

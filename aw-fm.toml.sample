@@ -10,11 +10,10 @@
 # background_colour = '#000000be'
 
 # The timeout, in seconds, for detecting idleness.
-# When the application is idle for a long period of time then most preloaded images can be unloaded
-# to reduce wasted memory.
+# When the application is idle for a long period of time tabs that aren't visible can be unloaded.
+# The default of 6 hours should not be disruptive.
 # Comment out or set to 0 to disable.
-# UNIMPLEMENTED
-idle_timeout = 600
+idle_timeout = 21600
 
 # Shortcuts
 #
