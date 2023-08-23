@@ -1,4 +1,5 @@
-use std::ffi::OsString;
+use std::borrow::Cow;
+use std::ffi::OsStr;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -7,14 +8,15 @@ use gtk::gdk::Texture;
 use gtk::gio::Icon;
 use gtk::glib::clone::Downgrade;
 use gtk::glib::{self, Object};
+use gtk::prelude::{EditableExt, EntryBufferExtManual};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{ButtonExt, CheckButtonExt, GtkWindowExt, WidgetExt};
+use gtk::traits::{ButtonExt, CheckButtonExt, EntryExt, GtkWindowExt, WidgetExt};
 use gtk::Image;
 
 use super::Operation;
 use crate::com::{Entry, EntryObject};
 use crate::config::FileCollision;
-use crate::gui::operations::Conflict;
+use crate::gui::operations::ConflictKind;
 use crate::gui::{gui_run, Gui};
 
 
@@ -24,18 +26,16 @@ pub(super) enum FileChoice {
     Overwrite(bool),
     AutoRename(bool),
     Newer(bool),
-    Rename(OsString),
 }
 
 impl FileChoice {
-    pub(super) const fn collision(&self) -> Option<(bool, FileCollision)> {
-        Some(match self {
+    pub(super) const fn collision(&self) -> (bool, FileCollision) {
+        match self {
             Self::Skip(b) => (*b, FileCollision::Skip),
             Self::Overwrite(b) => (*b, FileCollision::Overwrite),
             Self::AutoRename(b) => (*b, FileCollision::Rename),
             Self::Newer(b) => (*b, FileCollision::Newer),
-            Self::Rename(_) => return None,
-        })
+        }
     }
 }
 
@@ -43,7 +43,6 @@ impl FileChoice {
 pub(super) enum DirChoice {
     Skip(bool),
     Merge(bool),
-    Rename(OsString),
 }
 
 glib::wrapper! {
@@ -54,28 +53,71 @@ glib::wrapper! {
 impl AskDialog {
     pub(super) fn show(gui: &Rc<Gui>, op: Rc<Operation>) {
         let progress = op.progress.borrow();
-        let conflict = progress.pending_pair.as_ref().unwrap();
-        info!("Showing conflict resolution dialog for {conflict:?}");
+        let con = progress.conflict.as_ref().unwrap();
+        info!("Showing conflict resolution dialog for {con:?}");
 
         let s: Self = Object::new();
 
-        let (src, dst) = conflict.pair();
+        s.set_original(&con.src);
+        s.set_new(&con.dst);
 
-        s.set_original(src);
-        s.set_new(dst);
-
-        match conflict {
-            Conflict::Directory(..) => {
-                // TODO -- top_text
+        match con.kind {
+            ConflictKind::DirDir => {
                 s.imp().use_rest.set_label(Some("Apply to all remaining directories"));
                 s.dir_buttons(&op);
             }
-            Conflict::File(..) => {
-                // TODO -- top_text
+            ConflictKind::FileFile => {
                 s.imp().use_rest.set_label(Some("Apply to all remaining files"));
                 s.file_buttons(&op);
             }
-        }
+        };
+
+        // Not flexible for file -> dir or dir -> file
+        let top_text = if con.src.file_name() == con.dst.file_name() {
+            format!(
+                "Destination {} {:?} already exists",
+                con.kind.dst_str(),
+                con.dst.file_name().unwrap_or(con.dst.as_os_str())
+            )
+        } else {
+            format!(
+                "Destination {} {:?} (source: {:?}) already exists",
+                con.kind.dst_str(),
+                con.dst.file_name().unwrap_or(con.dst.as_os_str()),
+                con.src.file_name().unwrap_or(con.src.as_os_str())
+            )
+        };
+        s.imp().top_text.set_text(&top_text);
+
+        let o = op.clone();
+        let w = s.downgrade();
+        let k = con.kind;
+        s.imp().manual_rename.connect_clicked(move |_b| {
+            let s = w.upgrade().unwrap();
+
+            let t = s.imp().name_override.buffer().text();
+            if t.is_empty() {
+                return;
+            }
+
+            info!("Selected Rename({t:?}) for resolving {} conflict", k.dst_str());
+            s.destroy();
+
+            o.progress.borrow_mut().conflict_rename(&t);
+            o.clone().process_next();
+        });
+
+        // src, not dst, in case this is a repeat
+        let fname = con.src.file_name().map_or(Cow::Borrowed(""), OsStr::to_string_lossy);
+
+        s.imp().name_override.set_text(&fname);
+
+        let end_pos = if let Some(stem) = con.dst.file_stem() {
+            stem.to_string_lossy().chars().count() as i32
+        } else {
+            -1
+        };
+
 
         let o = op.clone();
         s.connect_close_request(move |_w| {
@@ -95,6 +137,9 @@ impl AskDialog {
         s.set_transient_for(Some(&gui.window));
         s.set_modal(true);
         s.set_visible(true);
+
+        s.imp().name_override.set_enable_undo(true);
+        s.imp().name_override.select_region(0, end_pos);
     }
 
     fn set_original(&self, p: &Arc<Path>) {
@@ -243,8 +288,11 @@ mod imp {
         #[template_child]
         pub use_rest: TemplateChild<gtk::CheckButton>,
 
-        // #[template_child]
-        // pub manual_rename: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub name_override: TemplateChild<gtk::Entry>,
+        #[template_child]
+        pub manual_rename: TemplateChild<gtk::Button>,
+
         #[template_child]
         pub cancel: TemplateChild<gtk::Button>,
 

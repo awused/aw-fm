@@ -175,22 +175,28 @@ impl Directory {
     }
 }
 
-#[derive(Debug)]
-enum Conflict {
-    // TODO -- support file -> folder and folder -> file, but only for Ask
-    // BothDirectories
-    // DirectorySource
-    // FileSource
-    Directory(Arc<Path>, PathBuf),
-    File(Arc<Path>, PathBuf),
+#[derive(Debug, Copy, Clone)]
+enum ConflictKind {
+    DirDir,
+    // DirFile
+    FileFile,
+    // FileDir
 }
 
-impl Conflict {
-    const fn pair(&self) -> (&Arc<Path>, &PathBuf) {
+impl ConflictKind {
+    fn dst_str(self) -> &'static str {
         match self {
-            Self::Directory(a, b) | Self::File(a, b) => (a, b),
+            ConflictKind::DirDir => "directory",
+            ConflictKind::FileFile => "file",
         }
     }
+}
+
+#[derive(Debug)]
+struct Conflict {
+    kind: ConflictKind,
+    src: Arc<Path>,
+    dst: PathBuf,
 }
 
 #[derive(Debug)]
@@ -205,7 +211,7 @@ pub struct Progress {
     // Would be nice to compute this more eagerly so it gets ahead of the processing
     total: usize,
 
-    pending_pair: Option<Conflict>,
+    conflict: Option<Conflict>,
 
     directory_collisions: DirectoryCollision,
     file_collisions: FileCollision,
@@ -214,7 +220,7 @@ pub struct Progress {
     file_override_next: Option<FileCollision>,
 
     // Maps prefix + to last highest existing number
-    collision_cache: AHashMap<(OsString, OsString), usize>,
+    collision_cache: AHashMap<(OsString, OsString), u64>,
 
     // process_callback: Option<SourceId>,
     update_timeout: Option<SourceId>,
@@ -234,14 +240,8 @@ enum NextRemove {
 
 impl Progress {
     fn next_copymove_pair(&mut self, dest_root: &Path) -> Option<NextCopyMove> {
-        #[allow(clippy::single_match)]
-        match self.pending_pair.take() {
-            Some(Conflict::Directory(src, dst) | Conflict::File(src, dst)) => {
-                return Some(NextCopyMove::Files(src, dst));
-            }
-            None => {
-                // Shutup clippy
-            }
+        if let Some(Conflict { src, dst, .. }) = self.conflict.take() {
+            return Some(NextCopyMove::Files(src, dst));
         }
 
         if let Some(dir) = &mut self.dirs.last_mut() {
@@ -336,7 +336,7 @@ impl Progress {
         };
 
         let (prefix, suffix, mut n) = if let Some(cap) = fragment.captures(name.as_bytes()) {
-            let n: usize = OsStr::from_bytes(&cap[3]).to_string_lossy().parse().unwrap_or(0);
+            let n: u64 = OsStr::from_bytes(&cap[3]).to_string_lossy().parse().unwrap_or(0);
             let prefix = cap.get(1).unwrap().as_bytes();
             let suffix = cap.get(4).map_or(&[][..], |m| m.as_bytes());
 
@@ -366,27 +366,58 @@ impl Progress {
         let mut target = target.into_vec();
         let length = target.len();
 
-        // Could do a gallop search here to avoid the worst case, at the cost of potentially
-        // missing gaps we could have used. Probably an unrealistic use case.
-        static MAX_LOOPS: usize = 2000;
-        for _ in 0..MAX_LOOPS {
-            n += 1;
-
+        let mut n_available = |n| {
             target.truncate(length);
             target.extend_from_slice(format!(" {n})").as_bytes());
             target.extend_from_slice(suffix.as_bytes());
 
             let new_path: &Path = Path::new(OsStr::from_bytes(&target));
             if !new_path.exists() {
-                debug!("Found new name {new_path:?} for {path:?}");
+                return true;
+            }
+            false
+        };
 
+        // Small linear search first, so we avoid easily found gaps
+        static MAX_LINEAR: usize = 64;
+        for _ in 0..MAX_LINEAR {
+            n += 1;
+
+            if n_available(n) {
                 self.collision_cache
                     .insert((OsStr::from_bytes(&target[0..length]).into(), suffix.into()), n);
-                return Some(OsString::from_vec(target).into());
+                let new_path = OsString::from_vec(target).into();
+                debug!("Found new name {new_path:?} for {path:?}");
+                return Some(new_path);
             }
         }
 
-        None
+        let mut start = n;
+        let mut end = u64::MAX;
+
+        // This is vulnerable to maliciously or mischievously crafted directories where we could
+        // believe all numbers are taken based on intentionally seeded files.
+        //
+        // But that's a stupid, self-sabotaging thing to do.
+        while start < end {
+            let mid = start + (end - start) / 2;
+
+            if n_available(mid) {
+                end = mid;
+            } else {
+                start = mid + 1;
+            }
+        }
+
+        if n_available(start) {
+            self.collision_cache
+                .insert((OsStr::from_bytes(&target[0..length]).into(), suffix.into()), start);
+            let new_path = OsString::from_vec(target).into();
+            debug!("Found new name {new_path:?} for {path:?}");
+            Some(new_path)
+        } else {
+            None
+        }
     }
 
     fn directory_strat(&mut self) -> DirectoryCollision {
@@ -395,19 +426,18 @@ impl Progress {
 
     fn set_directory_strat(&mut self, choice: DirChoice) {
         match choice {
-            DirChoice::Skip(false) => {
-                self.directory_override_next = Some(DirectoryCollision::Skip);
-            }
-            DirChoice::Merge(false) => {
-                self.directory_override_next = Some(DirectoryCollision::Merge);
-            }
             DirChoice::Skip(true) => {
                 self.directory_collisions = DirectoryCollision::Skip;
             }
             DirChoice::Merge(true) => {
                 self.directory_collisions = DirectoryCollision::Merge;
             }
-            DirChoice::Rename(name) => todo!(),
+            DirChoice::Skip(false) => {
+                self.directory_override_next = Some(DirectoryCollision::Skip);
+            }
+            DirChoice::Merge(false) => {
+                self.directory_override_next = Some(DirectoryCollision::Merge);
+            }
         }
     }
 
@@ -417,18 +447,24 @@ impl Progress {
 
     fn set_file_strat(&mut self, choice: FileChoice) {
         match choice.collision() {
-            Some((true, c)) => return self.file_collisions = c,
-            Some((false, c)) => return self.file_override_next = Some(c),
-            None => {}
+            (true, c) => self.file_collisions = c,
+            (false, c) => self.file_override_next = Some(c),
         }
+    }
 
-        match choice {
-            FileChoice::Skip(_)
-            | FileChoice::Overwrite(_)
-            | FileChoice::AutoRename(_)
-            | FileChoice::Newer(_) => unreachable!(),
-            FileChoice::Rename(_) => todo!(),
-        }
+    fn conflict_rename(&mut self, name: &str) {
+        let c = self.conflict.as_mut().unwrap();
+        let Some(parent) = c.dst.parent() else {
+            return show_warning(format!(
+                "Could not rename destination {}, choose a different strategy",
+                match c.kind {
+                    ConflictKind::DirDir => "directory",
+                    ConflictKind::FileFile => "file",
+                },
+            ));
+        };
+
+        c.dst = parent.join(name);
     }
 }
 
@@ -534,7 +570,7 @@ impl Operation {
                 total: 0,
                 finished: 0,
 
-                pending_pair: None,
+                conflict: None,
                 directory_collisions: CONFIG.directory_collisions,
                 file_collisions: CONFIG.file_collisions,
                 directory_override_next: None,
@@ -792,7 +828,7 @@ impl Operation {
             match progress.file_strat() {
                 FileCollision::Ask => {
                     debug!("Conflict: {src:?}, existing file {dst:?}");
-                    progress.pending_pair = Some(Conflict::File(src, dst));
+                    progress.conflict = Some(Conflict { kind: ConflictKind::FileFile, src, dst });
                     drop(progress);
                     gui_run(|g| AskDialog::show(g, self.clone()));
 
@@ -857,7 +893,7 @@ impl Operation {
             match progress.directory_strat() {
                 DirectoryCollision::Ask => {
                     debug!("Conflict: {src:?}, existing directory {dst:?}");
-                    progress.pending_pair = Some(Conflict::Directory(src, dst));
+                    progress.conflict = Some(Conflict { kind: ConflictKind::DirDir, src, dst });
                     drop(progress);
                     gui_run(|g| AskDialog::show(g, self.clone()));
 
@@ -1136,7 +1172,7 @@ impl Operation {
     fn cancel(&self) {
         info!("Cancelling operation {:?}", self.kind);
         // Nothing was done for these, cancel them
-        self.progress.borrow_mut().pending_pair.take();
+        self.progress.borrow_mut().conflict.take();
         // TODO -- close the ask dialog if it is open
         self.cancellable.cancel();
     }
