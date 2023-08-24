@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::rc::Rc;
@@ -8,7 +9,7 @@ use gtk::gdk::Texture;
 use gtk::gio::Icon;
 use gtk::glib::clone::Downgrade;
 use gtk::glib::{self, Object};
-use gtk::prelude::{EditableExt, EntryBufferExtManual};
+use gtk::prelude::{CancellableExtManual, EditableExt, EntryBufferExtManual};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{ButtonExt, CheckButtonExt, EntryExt, GtkWindowExt, WidgetExt};
 use gtk::Image;
@@ -118,21 +119,30 @@ impl AskDialog {
             -1
         };
 
+        let w = s.downgrade();
+        let signal = Cell::new(op.cancellable.connect_cancelled_local(move |_c| {
+            if let Some(s) = w.upgrade() {
+                s.destroy();
+            }
+        }));
 
         let o = op.clone();
         s.connect_close_request(move |_w| {
             o.cancel();
-            glib::Propagation::Proceed
+            glib::Propagation::Stop
         });
 
         let o = op.clone();
-        let w = s.downgrade();
         s.imp().cancel.connect_clicked(move |_b| {
-            let s = w.upgrade().unwrap();
             o.cancel();
-            s.destroy();
         });
 
+        let o = op.clone();
+        s.connect_destroy(move |_s| {
+            if let Some(signal) = signal.take() {
+                o.cancellable.disconnect_cancelled(signal);
+            }
+        });
 
         s.set_transient_for(Some(&gui.window));
         s.set_modal(true);
@@ -145,11 +155,16 @@ impl AskDialog {
     fn set_original(&self, p: &Arc<Path>) {
         if let Some(eo) = EntryObject::lookup(p) {
             let e = eo.get();
-            Self::set_image(&self.imp().original_icon, &e, eo.imp().thumbnail());
+            Self::set_image(
+                &self.imp().original_icon,
+                &e,
+                eo.imp().thumbnail(),
+                eo.imp().can_sync_thumbnail(),
+            );
             self.imp().original_size.set_text(&e.long_size_string());
             self.imp().original_mtime.set_text(&e.mtime.seconds_string())
         } else if let Ok((e, _needs_count)) = Entry::new(p.clone()) {
-            Self::set_image(&self.imp().original_icon, &e, None);
+            Self::set_image(&self.imp().original_icon, &e, None, true);
             self.imp().original_size.set_text(&e.long_size_string());
             self.imp().original_mtime.set_text(&e.mtime.seconds_string())
         } else {
@@ -160,11 +175,16 @@ impl AskDialog {
     fn set_new(&self, p: &Path) {
         if let Some(eo) = EntryObject::lookup(p) {
             let e = eo.get();
-            Self::set_image(&self.imp().new_icon, &e, eo.imp().thumbnail());
+            Self::set_image(
+                &self.imp().new_icon,
+                &e,
+                eo.imp().thumbnail(),
+                eo.imp().can_sync_thumbnail(),
+            );
             self.imp().new_size.set_text(&e.long_size_string());
             self.imp().new_mtime.set_text(&e.mtime.seconds_string())
         } else if let Ok((e, _needs_count)) = Entry::new(p.into()) {
-            Self::set_image(&self.imp().new_icon, &e, None);
+            Self::set_image(&self.imp().new_icon, &e, None, true);
             self.imp().new_size.set_text(&e.long_size_string());
             self.imp().new_mtime.set_text(&e.mtime.seconds_string())
         } else {
@@ -172,12 +192,12 @@ impl AskDialog {
         };
     }
 
-    fn set_image(image: &Image, entry: &Entry, tex: Option<Texture>) {
+    fn set_image(image: &Image, entry: &Entry, tex: Option<Texture>, can_sync_thumbnail: bool) {
         if let Some(tex) = tex {
             return image.set_from_paintable(Some(&tex));
         }
 
-        if !entry.dir() {
+        if can_sync_thumbnail {
             let tex = gui_run(|g| {
                 g.thumbnailer.sync_thumbnail(&entry.abs_path, &entry.mime, entry.mtime)
             });

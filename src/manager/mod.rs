@@ -15,6 +15,7 @@ use tokio::time::{sleep_until, timeout, Instant};
 
 use self::watcher::PendingUpdates;
 use crate::com::{GuiAction, ManagerAction};
+use crate::manager::watcher::Sources;
 use crate::{closing, spawn_thread};
 
 mod actions;
@@ -153,6 +154,21 @@ impl Manager {
 
             Execute(s, env) => self.execute(s, env),
             Script(s, env) => self.script(s, env),
+
+            Flush(paths, resp) => {
+                let remainder = self.flush_updates(paths);
+
+                // We, most likely, just wrote these files, so reading them should be very fast and
+                // very few of them should not have pending notifications.
+                for p in remainder {
+                    info!(
+                        "Synchronously reading {p:?} for completed operation with no notification."
+                    );
+                    Self::send_update(&self.gui_sender, p.into(), Sources::new_flat());
+                }
+
+                let _ignored = resp.send(());
+            }
         }
     }
 

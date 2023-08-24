@@ -4,12 +4,12 @@
 
 use std::ffi::OsString;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use derive_more::{Deref, DerefMut, From};
-use gtk::glib::{Object, SignalHandlerId};
+use gtk::glib::{Object, Sender, SignalHandlerId};
 use gtk::prelude::{IsA, ObjectExt};
 
 pub use self::entry::*;
@@ -55,6 +55,8 @@ pub enum ManagerAction {
     EndSearch(Arc<AtomicBool>),
     Execute(Arc<Path>, Vec<(String, OsString)>),
     Script(Arc<Path>, Vec<(String, OsString)>),
+
+    Flush(Vec<PathBuf>, Sender<()>),
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]

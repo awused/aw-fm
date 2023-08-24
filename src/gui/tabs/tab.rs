@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -9,7 +10,7 @@ use gtk::gio::Cancellable;
 use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{SelectionModelExt, WidgetExt};
-use gtk::{AlertDialog, MultiSelection, Orientation, PopoverMenu, Widget};
+use gtk::{glib, AlertDialog, MultiSelection, Orientation, PopoverMenu, Widget};
 use MaybePane as MP;
 
 use self::flat_dir::FlatDir;
@@ -21,13 +22,13 @@ use super::search::Search;
 use super::{HistoryEntry, NavTarget, PaneState, ScrollPosition};
 use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, GetEntry,
-    SearchSnapshot, SearchUpdate, SnapshotId, SortDir, SortMode, SortSettings,
+    ManagerAction, SearchSnapshot, SearchUpdate, SnapshotId, SortDir, SortMode, SortSettings,
 };
 use crate::config::CONFIG;
 use crate::gui::clipboard::{handle_clipboard, handle_drop, Operation, SelectionProvider};
-use crate::gui::operations::{Kind, Outcome};
+use crate::gui::operations::{self, Kind, Outcome};
 use crate::gui::tabs::PartiallyAppliedUpdate;
-use crate::gui::{applications, gui_run, show_error, show_warning, Selected, Update};
+use crate::gui::{applications, gui_run, show_error, show_warning, tabs_run, Selected, Update};
 
 /* This efficiently supports multiple tabs being open to the same directory with different
  * settings.
@@ -1358,47 +1359,51 @@ impl Tab {
         gui_run(|g| g.create_dialog(self.id(), self.dir(), folder));
     }
 
-    pub fn scroll_to_completed(&mut self, kind: &Kind, outcomes: &[Outcome]) {
-        if !self.loaded() {
-            info!("Not scrolling to completed operation in tab that is not loaded {:?}", self.id);
-            return;
+    fn matches_completed_op(&self, op: &operations::Operation) -> bool {
+        if !self.loaded() || !self.visible() {
+            info!(
+                "Not scrolling to completed operation in tab that is not loaded and visible {:?}",
+                self.id
+            );
+            return false;
         }
-
-        if !self.visible() {
-            info!("Not scrolling to completed operation in tab that is not visible {:?}", self.id);
-            return;
-        }
-
 
         let tab_dir = &**self.dir.path();
-        match kind {
+        match &op.kind {
             Kind::Move(d) | Kind::Copy(d) => {
-                if tab_dir != &**d {
+                if tab_dir == &**d {
+                    true
+                } else {
                     info!(
                         "Ignoring scroll to completed operation: tab dir {tab_dir:?} not equal to \
                          operation path {d:?}"
                     );
-                    return;
+                    false
                 }
             }
             Kind::Rename(f) | Kind::MakeDir(f) | Kind::MakeFile(f) => {
-                if f.parent() != Some(tab_dir) {
+                if f.parent() == Some(tab_dir) {
+                    true
+                } else {
                     warn!(
                         "Ignoring scroll to completed rename/creation: tab dir {tab_dir:?} not \
                          equal to operation path {:?}. This is unusual.",
                         f.parent()
                     );
-                    return;
+                    false
                 }
             }
             Kind::Undo { .. } => todo!(),
             Kind::Trash | Kind::Delete => {
                 info!("Not scrolling to completed deletion or trash operation.");
-                return;
+                false
             }
         }
+    }
 
-        let mut new_paths: AHashSet<&Path> = outcomes
+    fn paths_for_op<'a>(&self, outcomes: &'a [Outcome]) -> AHashSet<&'a Path> {
+        let tab_dir = &**self.dir.path();
+        outcomes
             .iter()
             .filter_map(|out| match out {
                 Outcome::Move { dest, .. }
@@ -1417,13 +1422,62 @@ impl Tab {
                 | Outcome::DeleteDir
                 | Outcome::Trash => None,
             })
-            .collect();
+            .collect()
+    }
 
-        if new_paths.is_empty() {
-            info!("No new paths to scroll to after operation in {tab_dir:?}");
+    pub fn scroll_to_completed(&mut self, op: Rc<operations::Operation>) {
+        if !self.matches_completed_op(&op) {
             return;
         }
 
+        let outcomes = op.outcomes();
+        let new_paths = self.paths_for_op(&outcomes);
+
+        if new_paths.is_empty() {
+            return info!("No new paths to scroll to after operation in {:?}", self.id);
+        }
+
+        // Look up all file paths. If any are missing, flush notifications or read them.
+        // If a path is present in the global map and this tab is loaded, the file will be present
+        // in the contents for this tab.
+        // There should be pretty few of these.
+        let unmatched_paths: Vec<_> = new_paths
+            .iter()
+            .filter(|p| EntryObject::lookup(p).is_none())
+            .map(|p| p.to_path_buf())
+            .collect();
+
+        if unmatched_paths.is_empty() {
+            return self.scroll_to_completed_inner(new_paths);
+        }
+        drop(outcomes);
+
+        info!("Found {} unmatched paths after file operation.", unmatched_paths.len());
+
+        // Lower than the normal priority for the main channel.
+        let (s, r) = glib::MainContext::channel(glib::Priority::DEFAULT_IDLE);
+
+        r.attach(None, move |_| {
+            tabs_run(|tlist| {
+                let Some(tab) = tlist.find_mut(op.tab) else {
+                    return;
+                };
+
+                if !tab.matches_completed_op(&op) {
+                    return;
+                }
+
+                let outcomes = op.outcomes();
+                let new_paths = tab.paths_for_op(&outcomes);
+                tab.scroll_to_completed_inner(new_paths);
+            });
+            glib::ControlFlow::Break
+        });
+
+        gui_run(|g| g.send_manager(ManagerAction::Flush(unmatched_paths, s)));
+    }
+
+    fn scroll_to_completed_inner(&mut self, mut new_paths: AHashSet<&Path>) {
         let selection = self.visible_selection();
 
         // TODO [incremental] -- if incremental filtering, must disable it now.

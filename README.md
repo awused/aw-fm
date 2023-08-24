@@ -171,6 +171,9 @@ specify them.
   * These programs will be killed on exit from aw-fm.
   * Example: `Script /path/to/sample-script.sh` if the script prints "Quit" the
     program will exit.
+* `Cancel`
+  * Cancels all ongoing operations (copies, moves, deletions).
+  * Any operations that have already been completed are not reversed.
 
 ### External Executable Environment
 

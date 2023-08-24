@@ -1,6 +1,6 @@
 // Until all the rest are implemented
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::fs::{remove_dir, ReadDir};
@@ -184,10 +184,10 @@ enum ConflictKind {
 }
 
 impl ConflictKind {
-    fn dst_str(self) -> &'static str {
+    const fn dst_str(self) -> &'static str {
         match self {
-            ConflictKind::DirDir => "directory",
-            ConflictKind::FileFile => "file",
+            Self::DirDir => "directory",
+            Self::FileFile => "file",
         }
     }
 }
@@ -479,8 +479,8 @@ impl Drop for Progress {
 #[derive(Debug)]
 pub struct Operation {
     // May become dangling while this is ongoing.
-    tab: TabId,
-    kind: Kind,
+    pub tab: TabId,
+    pub kind: Kind,
     cancellable: Cancellable,
     // Fast operations don't live long enough to display on-screen
     slow: Cell<bool>,
@@ -597,11 +597,16 @@ impl Operation {
         Some(rc)
     }
 
+    pub fn outcomes(&self) -> Ref<'_, [Outcome]> {
+        let p = self.progress.borrow();
+        Ref::map(p, |p| &*p.log)
+    }
+
     fn process_next(self: Rc<Self>) {
         if self.cancellable.is_cancelled() {
             info!("Cancelled operation {:?}", self.kind);
 
-            return gui_run(|g| g.finish_operation(self));
+            return gui_run(|g| g.finish_operation(&self));
         }
 
         let status = match &self.kind {
@@ -620,7 +625,7 @@ impl Operation {
             Status::CallAgain => {
                 glib::idle_add_local_once(move || self.process_next());
             }
-            Status::Done => gui_run(|g| g.finish_operation(self)),
+            Status::Done => gui_run(|g| g.finish_operation(&self)),
         }
     }
 
@@ -1118,7 +1123,7 @@ impl Operation {
                     s.progress.borrow_mut().push_outcome(Outcome::Move { source, dest });
                 }
 
-                gui_run(|g| g.finish_operation(s))
+                gui_run(|g| g.finish_operation(&s))
             },
         );
 
@@ -1169,31 +1174,26 @@ impl Operation {
         Status::Done
     }
 
-    fn cancel(&self) {
+    fn cancel(self: &Rc<Self>) {
         info!("Cancelling operation {:?}", self.kind);
         // Nothing was done for these, cancel them
         self.progress.borrow_mut().conflict.take();
-        // TODO -- close the ask dialog if it is open
         self.cancellable.cancel();
+        gui_run(|g| g.finish_operation(self));
     }
 }
 
 impl Gui {
-    fn finish_operation(self: &Rc<Self>, finished: Rc<Operation>) {
+    // This is idempotent and can be called multiple times depending on exactly when an operation
+    // is cancelled.
+    fn finish_operation(self: &Rc<Self>, finished: &Rc<Operation>) {
         let mut ops = self.ongoing_operations.borrow_mut();
-        let Some(index) = ops.iter().position(|o| Rc::ptr_eq(o, &finished)) else {
+        let Some(index) = ops.iter().position(|o| Rc::ptr_eq(o, finished)) else {
             return;
         };
         let op = ops.swap_remove(index);
 
-        // Allow file system + notifies to settle.
-        // We dedupe notifications for at most 10ms, plus some margin.
-        // TODO -- explicit flushes and maybe an explicit read.
-        glib::timeout_add_local_once(Duration::from_millis(25), move || {
-            tabs_run(|tlist| {
-                tlist.scroll_to_completed(op.tab, &op.kind, &op.progress.borrow().log)
-            });
-        });
+        tabs_run(|tlist| tlist.scroll_to_completed(op));
     }
 
     pub(super) fn start_operation(

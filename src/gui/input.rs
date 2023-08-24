@@ -436,6 +436,8 @@ impl Gui {
             "Cut" => return tabs.active_cut(),
             "Paste" => return tabs.active_paste(),
 
+            "Cancel" => return self.cancel_operations(),
+
             "Home" => {
                 return tabs.active_navigate(&home_dir().unwrap_or_default());
             }

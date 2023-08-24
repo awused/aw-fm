@@ -1,5 +1,5 @@
 use std::collections::btree_map;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gtk::glib;
@@ -45,6 +45,12 @@ pub struct Sources {
     searches: Vec<RecurseId>,
 }
 
+impl Sources {
+    pub(super) const fn new_flat() -> Self {
+        Self { flat: true, searches: Vec::new() }
+    }
+}
+
 #[derive(Debug)]
 pub struct PendingUpdates(Instant, State, Sources);
 
@@ -87,7 +93,7 @@ impl Manager {
         }
     }
 
-    fn send_update(sender: &glib::Sender<GuiAction>, path: Arc<Path>, sources: Sources) {
+    pub(super) fn send_update(sender: &glib::Sender<GuiAction>, path: Arc<Path>, sources: Sources) {
         // It's probably true that sources.flat means any search updates are wasted.
         // But the flat tab could have been closed.
 
@@ -263,6 +269,23 @@ impl Manager {
         }
 
         // trace!("Processed {starting_len} events in {:?}", now.elapsed());
+    }
+
+    pub(super) fn flush_updates(&mut self, mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
+        paths.retain_mut(|p| {
+            let Some(PendingUpdates(_expiry, state, sources)) = self.recent_mutations.get_mut(&**p)
+            else {
+                return true;
+            };
+
+            *state = State::Expiring;
+
+            debug!("Flushing update for {p:?} and {sources:?}");
+            Self::send_update(&self.gui_sender, std::mem::take(p).into(), std::mem::take(sources));
+            false
+        });
+
+        paths
     }
 
     pub(super) async fn watch_search(&mut self, path: Arc<Path>, cancel: RecurseId) {

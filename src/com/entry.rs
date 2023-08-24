@@ -587,6 +587,16 @@ mod internal {
             }
         }
 
+        // Returns true if it's appropriate to synchronously thumbnail this file.
+        pub fn can_sync_thumbnail(&self) -> bool {
+            match self.0.borrow().as_ref().unwrap().thumbnail {
+                Thumbnail::Nothing | Thumbnail::Loaded(_) | Thumbnail::Failed => false,
+                Thumbnail::Unloaded | Thumbnail::Loading => true,
+                // This is a really niche edge case, but really it should be handled.
+                Thumbnail::Outdated(..) => true,
+            }
+        }
+
         pub fn was_updated(&self) -> bool {
             self.0.borrow().as_ref().unwrap().updated
         }
