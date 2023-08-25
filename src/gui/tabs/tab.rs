@@ -256,7 +256,11 @@ impl Tab {
         element.clone_from(&source.element);
 
         // Spinner will start spinning for search when pane is attached
-        if !source.dir.state().loading() {
+        // It's possible for this spinner to be shown, then stop spinning, then start spinning
+        // again once the tab is selected.
+        if source.dir.state().loading() {
+            element.spin();
+        } else if source.dir.state().loading() {
             element.stop_spin();
         }
 
@@ -317,9 +321,10 @@ impl Tab {
             if **self.dir.path() == **t.dir.path() {
                 self.dir = t.dir.clone();
                 self.contents.clone_from(&t.contents, self.settings.sort);
-                self.element.clone_from(&t.element);
 
-                if !self.dir.state().loading() {
+                if self.dir.state().loading() {
+                    self.element.spin();
+                } else {
                     self.element.stop_spin();
                 }
 
@@ -980,8 +985,12 @@ impl Tab {
     }
 
     fn maybe_finish_load(&mut self) {
+        // We can be done loading without being loaded (flat loaded + search unloaded)
+        if !self.loading() {
+            self.element.stop_spin()
+        }
+
         if self.loaded() {
-            self.element.stop_spin();
             self.apply_pane_state();
         }
     }
