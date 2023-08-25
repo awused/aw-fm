@@ -631,14 +631,16 @@ impl Operation {
 
     fn process_next_move(self: &Rc<Self>, dest: &Path) -> Status {
         let (src, dst) = loop {
-            let (src, dst) = match self.progress.borrow_mut().next_copymove_pair(dest) {
+            let mut progress = self.progress.borrow_mut();
+
+            let (src, dst) = match progress.next_copymove_pair(dest) {
                 Some(NextCopyMove::Files(src, dst)) => (src, dst),
                 Some(NextCopyMove::FinishedDir(dir)) => {
                     dir.apply_info();
 
                     info!("Removing source directory {dir:?}");
                     match remove_dir(&dir.abs_path) {
-                        Ok(_) => self.progress.borrow_mut().push_outcome(Outcome::RemoveSourceDir(
+                        Ok(_) => progress.push_outcome(Outcome::RemoveSourceDir(
                             dir.abs_path,
                             dir.original_info,
                         )),
@@ -652,7 +654,7 @@ impl Operation {
 
             if *src == *dst {
                 info!("Skipping no-op move for {src:?}");
-                self.progress.borrow_mut().push_outcome(Outcome::Skip);
+                progress.push_outcome(Outcome::Skip);
                 continue;
             }
 
