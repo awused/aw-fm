@@ -220,7 +220,7 @@ pub fn handle_drop(drop_ev: &gdk::Drop, tab: TabId, path: Arc<Path>) -> bool {
 mod imp {
     use std::ffi::OsString;
     use std::future::Future;
-    use std::os::unix::prelude::OsStringExt;
+    use std::os::unix::prelude::OsStrExt;
     use std::pin::Pin;
     use std::rc::Rc;
 
@@ -307,6 +307,22 @@ mod imp {
         }
     }
 
+    async fn write_bytes(
+        stream: &gio::OutputStream,
+        priority: glib::Priority,
+        mut bytes: &[u8],
+    ) -> Result<(), glib::Error> {
+        while !bytes.is_empty() {
+            let n = stream.write_bytes_future(&glib::Bytes::from(&bytes), priority).await?;
+            if n <= 0 {
+                trace!("Failed to finish writing clipboard contents: {} unsent", bytes.len());
+                break;
+            }
+            bytes = &bytes[(n as usize)..];
+        }
+        Ok(())
+    }
+
     impl ClipboardProvider {
         async fn write_uris(
             stream: &gio::OutputStream,
@@ -323,10 +339,8 @@ mod imp {
                     output += &gio::File::for_path(&f.get().abs_path).uri();
                 }
             }
-            stream
-                .write_bytes_future(&glib::Bytes::from_owned(output.into_bytes()), priority)
-                .await
-                .map(|_| ())
+
+            write_bytes(stream, priority, &output.into_bytes()).await
         }
 
         async fn write_paths(
@@ -344,10 +358,8 @@ mod imp {
                     output.push(f.get().abs_path.as_os_str());
                 }
             }
-            stream
-                .write_bytes_future(&glib::Bytes::from_owned(output.into_vec()), priority)
-                .await
-                .map(|_| ())
+
+            write_bytes(stream, priority, output.as_bytes()).await
         }
 
         // Doesn't match C-style escape sequences, but nothing should really use this
@@ -366,10 +378,8 @@ mod imp {
                     output.extend(f.get().abs_path.to_string_lossy().escape_default());
                 }
             }
-            stream
-                .write_bytes_future(&glib::Bytes::from_owned(output.into_bytes()), priority)
-                .await
-                .map(|_| ())
+
+            write_bytes(stream, priority, &output.into_bytes()).await
         }
     }
 }
