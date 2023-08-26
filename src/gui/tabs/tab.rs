@@ -654,18 +654,18 @@ impl Tab {
         self.pane.overwrite_state(PaneState::for_jump(target.scroll));
         self.dir = FlatDir::new(target.dir);
 
+        let old_settings = self.settings;
+        self.settings = gui_run(|g| g.database.get(self.dir.path().clone()));
+
         if !self.copy_flat_from_donor(left, right) {
             // We couldn't find any state to steal, so we know we're the only matching tab.
 
-            let old_settings = self.settings;
-            self.settings = gui_run(|g| g.database.get(self.dir.path().clone()));
-
-            // Deliberately do not clear or update self.contents here, not yet.
-            // This allows us to keep something visible just a tiny bit longer.
-            // Safe enough when the settings match.
             if was_search {
-                self.close_search();
+                // Contents were cleared above
             } else if self.pane.has_pane() && self.settings == old_settings {
+                // Deliberately do not clear or update self.contents here, not yet.
+                // This allows us to keep something visible just a tiny bit longer.
+                // Safe enough when the settings match.
                 self.contents.mark_stale(self.settings.sort);
             } else {
                 self.contents.clear(self.settings.sort);
