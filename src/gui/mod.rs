@@ -25,6 +25,7 @@ mod input;
 mod main_window;
 mod menu;
 mod operations;
+mod properties;
 mod tabs;
 mod thumbnailer;
 
@@ -280,6 +281,8 @@ impl Gui {
             Update(update) => self.tabs.borrow_mut().update(update),
             SearchSnapshot(snap) => self.tabs.borrow_mut().apply_search_snapshot(snap),
             SearchUpdate(update) => self.tabs.borrow_mut().search_update(update),
+            DirChildren(id, children) => self.handle_properties_update(id, children),
+
             DirectoryOpenError(path, error) => {
                 // This is a special case where we failed to open a directory or read it at all.
                 // Treat it as if it were closed.

@@ -760,6 +760,14 @@ impl TabsList {
         self.find(active).unwrap().rename();
     }
 
+    pub fn active_properties(&self) {
+        let Some(active) = self.active else {
+            return warn!("Properties called with no open panes");
+        };
+
+        self.find(active).unwrap().properties();
+    }
+
     pub fn active_create(&self, folder: bool) {
         let Some(active) = self.active else {
             return warn!(

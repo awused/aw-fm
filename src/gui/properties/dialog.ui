@@ -1,0 +1,334 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="AwFmProperties" parent="GtkWindow">
+    <property name="title">Properties</property>
+    <property name="default-width">800</property>
+    <property name="default-height">600</property>
+
+
+        <child>
+          <object class="GtkLabel" id="top_text">
+            <property name="wrap">true</property>
+            <attributes>
+              <attribute name="insert-hyphens" value="false"></attribute>
+            </attributes>
+
+            <style>
+              <class name="title-4" />
+            </style>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="halign">center</property>
+            <style>
+              <class name="short-properties"/>
+            </style>
+
+
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="valign">center</property>
+
+                <child>
+                  <object class="GtkLabel">
+                    <property name="halign">start</property>
+                    <property name="label">Source</property>
+                    <style>
+                      <class name="title-4" />
+                    </style>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkLabel" id="original_size">
+                    <property name="halign">start</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkLabel" id="original_mtime">
+                    <property name="halign">start</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+
+
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="hexpand">true</property>
+
+
+        <child>
+          <object class="GtkNotebook">
+            <property name="hexpand">true</property>
+            <property name="vexpand">true</property>
+
+            <child>
+              <object class="GtkNotebookPage">
+                <property name="tab-expand">1</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="orientation">horizontal</property>
+
+                    <!-- icon -->
+                    <child>
+                      <object class="GtkBox">
+                        <property name="orientation">vertical</property>
+
+
+                        <child>
+                          <object class="GtkImage" id="icon">
+                            <property name="margin-top">6</property>
+                            <property name="margin-bottom">6</property>
+                            <property name="margin-start">6</property>
+                            <property name="margin-end">6</property>
+                            <property name="pixel-size">128</property>
+                          </object>
+                        </child>
+
+                      </object>
+                    </child>
+
+
+                    <child>
+                      <object class="GtkBox">
+                        <property name="orientation">vertical</property>
+                        <property name="margin-top">8px</property>
+                        <property name="spacing">8</property>
+
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">horizontal</property>
+
+                            <child>
+                              <object class="GtkLabel" id="name_label">
+                                <property name="label">Name:</property>
+
+                                <style>
+                                  <class name="prop-label"/>
+                                </style>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="GtkLabel" id="name_text">
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+
+                        <child>
+                          <object class="GtkBox" id="type_box">
+                            <property name="orientation">horizontal</property>
+
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label">Type:</property>
+
+                                <style>
+                                  <class name="prop-label"/>
+                                </style>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="GtkLabel" id="type_text">
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">horizontal</property>
+
+                            <child>
+                              <object class="GtkBox">
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">4px</property>
+
+                                <style>
+                                  <class name="prop-label"/>
+                                </style>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="label">Contents:</property>
+
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkSpinner" id="spinner">
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="GtkLabel" id="children">
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">horizontal</property>
+
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label">Size:</property>
+
+                                <style>
+                                  <class name="prop-label"/>
+                                </style>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="GtkLabel" id="size">
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">horizontal</property>
+
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label">Size on Disk:</property>
+
+                                <style>
+                                  <class name="prop-label"/>
+                                </style>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="GtkLabel" id="allocated">
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">horizontal</property>
+
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label">Location:</property>
+
+                                <style>
+                                  <class name="prop-label"/>
+                                </style>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="GtkLabel" id="location">
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">horizontal</property>
+
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label">Modified:</property>
+
+                                <style>
+                                  <class name="prop-label"/>
+                                </style>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="GtkLabel" id="mtime">
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- btime? -->
+
+                      </object>
+                    </child>
+
+                  </object>
+                </property>
+
+                <property name="tab">
+                  <object class="GtkLabel">
+                    <property name="label">Basic</property>
+                    <property name="use-underline">1</property>
+                  </object>
+                </property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkNotebookPage">
+                <property name="tab-expand">1</property>
+                <property name="child">
+                  <object class="GtkLabel">
+                    <property name="label">Not yet implemented</property>
+                  </object>
+                </property>
+
+                <property name="tab">
+                  <object class="GtkLabel">
+                    <property name="label">Permissions</property>
+                    <property name="use-underline">1</property>
+                  </object>
+                </property>
+              </object>
+            </child>
+
+
+          </object>
+        </child> <!-- notebook -->
+
+
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">8</property>
+            <property name="margin-top">8px</property>
+            <property name="margin-bottom">8px</property>
+            <property name="margin-end">8px</property>
+            <property name="halign">GTK_ALIGN_END</property>
+
+            <child>
+              <object class="GtkButton" id="close">
+                <property name="label">Close</property>
+                <property name="width-request">96</property>
+              </object>
+            </child>
+
+          </object>
+        </child>
+
+      </object>
+    </child>
+  </template>
+</interface>
+
+

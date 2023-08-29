@@ -146,6 +146,8 @@ context_menu = [
 
   {name = "Ascending", submenu = "Sort", action = "SortDir ascending"},
   {name = "Descending", submenu = "Sort", action = "SortDir descending"},
+
+  {name = "Properties", action = "Properties", selection = "at_least_one"},
 ]
 
 # How to handle directory collisions during file operations.

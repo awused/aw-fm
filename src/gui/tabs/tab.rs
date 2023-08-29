@@ -1364,6 +1364,15 @@ impl Tab {
         gui_run(|g| g.rename_dialog(self.id(), path));
     }
 
+    pub fn properties(&self) {
+        let files = Selected::from(self.visible_selection());
+        if files.len() == 0 {
+            return info!("Can't show properties for empty selection");
+        }
+
+        gui_run(|g| g.properties_dialog(files));
+    }
+
     pub fn create(&self, folder: bool) {
         gui_run(|g| g.create_dialog(self.id(), self.dir(), folder));
     }

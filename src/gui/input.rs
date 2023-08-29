@@ -19,6 +19,7 @@ use gtk::traits::{
 };
 use gtk::Orientation;
 
+use super::properties::dialog::PropDialog;
 use super::tabs::id::TabId;
 use super::Gui;
 use crate::closing;
@@ -32,6 +33,7 @@ mod help;
 #[derive(Debug, Default)]
 pub(super) struct OpenDialogs {
     help: Option<gtk::Window>,
+    pub properties: Vec<PropDialog>,
 }
 
 impl Gui {
@@ -459,6 +461,8 @@ impl Gui {
             "Delete" => return tabs.active_delete(),
 
             "Rename" => return tabs.active_rename(),
+            "Properties" => return tabs.active_properties(),
+
             "NewFolder" => return tabs.active_create(true),
             "NewFile" => return tabs.active_create(false),
 

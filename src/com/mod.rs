@@ -56,16 +56,20 @@ pub enum ManagerAction {
     Execute(Arc<Path>, Vec<(String, OsString)>),
     Script(Arc<Path>, Vec<(String, OsString)>),
 
+    DirProperties(Vec<Arc<Path>>, Arc<AtomicBool>),
+
     Flush(Vec<PathBuf>, Sender<()>),
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub struct WorkParams {
-    pub park_before_scale: bool,
-    pub jump_downscaling_queue: bool,
-    pub extract_early: bool,
-}
 
+#[derive(Debug)]
+pub struct ChildInfo {
+    pub size: u64,
+    pub allocated: u64,
+    pub files: usize,
+    pub dirs: usize,
+    pub done: bool,
+}
 
 #[derive(Debug)]
 pub enum GuiAction {
@@ -74,6 +78,8 @@ pub enum GuiAction {
     SearchSnapshot(SearchSnapshot),
     SearchUpdate(SearchUpdate),
 
+    DirChildren(Arc<AtomicBool>, ChildInfo),
+
     DirectoryOpenError(Arc<Path>, String),
     // Directory errors that aren't as fatal. Could maybe flash the tab?
     DirectoryError(Arc<Path>, String),
@@ -81,12 +87,7 @@ pub enum GuiAction {
     // Any generic error we want to convey to the user.
     ConveyError(String),
 
-    // SearchSubscription,
-    // DirectoryContents
-
-    //State(GuiState, GuiActionContext),
     Action(String),
-    // IdleUnload,
     Quit,
 }
 

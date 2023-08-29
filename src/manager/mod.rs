@@ -155,6 +155,10 @@ impl Manager {
             Execute(s, env) => self.execute(s, env),
             Script(s, env) => self.script(s, env),
 
+            DirProperties(dirs, cancel) => {
+                error!("TODO")
+            }
+
             Flush(paths, resp) => {
                 let remainder = self.flush_updates(paths);
 

@@ -12,9 +12,9 @@ use gtk::gdk::Texture;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
     self, Cancellable, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE,
-    FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE, FILE_ATTRIBUTE_STANDARD_ICON,
-    FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE, FILE_ATTRIBUTE_STANDARD_TYPE,
-    FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+    FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE, FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+    FILE_ATTRIBUTE_STANDARD_ICON, FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
+    FILE_ATTRIBUTE_STANDARD_TYPE, FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
     FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
 };
 use gtk::glib::{self, GStr, Object, Variant, WeakRef};
@@ -37,6 +37,7 @@ static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
         FILE_ATTRIBUTE_STANDARD_ICON,
         FILE_ATTRIBUTE_STANDARD_IS_SYMLINK,
         FILE_ATTRIBUTE_STANDARD_SIZE,
+        FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE,
         FILE_ATTRIBUTE_TIME_MODIFIED,
         FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
         FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
@@ -90,6 +91,8 @@ pub enum EntryKind {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Entry {
     pub kind: EntryKind,
+    pub allocated_size: u64,
+
     // This is an absolute but NOT canonicalized path.
     pub abs_path: Arc<Path>,
     // It's kind of expensive to do this but necessary as an mtime/ctime tiebreaker anyway.
@@ -197,6 +200,7 @@ impl Entry {
         let mime = info.attribute_string(FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE).unwrap().to_string();
 
         let size = info.attribute_uint64(FILE_ATTRIBUTE_STANDARD_SIZE);
+        let allocated_size = info.attribute_uint64(FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE);
 
         let file_type = info.attribute_uint32(FILE_ATTRIBUTE_STANDARD_TYPE);
         let mut needs_full_count = false;
@@ -230,6 +234,7 @@ impl Entry {
         Ok((
             Self {
                 kind,
+                allocated_size,
                 abs_path,
                 name,
                 mtime,
@@ -303,6 +308,7 @@ impl Entry {
         );
         Self {
             kind: self.kind,
+            allocated_size: self.allocated_size,
             abs_path: self.abs_path.clone(),
             name: self.name.clone(),
             mtime: self.mtime,
