@@ -31,6 +31,33 @@ pub(super) fn event_run_tab<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(id: Tab
     tabs_run(|t| t.must_run_tab(id, f))
 }
 
+#[derive(Debug)]
+pub(super) enum SplitChild {
+    Tab(TabId),
+    Split(Box<Split>),
+}
+
+#[derive(Debug)]
+pub(super) struct Split {
+    // pub orientation: Orientation,
+    // pub position: f64,
+    pub first: SplitChild,
+    pub last: SplitChild,
+}
+
+#[derive(Debug)]
+pub(super) struct Group {
+    // Only needed for restoring from closed tabs, for later
+    // id: GroupUid,
+    // The current parent, subject to change
+    pub parent: TabId,
+    // _NOT_ including the parent
+    pub children: Vec<TabId>,
+    // Only None when the tab group is defunct
+    // layout: Option<Split>,
+    // layout: Split,
+}
+
 
 // This is tightly coupled the Tab implementation, right now.
 #[derive(Debug)]
@@ -41,6 +68,8 @@ pub struct TabsList {
     // TODO -- limit number of tabs to 255 or so?
     tabs: Vec<Tab>,
 
+    // We need to keep all groups alive so that reopening closed tabs will recreate defunct groups
+    // groups: Vec<Rc<RefCell<Group>>>,
     closed: Vec<ClosedTab>,
 
     // There is always one active tab or no visible tabs.
@@ -99,11 +128,12 @@ impl TabsList {
             return;
         };
 
-        let (tab, element) = Tab::new(next_id(), target, &[]);
+        let (tab, element) = Tab::new(next_id(), target, &[], |w| self.pane_container.append(w));
 
         self.tabs.push(tab);
         self.tab_elements.append(&element);
-        self.tabs[0].attach_pane(&[], &[], |w| self.pane_container.append(w));
+        // self.tabs[0].make_visible(&[], &[], |w| self.pane_container.append(w));
+        self.tabs[0].make_visible(&[], &[]);
         self.set_active(self.tabs[0].id());
     }
 
@@ -290,47 +320,76 @@ impl TabsList {
             return;
         }
 
-        let Some(active) = self.active else {
-            info!("Opening new pane on switch");
-            let pane_container = self.pane_container.clone();
-            let (left, tab, right) = self.split_around_mut(index);
-            tab.attach_pane(left, right, |w| pane_container.append(w));
-            self.set_active(id);
-            return;
-        };
+        if let Some(active) = self.active {
+            if let Some(group) = self.find(active).unwrap().group() {
+                let mut children = group.borrow().children.clone();
 
-        debug!("Switching to non-visible tab {id:?} from {:?}", active);
+                for t in &mut self.tabs {
+                    if children.is_empty() {
+                        break;
+                    };
 
-        let old_pane = self.find_mut(active).unwrap().take_pane();
-        let (left, tab, right) = self.split_around_mut(index);
-        tab.replace_pane(left, right, old_pane);
+                    let Some(pos) = children.iter().position(|id| *id == t.id()) else {
+                        continue;
+                    };
+                    children.swap_remove(pos);
 
-        self.set_active(id);
-    }
+                    t.start_hide();
+                }
 
-    fn swap_panes(&mut self, visible: TabId, inactive: TabId) {
-        debug_assert!(self.find(visible).unwrap().visible());
-        debug_assert!(!self.find(inactive).unwrap().visible());
+                let t = self.find_mut(group.borrow().parent).unwrap();
+                t.start_hide();
+                t.finish_hide();
 
-        if Some(visible) == self.active {
-            self.switch_active_tab(inactive);
-            return;
+                let mut children = group.borrow().children.clone();
+                for t in &mut self.tabs {
+                    if children.is_empty() {
+                        break;
+                    };
+
+                    let Some(pos) = children.iter().position(|id| *id == t.id()) else {
+                        continue;
+                    };
+                    children.swap_remove(pos);
+
+                    t.finish_hide();
+                }
+            } else {
+                let t = self.find_mut(active).unwrap();
+                t.start_hide();
+                t.finish_hide();
+            }
         }
 
-        info!("Swapping pane from {visible:?} to {inactive:?}");
-        error!("TODO [session restore] -- haven't tested this");
-        let new_index = self.position(inactive).unwrap();
 
-        let old_pane = self.find_mut(visible).unwrap().take_pane();
-        let (left, tab, right) = self.split_around_mut(new_index);
-        tab.replace_pane(left, right, old_pane);
+        if let Some(group) = self.tabs[index].group() {
+            debug!("Switching to non-visible tab {id:?} in group");
+
+            for c in &group.borrow().children {
+                let pos = self.position(*c).unwrap();
+
+                let (left, tab, right) = self.split_around_mut(pos);
+                tab.make_visible(left, right);
+            }
+
+            let pos = self.position(group.borrow().parent).unwrap();
+            let (left, tab, right) = self.split_around_mut(pos);
+            tab.make_visible(left, right);
+        } else {
+            debug!("Switching to non-visible tab {id:?}");
+            let (left, tab, right) = self.split_around_mut(index);
+            tab.make_visible(left, right);
+        }
+
+        self.set_active(id);
     }
 
     fn clone_active(&mut self) -> Option<(TabId, usize)> {
         let index = self.position(self.active?).unwrap();
         let element_index = self.active_element().unwrap();
 
-        let (new_tab, element) = Tab::cloned(next_id(), &self.tabs[index]);
+        let (new_tab, element) =
+            Tab::cloned(next_id(), &self.tabs[index], |w| self.pane_container.append(w));
         let id = new_tab.id();
 
         self.tabs.push(new_tab);
@@ -345,7 +404,8 @@ impl TabsList {
         target: NavTarget,
         activate: bool,
     ) -> TabId {
-        let (new_tab, element) = Tab::new(next_id(), target, &self.tabs);
+        let (new_tab, element) =
+            Tab::new(next_id(), target, &self.tabs, |w| self.pane_container.append(w));
 
         let id = new_tab.id();
         self.tabs.push(new_tab);
@@ -373,7 +433,7 @@ impl TabsList {
             .and_then(|a| self.element_position(a).map(|i| i + 1))
             .unwrap_or_default();
 
-        let (new_tab, element) = Tab::reopen(closed, &self.tabs);
+        let (new_tab, element) = Tab::reopen(closed, &self.tabs, |w| self.pane_container.append(w));
 
         let id = new_tab.id();
         self.tabs.push(new_tab);
@@ -417,36 +477,36 @@ impl TabsList {
     // Used as an implementation detail for session loading
     // returns false if it fails, and session loading should stop if it happens.
     #[allow(unused)]
-    fn restore_split(&mut self, first: usize, second: usize, orient: Orientation) -> bool {
-        if first >= self.tabs.len()
-            || second >= self.tabs.len()
-            || first == second
-            || !self.tabs[first].visible()
-            || self.tabs[second].visible()
-        {
-            error!(
-                "Invalid or corrupt saved session. Split {first}:{} / {second}:{} is not valid. \
-                 {} total tabs.",
-                self.tabs.get(first).map(Tab::visible).unwrap_or_default(),
-                self.tabs.get(second).map(Tab::visible).unwrap_or_default(),
-                self.tabs.len()
-            );
-            gui_run(|g| g.error("Invalid or corrupt saved session. Check the logs"));
-            return false;
-        }
-
-        let Some(paned) = self.tabs[first].split(orient) else {
-            info!("Called split {orient} but pane was too small to split");
-            show_warning("Could not restore session: window was too small");
-            return false;
-        };
-
-        let (left, tab, right) = self.split_around_mut(second);
-        tab.attach_pane(left, right, |w| paned.set_end_child(Some(w)));
-
-        true
-    }
-
+    // fn restore_split(&mut self, first: usize, second: usize, orient: Orientation) -> bool {
+    //     if first >= self.tabs.len()
+    //         || second >= self.tabs.len()
+    //         || first == second
+    //         || !self.tabs[first].visible()
+    //         || self.tabs[second].visible()
+    //     {
+    //         error!(
+    //             "Invalid or corrupt saved session. Split {first}:{} / {second}:{} is not valid. \
+    //              {} total tabs.",
+    //             self.tabs.get(first).map(Tab::visible).unwrap_or_default(),
+    //             self.tabs.get(second).map(Tab::visible).unwrap_or_default(),
+    //             self.tabs.len()
+    //         );
+    //         gui_run(|g| g.error("Invalid or corrupt saved session. Check the logs"));
+    //         return false;
+    //     }
+    //
+    //     let Some(paned) = self.tabs[first].split(orient) else {
+    //         info!("Called split {orient} but pane was too small to split");
+    //         show_warning("Could not restore session: window was too small");
+    //         return false;
+    //     };
+    //
+    //     let (left, tab, right) = self.split_around_mut(second);
+    //     tab.make_visible(left, right);
+    //
+    //     true
+    // }
+    //
     pub fn active_split(&mut self, orient: Orientation, tab: Option<TabId>) {
         let Some(active) = self.active else {
             show_warning("Split called with no panes to split");
@@ -454,11 +514,22 @@ impl TabsList {
         };
 
         let existing = if let Some(tab) = tab {
-            // Called synchronously from a click.
             let index = self.position(tab).unwrap();
             if self.tabs[index].visible() {
                 return self.set_active(tab);
             }
+
+            if self.tabs[index].group().is_some() {
+                todo!()
+            }
+
+            let eindex = self.element_position(tab).unwrap();
+            let moved = self.tab_elements.item(eindex).unwrap();
+            self.tab_elements.remove(eindex);
+
+            let dest = self.element_position(active).unwrap() + 1;
+            self.tab_elements.insert(dest, &moved);
+
             Some((tab, index))
         } else {
             None
@@ -466,14 +537,20 @@ impl TabsList {
 
         let active_pos = self.position(active).unwrap();
 
-        let Some(paned) = self.tabs[active_pos].split(orient) else {
+        let Some((paned, group)) = self.tabs[active_pos].split(orient) else {
             return show_warning("Pane is too small to split");
         };
 
+        let eindex = self.element_position(active).unwrap();
+
         let (id, index) = existing.unwrap_or_else(|| self.clone_active().unwrap());
 
+        if self.tabs[index].group().is_some() {
+            self.remove_tab_from_group(id);
+        }
+
         let (left, tab, right) = self.split_around_mut(index);
-        tab.attach_pane(left, right, |w| paned.set_end_child(Some(w)));
+        tab.make_visible_end_child(left, right, group, paned);
 
         self.set_active(id);
     }
@@ -506,39 +583,77 @@ impl TabsList {
         }
     }
 
+    // Removes a tab from its group and moves its element out of the group.
+    // Does not change the active tab
+    fn remove_tab_from_group(&mut self, id: TabId) {
+        debug!("Removing {id:?} from its group");
+
+        let index = self.position(id).unwrap();
+        let tab = &self.tabs[index];
+        let group = tab.group().unwrap();
+
+        let mut b = group.borrow_mut();
+
+        let eindex = self.element_position(id).unwrap();
+
+        if b.children.is_empty() {
+            // Nothing to do here.
+            return trace!("Not removing {id:?} from group where it is the only member");
+        } else if b.parent == tab.id() {
+            // We don't need to move it, but we do need to promote the next child
+            // There must be at least one child.
+            let next = self.tab_elements.item(eindex + 1).unwrap();
+            let next = next.downcast::<TabElement>().unwrap();
+            let new_parent = next.imp().tab.get().unwrap();
+
+
+            let pos = b.children.iter().position(|c| c == new_parent).unwrap();
+            b.children.swap_remove(pos);
+            b.parent = *new_parent;
+            drop(b);
+
+            self.find(*new_parent).unwrap().become_parent();
+        } else {
+            let pos = b.children.iter().position(|c| *c == id).unwrap();
+            b.children.swap_remove(pos);
+            drop(b);
+
+            // tab.leave_group();
+            let mut dest = eindex + 1;
+            while dest < self.tab_elements.n_items() {
+                let next_element =
+                    self.tab_elements.item(dest).and_downcast::<TabElement>().unwrap();
+                let tab = self.find(*next_element.imp().tab.get().unwrap()).unwrap();
+
+                if let Some(next_group) = tab.group() {
+                    if Rc::ptr_eq(&next_group, &group) {
+                        dest += 1;
+                        continue;
+                    }
+                }
+
+                break;
+            }
+
+            dest -= 1;
+
+            if dest != eindex {
+                // Must be at least two elements
+                let moved = self.tab_elements.item(eindex).unwrap();
+                self.tab_elements.remove(eindex);
+                self.tab_elements.insert(dest - 1, &moved);
+            }
+        }
+
+        self.tabs[index].reattach_and_hide_pane(&self.pane_container);
+        self.tabs[index].leave_group();
+    }
+
     pub(super) fn close_tab(&mut self, id: TabId) {
         let index = self.position(id).unwrap();
         let eindex = self.element_position(id).unwrap();
 
-
         let tab = &self.tabs[index];
-        if tab.visible() {
-            // If there's another tab that isn't visible, use it.
-            // We want to prioritize the first tab to the left/above in the visible list.
-            // If there is no tab at all, we'll also be closing the pane.
-            //
-            // The number of visible tabs is bounded to a small number by practicality.
-            let visible_tabs: Vec<_> =
-                self.tabs.iter().filter(|t| t.visible()).map(Tab::id).collect();
-            let prioritized = (0..eindex).rev().chain(eindex + 1..self.tab_elements.n_items());
-
-            for e in prioritized {
-                let other_id = *self.element(e).imp().tab.get().unwrap();
-                if !visible_tabs.contains(&other_id) {
-                    self.swap_panes(id, other_id);
-                    break;
-                }
-            }
-        }
-
-        // swap_panes will have changed self.active if there was another inactive tab to swap in.
-        if Some(id) == self.active {
-            if let Some(next) = self.tabs[index].next_of_kin_by_pane() {
-                self.set_active(next);
-            } else {
-                self.active = None;
-            }
-        }
 
         let after = if eindex > 0 {
             self.tab_elements
@@ -552,6 +667,22 @@ impl TabsList {
         } else {
             None
         };
+
+        if let Some(group) = tab.group() {
+            // Real pain here.
+            todo!()
+        } else if self.tabs.len() > 1 && tab.visible() {
+            debug_assert_eq!(Some(id), self.active);
+            // If there's another tab that isn't visible, use it.
+            // We want to prioritize the first tab to the left/above in the visible list.
+            let next = if eindex > 0 { eindex - 1 } else { eindex + 1 };
+            let other_id = *self.element(next).imp().tab.get().unwrap();
+
+            let target_tab =
+                self.find(other_id).unwrap().group().map_or(other_id, |g| g.borrow().parent);
+
+            self.switch_active_tab(target_tab);
+        }
 
         let closed = self.tabs.swap_remove(index).close(after);
         self.tab_elements.remove(eindex);
@@ -683,11 +814,12 @@ impl TabsList {
 
         if let Some(kin) = self.tabs[index].next_of_kin_by_pane() {
             self.set_active(kin);
+            self.remove_tab_from_group(active);
         } else {
             self.active = None;
         }
 
-        self.tabs[index].close_pane();
+        self.tabs[index].hide_pane();
     }
 
     pub fn active_close_both(&mut self) {
@@ -780,6 +912,32 @@ impl TabsList {
     }
 
     pub fn reorder(&mut self, moved: TabId, dest: TabId, after: bool) {
+        let Some(src_idx) = self.position(moved) else {
+            return;
+        };
+        let Some(dest_idx) = self.position(dest) else {
+            return;
+        };
+
+        let sg = self.tabs[src_idx].group();
+        let dg = self.tabs[dest_idx].group();
+
+        if sg.as_ref().is_some_and(|sg| dg.as_ref().is_some_and(|dg| Rc::ptr_eq(sg, dg))) {
+            // Same group
+            todo!();
+        }
+
+        if let Some(sg) = sg {
+            self.remove_tab_from_group(moved);
+        }
+
+
+        if let Some(dg) = dg {
+            // Move after the target group OR before the parent, but only the parent.
+        }
+
+        let src_group = self.find(moved).unwrap().group();
+
         let src = self.element_position(moved).unwrap();
 
         let moved = self.tab_elements.item(src).unwrap();
@@ -819,7 +977,7 @@ impl TabsList {
             // We do swap_remove so this is fine.
             let tab = &mut self.tabs[old_tabs - n - 1];
             if tab.visible() {
-                tab.close_pane();
+                tab.hide_pane();
             }
             let id = tab.id();
             self.close_tab(id);

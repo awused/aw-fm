@@ -1,3 +1,4 @@
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::Path;
@@ -17,6 +18,7 @@ use self::flat_dir::FlatDir;
 use super::contents::Contents;
 use super::element::TabElement;
 use super::id::{TabId, TabUid};
+use super::list::Group;
 use super::pane::Pane;
 use super::search::Search;
 use super::{HistoryEntry, NavTarget, PaneState, ScrollPosition};
@@ -43,82 +45,109 @@ use crate::gui::{applications, gui_run, show_error, show_warning, tabs_run, Sele
 enum MaybePane {
     Pane(Pane),
     Pending(Pane, PaneState),
-    Closed(PaneState),
+    Detached {
+        pane: Pane,
+        state: PaneState,
+        // If res is present, it was in the "Pane" state.
+        // If res is present and matches the resolution on reattach, we don't need to apply the
+        // state.
+        // res: Option<(u32, u32)>,
+        pending: bool,
+    },
+    Empty,
 }
 
 impl MaybePane {
-    const fn has_pane(&self) -> bool {
+    const fn visible(&self) -> bool {
         match &self {
             Self::Pane(_) | Self::Pending(..) => true,
-            Self::Closed(_) => false,
+            Self::Detached { .. } => false,
+            Self::Empty => unreachable!(),
         }
     }
 
-    const fn get(&self) -> Option<&Pane> {
+    const fn get_visible(&self) -> Option<&Pane> {
         match self {
             Self::Pane(p) | Self::Pending(p, _) => Some(p),
-            Self::Closed(_) => None,
+            Self::Detached { .. } => None,
+            Self::Empty => unreachable!(),
         }
     }
 
-    fn getm(&mut self) -> Option<&mut Pane> {
+    const fn get(&self) -> &Pane {
+        match self {
+            Self::Pane(p) | Self::Pending(p, _) | Self::Detached { pane: p, .. } => p,
+            Self::Empty => unreachable!(),
+        }
+    }
+
+    fn get_visible_mut(&mut self) -> Option<&mut Pane> {
         match self {
             Self::Pane(p) | Self::Pending(p, _) => Some(p),
-            Self::Closed(_) => None,
+            Self::Detached { .. } => None,
+            Self::Empty => unreachable!(),
         }
     }
 
     fn clone_state(&self, list: &Contents) -> PaneState {
         match self {
             Self::Pane(p) => p.get_state(list),
-            Self::Pending(_, state) | Self::Closed(state) => state.clone(),
+            Self::Detached { state, .. } | Self::Pending(_, state) => state.clone(),
+            Self::Empty => unreachable!(),
         }
     }
 
-    fn overwrite_state(&mut self, state: PaneState) {
+    fn overwrite_state(&mut self, new_state: PaneState) {
         match self {
             Self::Pane(_p) => {
-                let temp = Self::Closed(PaneState::default());
+                let temp = Self::Empty;
                 let old = std::mem::replace(self, temp);
                 let Self::Pane(pane) = old else {
                     unreachable!()
                 };
-                *self = Self::Pending(pane, state);
+                *self = Self::Pending(pane, new_state);
             }
-            Self::Pending(_, old_state) | Self::Closed(old_state) => *old_state = state,
+            Self::Detached { state, .. } | Self::Pending(_, state) => *state = new_state,
+            Self::Empty => unreachable!(),
         }
     }
 
-    fn set_pane(&mut self, pane: Pane) {
+    // TODO
+    fn make_visible(&mut self) {
         match self {
-            Self::Pane(_) | Self::Pending(..) => unreachable!(),
-            Self::Closed(state) => *self = Self::Pending(pane, std::mem::take(state)),
+            Self::Detached { .. } => {
+                let old = std::mem::replace(self, Self::Empty);
+                let Self::Detached { pane, state, pending } = old else {
+                    unreachable!()
+                };
+                pane.set_visible(true);
+                *self = if pending { Self::Pending(pane, state) } else { Self::Pane(pane) };
+            }
+            Self::Pane(_) | Self::Pending(..) | Self::Empty => unreachable!(),
         }
     }
 
-    fn take_pane(&mut self, list: &Contents) -> Pane {
-        let old = match self {
-            Self::Pane(p) => {
-                let new = Self::Closed(p.get_state(list));
-                std::mem::replace(self, new)
+    fn mark_detached(&mut self, list: &Contents) {
+        match std::mem::replace(self, Self::Empty) {
+            Self::Detached { .. } | Self::Empty => unreachable!(),
+            Self::Pane(pane) => {
+                let state = pane.get_state(list);
+                *self = Self::Detached { pane, state, pending: false };
             }
-            Self::Pending(_p, state) => {
-                let state = std::mem::take(state);
-                std::mem::replace(self, Self::Closed(state))
+            Self::Pending(pane, state) => {
+                *self = Self::Detached { pane, state, pending: true };
             }
-            Self::Closed(_) => unreachable!(),
-        };
-
-        let (Self::Pane(p) | Self::Pending(p, _)) = old else {
-            unreachable!()
-        };
-        p
+        }
     }
 
     fn snapshot_pane(&mut self, list: &Contents) {
-        let Self::Pane(p) = self else { return };
-        let state = p.get_state(list);
-        let old = std::mem::replace(self, Self::Closed(PaneState::default()));
+        let state = match self {
+            Self::Detached { pending, .. } => return *pending = true,
+            Self::Pending(..) => return,
+            Self::Empty => unreachable!(),
+            Self::Pane(p) => p.get_state(list),
+        };
+        let old = std::mem::replace(self, Self::Empty);
         let Self::Pane(p) = old else { unreachable!() };
 
         *self = Self::Pending(p, state);
@@ -128,7 +157,7 @@ impl MaybePane {
         let Self::Pending(_p, _state) = self else {
             unreachable!()
         };
-        let old = std::mem::replace(self, Self::Closed(PaneState::default()));
+        let old = std::mem::replace(self, Self::Empty);
         let Self::Pending(pane, state) = old else {
             unreachable!()
         };
@@ -150,6 +179,8 @@ impl MaybePane {
 #[derive(Debug)]
 pub(super) struct Tab {
     id: TabUid,
+    group: Option<Rc<RefCell<Group>>>,
+
     dir: FlatDir,
     pane: MaybePane,
 
@@ -167,6 +198,7 @@ pub(super) struct Tab {
 #[derive(Debug)]
 pub(super) struct ClosedTab {
     id: TabUid,
+    // group: GroupId,
     pub after: Option<TabId>,
     current: HistoryEntry,
     past: Vec<HistoryEntry>,
@@ -178,8 +210,12 @@ impl Tab {
         self.id.copy()
     }
 
+    pub fn group(&self) -> Option<Rc<RefCell<Group>>> {
+        self.group.clone()
+    }
+
     pub const fn visible(&self) -> bool {
-        self.pane.has_pane()
+        self.pane.visible()
     }
 
     pub fn unloaded(&self) -> bool {
@@ -202,6 +238,10 @@ impl Tab {
         Arc::ptr_eq(self.dir.path(), other)
     }
 
+    const fn visible_contents(&self) -> &Contents {
+        if let Some(search) = &self.search { search.contents() } else { &self.contents }
+    }
+
     const fn visible_selection(&self) -> &MultiSelection {
         if let Some(search) = &self.search {
             &search.contents().selection
@@ -218,7 +258,12 @@ impl Tab {
         other.iter().filter(|t| self.matches_arc(t.dir.path()))
     }
 
-    pub fn new(id: TabUid, target: NavTarget, existing_tabs: &[Self]) -> (Self, TabElement) {
+    pub fn new(
+        id: TabUid,
+        target: NavTarget,
+        existing_tabs: &[Self],
+        insert: impl FnOnce(&Widget),
+    ) -> (Self, TabElement) {
         debug!("Opening tab {id:?} to {target:?}");
         // fetch metatada synchronously, even with a donor
         let settings = gui_run(|g| g.database.get(target.dir.clone()));
@@ -228,11 +273,29 @@ impl Tab {
         let contents = Contents::new(settings.sort);
         let state = PaneState::for_jump(target.scroll);
 
+        let pane = Pane::new_flat(id.copy(), dir.path(), settings, &contents.selection, insert);
+
+        // if let Some(search) = &self.search {
+        //     let pane = Pane::new_search(
+        //         self.id(),
+        //         search.query(),
+        //         self.settings,
+        //         &search.contents().selection,
+        //         search.filter.clone(),
+        //         search.contents().filtered.clone().unwrap(),
+        //         attach,
+        // );
+        // self.pane.set_pane(pane);
+        // } else {
+        // self.pane.set_pane(pane);
+        // }
 
         let mut t = Self {
             id,
+            group: None,
+
             dir,
-            pane: MP::Closed(state),
+            pane: MP::Detached { pane, state, pending: true },
 
             settings,
             contents,
@@ -247,7 +310,7 @@ impl Tab {
         (t, element)
     }
 
-    pub fn cloned(id: TabUid, source: &Self) -> (Self, TabElement) {
+    pub fn cloned(id: TabUid, source: &Self, insert: impl FnOnce(&Widget)) -> (Self, TabElement) {
         // Assumes inactive tabs cannot be cloned.
         let mut contents = Contents::new(source.settings.sort);
         let element = TabElement::new(id.copy(), Path::new(""));
@@ -266,11 +329,35 @@ impl Tab {
 
         let search = source.search.as_ref().map(|s| s.clone_for(&contents));
 
+        let pane = if let Some(search) = &search {
+            Pane::new_search(
+                id.copy(),
+                search.query(),
+                source.settings,
+                &search.contents().selection,
+                search.filter.clone(),
+                search.contents().filtered.clone().unwrap(),
+                insert,
+            )
+        } else {
+            Pane::new_flat(
+                id.copy(),
+                source.dir.path(),
+                source.settings,
+                &contents.selection,
+                insert,
+            )
+        };
+
+        let state = source.pane.clone_state(&source.contents);
+
         (
             Self {
                 id,
+                group: None,
+
                 dir: source.dir.clone(),
-                pane: MP::Closed(source.pane.clone_state(&source.contents)),
+                pane: MP::Detached { pane, state, pending: true },
 
                 settings: source.settings,
                 contents,
@@ -283,7 +370,11 @@ impl Tab {
         )
     }
 
-    pub fn reopen(closed: ClosedTab, existing_tabs: &[Self]) -> (Self, TabElement) {
+    pub fn reopen(
+        closed: ClosedTab,
+        existing_tabs: &[Self],
+        insert: impl FnOnce(&Widget),
+    ) -> (Self, TabElement) {
         debug!("Reopening closed tab {closed:?}");
         let settings = gui_run(|g| g.database.get(closed.current.location.clone()));
 
@@ -291,11 +382,20 @@ impl Tab {
         let dir = FlatDir::new(closed.current.location);
         let contents = Contents::new(settings.sort);
 
+        let pane =
+            Pane::new_flat(closed.id.copy(), dir.path(), settings, &contents.selection, insert);
 
         let mut t = Self {
             id: closed.id,
+            // TODO [group]
+            group: None,
+
             dir,
-            pane: MP::Closed(closed.current.state),
+            pane: MP::Detached {
+                pane,
+                state: closed.current.state,
+                pending: true,
+            },
 
             settings,
             contents,
@@ -335,15 +435,25 @@ impl Tab {
     }
 
     #[must_use]
-    pub fn split(&mut self, orient: Orientation) -> Option<gtk::Paned> {
-        self.pane.get().unwrap().split(orient)
+    pub fn split(&mut self, orient: Orientation) -> Option<(gtk::Paned, Rc<RefCell<Group>>)> {
+        let Some(paned) = self.pane.get_visible().unwrap().split(orient) else {
+            return None;
+        };
+        if self.group.is_none() {
+            self.group = Some(Rc::new(RefCell::new(Group {
+                parent: self.id.copy(),
+                children: Vec::new(),
+            })));
+        }
+
+        Some((paned, self.group.clone().unwrap()))
     }
 
     fn open_search(&mut self, query: String) {
         trace!("Creating Search for {:?}", self.id);
         let mut search = Search::new(self.dir.path().clone(), &self.contents, query);
 
-        let Some(pane) = self.pane.getm() else {
+        let Some(pane) = self.pane.get_visible_mut() else {
             self.search = Some(search);
             return;
         };
@@ -375,7 +485,7 @@ impl Tab {
 
         self.element.flat_title(self.dir.path());
 
-        let Some(pane) = self.pane.getm() else {
+        let Some(pane) = self.pane.get_visible_mut() else {
             return;
         };
 
@@ -387,7 +497,7 @@ impl Tab {
         assert!(self.visible());
 
         if let Some(_search) = &mut self.search {
-            let pane = self.pane.getm().unwrap();
+            let pane = self.pane.get_visible_mut().unwrap();
             pane.update_search(&query);
             return;
         }
@@ -415,7 +525,7 @@ impl Tab {
 
     // This is the easiest implementation, but it is clumsy
     pub fn unload_unchecked(&mut self) {
-        if let Some(pane) = self.pane.get() {
+        if let Some(pane) = self.pane.get_visible() {
             pane.move_active_focus_to_text();
         }
 
@@ -448,7 +558,7 @@ impl Tab {
 
     fn apply_snapshot_inner(&mut self, snap: EntryObjectSnapshot) {
         if self.settings.display_mode == DisplayMode::Icons {
-            if let Some(scroller) = self.pane.get().map(Pane::workaround_scroller) {
+            if let Some(scroller) = self.pane.get_visible().map(Pane::workaround_scroller) {
                 if scroller.vscrollbar_policy() != gtk::PolicyType::Never {
                     warn!("Locking scrolling to work around gtk crash");
                     scroller.set_vscrollbar_policy(gtk::PolicyType::Never);
@@ -596,10 +706,10 @@ impl Tab {
         if let Some(search) = &mut self.search {
             search.update_settings(self.settings);
 
-            if let Some(p) = self.pane.getm() {
+            if let Some(p) = self.pane.get_visible_mut() {
                 p.update_settings(self.settings, search.contents())
             }
-        } else if let Some(p) = self.pane.getm() {
+        } else if let Some(p) = self.pane.get_visible_mut() {
             p.update_settings(self.settings, &self.contents)
         }
         self.save_settings();
@@ -662,7 +772,7 @@ impl Tab {
 
             if was_search {
                 // Contents were cleared above
-            } else if self.pane.has_pane() && self.settings == old_settings {
+            } else if self.pane.visible() && self.settings == old_settings {
                 // Deliberately do not clear or update self.contents here, not yet.
                 // This allows us to keep something visible just a tiny bit longer.
                 // Safe enough when the settings match.
@@ -676,7 +786,7 @@ impl Tab {
             self.close_search();
         }
 
-        if let Some(pane) = self.pane.getm() {
+        if let Some(pane) = self.pane.get_visible_mut() {
             // Cannot be a search pane
             debug_assert!(self.search.is_none());
             pane.update_location(self.dir.path(), self.settings, &self.contents);
@@ -687,12 +797,12 @@ impl Tab {
 
     pub fn set_active(&mut self) {
         assert!(self.visible(), "Called set_active on a tab that isn't visible");
-        self.pane.getm().unwrap().set_active(true);
+        self.pane.get_visible_mut().unwrap().set_active(true);
         self.element.set_active(true);
     }
 
     pub fn set_inactive(&mut self) {
-        if let Some(pane) = self.pane.getm() {
+        if let Some(pane) = self.pane.get_visible_mut() {
             pane.set_active(false);
         }
         self.element.set_active(false);
@@ -728,8 +838,7 @@ impl Tab {
         // Smart case seeking?
         // Prefix instead?
         let fragment = fragment.to_lowercase();
-        let contents =
-            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+        let contents = self.visible_contents();
 
         for i in range {
             let eo = contents.selection.item(i).and_downcast::<EntryObject>().unwrap();
@@ -1019,7 +1128,7 @@ impl Tab {
         pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
 
         let state = self.pane.must_resolve_pending();
-        let pane = self.pane.getm().unwrap();
+        let pane = self.pane.get_visible_mut().unwrap();
 
         if let Some(search) = &self.search {
             pane.apply_state(state, search.contents());
@@ -1028,84 +1137,87 @@ impl Tab {
         }
     }
 
-    pub fn attach_pane<F: FnOnce(&Widget)>(&mut self, left: &[Self], right: &[Self], attach: F) {
+    pub fn make_visible(&mut self, left: &[Self], right: &[Self]) {
         if self.visible() {
             error!("Pane {:?} already displayed", self.id);
             return;
         }
 
-        if let Some(search) = &self.search {
-            let pane = Pane::new_search(
-                self.id(),
-                search.query(),
-                self.settings,
-                &search.contents().selection,
-                search.filter.clone(),
-                search.contents().filtered.clone().unwrap(),
-                attach,
-            );
-            self.pane.set_pane(pane);
-        } else {
-            let pane = Pane::new_flat(
-                self.id(),
-                self.dir.path(),
-                self.settings,
-                &self.contents.selection,
-                attach,
-            );
-            self.pane.set_pane(pane);
+        if self.group.is_some() {
+            self.pane.get().show_ancestors();
         }
 
+        self.pane.make_visible();
         self.element.set_pane_visible(true);
 
         self.load(left, right);
         self.apply_pane_state();
     }
 
-    // Doesn't start loading
-    pub fn replace_pane(&mut self, left: &[Self], right: &[Self], old: Pane) {
-        info!("Replacing pane for {:?} with pane from {:?}", old.tab(), self.id());
+    // TODO -- switching away from a tab group is a two-step process
+    // We need to save the state before we start mucking around with visibility
+    pub fn start_hide(&mut self) {
+        if !self.visible() {
+            return error!("Pane {:?} already hidden", self.id);
+        }
+
+
+        if let Some(search) = &self.search {
+            self.pane.mark_detached(search.contents());
+        } else {
+            self.pane.mark_detached(&self.contents);
+        }
+    }
+
+    pub fn finish_hide(&mut self) {
         if self.visible() {
-            error!("Pane already displayed, dropping instead.");
-            return;
+            return error!("Pane {:?} not hidden", self.id);
         }
 
-        if let Some(search) = &self.search {
-            let pane = Pane::new_search(
-                self.id(),
-                search.query(),
-                self.settings,
-                &search.contents().selection,
-                search.filter.clone(),
-                search.contents().filtered.clone().unwrap(),
-                |new| old.replace_with_other_tab(new),
-            );
-
-            self.pane.set_pane(pane);
-        } else {
-            let pane = Pane::new_flat(
-                self.id(),
-                self.dir.path(),
-                self.settings,
-                &self.contents.selection,
-                |new| old.replace_with_other_tab(new),
-            );
-
-            self.pane.set_pane(pane);
+        if self.group.is_some() {
+            self.pane.get().hide_ancestors();
         }
 
-        self.element.set_pane_visible(true);
-
-        self.load(left, right);
-        self.apply_pane_state();
+        self.pane.get().set_visible(false);
+        self.element.set_pane_visible(false);
     }
 
-    pub fn close_pane(&mut self) {
-        drop(self.take_pane());
+    pub fn make_visible_end_child(
+        &mut self,
+        left: &[Self],
+        right: &[Self],
+        group: Rc<RefCell<Group>>,
+        paned: gtk::Paned,
+    ) {
+        group.borrow_mut().children.push(self.id());
+        self.group = Some(group);
+
+        self.element.set_child(true);
+
+        let p = self.pane.get();
+        p.remove_from_parent();
+        p.set_visible(true);
+        p.make_end_child(paned);
+
+        self.make_visible(left, right);
+    }
+
+    pub fn reattach_and_hide_pane(&mut self, parent: &gtk::Box) {
+        self.start_hide();
+        self.pane.get().remove_from_parent();
+        self.pane.get().append(parent);
+        self.finish_hide();
+    }
+
+    pub fn hide_pane(&mut self) {
+        self.start_hide();
+        self.pane.get().set_visible(false);
         self.element.set_active(false);
+        self.element.set_pane_visible(false);
     }
 
     pub fn close(self, after: Option<TabId>) -> ClosedTab {
+        // TODO [group]
         let current = self.current_history();
         ClosedTab {
             id: self.id,
@@ -1116,19 +1228,17 @@ impl Tab {
         }
     }
 
-    pub fn next_of_kin_by_pane(&self) -> Option<TabId> {
-        self.pane.get().and_then(Pane::next_of_kin)
+    pub fn leave_group(&mut self) {
+        self.group = None;
+        self.element.set_child(false);
     }
 
-    pub fn take_pane(&mut self) -> Pane {
-        assert!(self.pane.get().is_some(), "Called take_pane on {:?} with no pane", self.id);
+    pub fn become_parent(&self) {
+        self.element.set_child(false);
+    }
 
-        self.element.set_pane_visible(false);
-        if let Some(search) = &self.search {
-            self.pane.take_pane(search.contents())
-        } else {
-            self.pane.take_pane(&self.contents)
-        }
+    pub fn next_of_kin_by_pane(&self) -> Option<TabId> {
+        self.pane.get_visible().and_then(Pane::next_of_kin)
     }
 
     fn save_settings(&self) {
@@ -1272,7 +1382,7 @@ impl Tab {
         let text = provider.display_string();
 
         info!("Setting clipboard as: {text}");
-        if let Some(pane) = self.pane.get() {
+        if let Some(pane) = self.pane.get_visible() {
             pane.set_clipboard_text(&provider.display_string())
         }
 
@@ -1534,9 +1644,7 @@ impl Tab {
 
         info!("Scrolling to {pos:?} after completed operation in {:?}", self.id);
 
-        let contents =
-            if let Some(search) = &self.search { search.contents() } else { &self.contents };
-        let mut state = self.pane.clone_state(contents);
+        let mut state = self.pane.clone_state(self.visible_contents());
         state.scroll_pos = Some(pos);
         self.pane.overwrite_state(state);
 
@@ -1577,14 +1685,14 @@ impl Tab {
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
     pub fn workaround_disable_rubberband(&self) {
-        if let Some(pane) = self.pane.get() {
+        if let Some(pane) = self.pane.get_visible() {
             pane.workaround_disable_rubberband();
         }
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
     pub fn workaround_enable_rubberband(&self) {
-        if let Some(pane) = self.pane.get() {
+        if let Some(pane) = self.pane.get_visible() {
             pane.workaround_enable_rubberband();
         }
     }

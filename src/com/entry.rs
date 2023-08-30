@@ -598,8 +598,10 @@ mod internal {
             match self.0.borrow().as_ref().unwrap().thumbnail {
                 Thumbnail::Nothing | Thumbnail::Loaded(_) | Thumbnail::Failed => false,
                 Thumbnail::Unloaded | Thumbnail::Loading => true,
-                // This is a really niche edge case, but really it should be handled.
-                Thumbnail::Outdated(..) => true,
+                Thumbnail::Outdated(..) => {
+                    // This is a really niche edge case, but really it should be handled.
+                    true
+                }
             }
         }
 

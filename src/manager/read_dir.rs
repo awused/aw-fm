@@ -669,7 +669,7 @@ impl Drop for ChildAccumulator {
 
 impl ChildAccumulator {
     fn send(&mut self) {
-        trace!("Sending info about {} children", self.unsent);
+        // trace!("Sending info about {} children", self.unsent);
         drop(self.sender.send(GuiAction::DirChildren(self.cancel.clone(), self.info)));
         self.unsent = 0;
         self.info = ChildInfo::default();

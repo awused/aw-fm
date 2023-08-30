@@ -104,54 +104,20 @@ impl Drop for Pane {
         let Some(parent) = self.element.parent() else {
             // If parent is None here, we've explicitly detached it to replace it with another
             // pane.
-            trace!("Dropping detached pane");
-            return;
+            return trace!("Dropping detached pane");
         };
 
-        if let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
-            info!("Promoting sibling of closed pane {:?}", self.tab);
-
-            let start = paned.start_child().unwrap();
-            let end = paned.end_child().unwrap();
-            paned.set_start_child(Widget::NONE);
-            paned.set_end_child(Widget::NONE);
-
-            let start_tab =
-                start.downcast_ref::<PaneElement>().map(|te| *te.imp().tab.get().unwrap());
-            let sibling = if start_tab == Some(self.tab) { end } else { start };
-
-            // A split will always have a parent.
-            let grandparent = paned.parent().unwrap();
-            if let Some(grandpane) = grandparent.downcast_ref::<gtk::Paned>() {
-                let pos = grandpane.position();
-                let parent_is_start = grandpane
-                    .start_child()
-                    .unwrap()
-                    .downcast_ref::<gtk::Paned>()
-                    .map_or(false, |sc| sc.eq(paned));
-
-                if parent_is_start {
-                    grandpane.set_start_child(Some(&sibling));
-                } else {
-                    grandpane.set_end_child(Some(&sibling));
-                }
-                grandpane.set_position(pos);
-            } else {
-                let grandparent = grandparent.downcast_ref::<gtk::Box>().unwrap();
-                grandparent.remove(paned);
-                grandparent.append(&sibling);
-            }
-        } else {
-            // Single pane, just remove it.
-            let parent = parent.downcast_ref::<gtk::Box>().unwrap();
-            parent.remove(&self.element);
-        }
+        self.remove_from_parent();
     }
 }
 
 impl Pane {
     pub const fn tab(&self) -> TabId {
         self.tab
+    }
+
+    pub fn set_visible(&self, visible: bool) {
+        self.element.set_visible(visible);
     }
 
     fn create(tab: TabId, settings: DirSettings, selection: &MultiSelection) -> Self {
@@ -314,18 +280,19 @@ impl Pane {
         self.connections = vec![SignalHolder::new(&*imp.text_entry, signal)];
     }
 
-    pub(super) fn new_flat<F: FnOnce(&Widget)>(
+    pub(super) fn new_flat(
         tab: TabId,
         path: &Path,
         settings: DirSettings,
         selection: &MultiSelection,
-        attach: F,
+        insert: impl FnOnce(&Widget),
     ) -> Self {
         let mut pane = Self::create(tab, settings, selection);
         pane.setup_flat(path);
+        pane.set_visible(false);
 
         // Where panes are created is controlled in TabsList
-        attach(pane.element.upcast_ref());
+        insert(pane.element.upcast_ref());
 
         pane
     }
@@ -337,13 +304,14 @@ impl Pane {
         selection: &MultiSelection,
         filter: CustomFilter,
         filtered: FilterListModel,
-        attach: F,
+        insert: F,
     ) -> Self {
         let mut pane = Self::create(tab, settings, selection);
         pane.setup_search(filter, filtered, queries);
+        pane.set_visible(false);
 
         // Where panes are created is controlled in TabsList
-        attach(pane.element.upcast_ref());
+        insert(pane.element.upcast_ref());
 
         pane
     }
@@ -402,6 +370,56 @@ impl Pane {
         }
     }
 
+    pub(super) fn remove_from_parent(&self) {
+        let parent = self.element.parent().unwrap();
+
+        if let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
+            info!("Promoting sibling of pane {:?}", self.tab);
+
+            let start = paned.start_child().unwrap();
+            let end = paned.end_child().unwrap();
+            paned.set_start_child(Widget::NONE);
+            paned.set_end_child(Widget::NONE);
+
+            let start_tab =
+                start.downcast_ref::<PaneElement>().map(|te| *te.imp().tab.get().unwrap());
+            let sibling = if start_tab == Some(self.tab) { end } else { start };
+
+            // A split will always have a parent.
+            let grandparent = paned.parent().unwrap();
+            if let Some(grandpane) = grandparent.downcast_ref::<gtk::Paned>() {
+                let pos = grandpane.position();
+                let parent_is_start = grandpane
+                    .start_child()
+                    .unwrap()
+                    .downcast_ref::<gtk::Paned>()
+                    .map_or(false, |sc| sc.eq(paned));
+
+                if parent_is_start {
+                    grandpane.set_start_child(Some(&sibling));
+                } else {
+                    grandpane.set_end_child(Some(&sibling));
+                }
+                grandpane.set_position(pos);
+            } else {
+                let grandparent = grandparent.downcast_ref::<gtk::Box>().unwrap();
+                grandparent.remove(paned);
+                grandparent.append(&sibling);
+            }
+        } else {
+            let parent = parent.downcast_ref::<gtk::Box>().unwrap();
+            parent.remove(&self.element);
+        }
+    }
+
+    pub(super) fn make_end_child(&self, paned: gtk::Paned) {
+        paned.set_end_child(Some(&self.element));
+    }
+
+    pub(super) fn append(&self, parent: &gtk::Box) {
+        parent.append(&self.element);
+    }
+
     pub(super) fn update_location(&mut self, path: &Path, settings: DirSettings, list: &Contents) {
         self.update_settings(settings, list);
 
@@ -416,7 +434,7 @@ impl Pane {
     }
 
     pub(super) fn update_search(&self, query: &str) {
-        self.element.search_text(&query, query.to_string());
+        self.element.search_text(query, query.to_string());
     }
 
     pub(super) fn set_clipboard_text(&self, text: &str) {
@@ -580,6 +598,32 @@ impl Pane {
             View::Columns(v) => v.workaround_enable_rubberband(),
         }
     }
+
+    pub fn hide_ancestors(&self) {
+        let mut parent = self.element.parent().unwrap();
+
+        while let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
+            if !paned.get_visible() {
+                return;
+            }
+
+            paned.set_visible(false);
+            parent = paned.parent().unwrap();
+        }
+    }
+
+    pub fn show_ancestors(&self) {
+        let mut parent = self.element.parent().unwrap();
+
+        while let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
+            if paned.get_visible() {
+                return;
+            }
+
+            paned.set_visible(true);
+            parent = paned.parent().unwrap();
+        }
+    }
 }
 
 fn firstmost_descendent(mut widget: Widget) -> TabId {
@@ -689,7 +733,8 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
         if c.current_button() == 1 {
             tabs_run(|t| t.find(tab).unwrap().workaround_disable_rubberband());
         } else if c.current_button() == 2 {
-            if let Some(nav) = NavTarget::open_or_jump_abs(eo.get().abs_path.clone()) {
+            let path = eo.get().abs_path.clone();
+            if let Some(nav) = NavTarget::open_or_jump_abs(path) {
                 tabs_run(|t| t.create_tab(Some(tab), nav, false));
             }
         } else if c.current_event().unwrap().triggers_context_menu() {

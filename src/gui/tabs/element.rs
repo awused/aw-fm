@@ -157,6 +157,14 @@ impl TabElement {
         }
     }
 
+    pub fn set_child(&self, active: bool) {
+        if active {
+            self.add_css_class("child-tab");
+        } else {
+            self.remove_css_class("child-tab");
+        }
+    }
+
     pub fn spin(&self) {
         self.imp().spinner.start();
         self.imp().spinner.set_visible(true);

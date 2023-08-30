@@ -89,13 +89,18 @@ listview.tabs-list>* {
 .tab,
 .bookmark {
   padding-left: 3px;
-  padding-top: 8px;
   padding-bottom: 10px;
-  border-top: 1px solid black;
 }
 
-.tabs-list> :last-child {
-  border-bottom: 1px solid black;
+.bookmark {
+  border-top: 1px solid black;
+  padding-top: 8px;
+}
+
+.tab {
+  outline: 1px solid black;
+  margin-top: 1px;
+  padding-top: 7px;
 }
 
 .tab:hover,
@@ -113,6 +118,10 @@ listview.tabs-list>* {
   background: rgba(1, 120, 255, 0.6);
 }
 
+.child-tab {
+  margin-left: 20px;
+}
+
 .pane-contents {
   opacity: 0.6;
 }
@@ -123,6 +132,11 @@ listview.tabs-list>* {
 
 .prop-label {
   min-width: 140px;
+}
+
+.location-bar {
+  border-radius: 0;
+  border-left: 0;
 }
 
 /* Fix some parts of the title bar not being clickable by moving the padding to the interactive element. */
