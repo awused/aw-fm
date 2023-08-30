@@ -1370,7 +1370,7 @@ impl Tab {
             return info!("Can't show properties for empty selection");
         }
 
-        gui_run(|g| g.properties_dialog(files));
+        gui_run(|g| g.properties_dialog(self.dir.path(), self.search.is_some(), files));
     }
 
     pub fn create(&self, folder: bool) {

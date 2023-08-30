@@ -3,63 +3,7 @@
   <template class="AwFmProperties" parent="GtkWindow">
     <property name="title">Properties</property>
     <property name="default-width">800</property>
-    <property name="default-height">600</property>
-
-
-        <child>
-          <object class="GtkLabel" id="top_text">
-            <property name="wrap">true</property>
-            <attributes>
-              <attribute name="insert-hyphens" value="false"></attribute>
-            </attributes>
-
-            <style>
-              <class name="title-4" />
-            </style>
-          </object>
-        </child>
-
-        <child>
-          <object class="GtkBox">
-            <property name="orientation">horizontal</property>
-            <property name="halign">center</property>
-            <style>
-              <class name="short-properties"/>
-            </style>
-
-
-            <child>
-              <object class="GtkBox">
-                <property name="orientation">vertical</property>
-                <property name="valign">center</property>
-
-                <child>
-                  <object class="GtkLabel">
-                    <property name="halign">start</property>
-                    <property name="label">Source</property>
-                    <style>
-                      <class name="title-4" />
-                    </style>
-                  </object>
-                </child>
-
-                <child>
-                  <object class="GtkLabel" id="original_size">
-                    <property name="halign">start</property>
-                  </object>
-                </child>
-
-                <child>
-                  <object class="GtkLabel" id="original_mtime">
-                    <property name="halign">start</property>
-                  </object>
-                </child>
-              </object>
-            </child>
-          </object>
-        </child>
-
-
+    <property name="default-height">400</property>
 
     <child>
       <object class="GtkBox">
@@ -83,7 +27,6 @@
                     <child>
                       <object class="GtkBox">
                         <property name="orientation">vertical</property>
-
 
                         <child>
                           <object class="GtkImage" id="icon">
@@ -112,6 +55,7 @@
                             <child>
                               <object class="GtkLabel" id="name_label">
                                 <property name="label">Name:</property>
+                                <property name="xalign">0</property>
 
                                 <style>
                                   <class name="prop-label"/>
@@ -121,6 +65,11 @@
 
                             <child>
                               <object class="GtkLabel" id="name_text">
+                                <property name="selectable">true</property>
+
+                                <attributes>
+                                  <attribute name="insert-hyphens" value="false"></attribute>
+                                </attributes>
                               </object>
                             </child>
                           </object>
@@ -134,6 +83,7 @@
                             <child>
                               <object class="GtkLabel">
                                 <property name="label">Type:</property>
+                                <property name="xalign">0</property>
 
                                 <style>
                                   <class name="prop-label"/>
@@ -143,6 +93,11 @@
 
                             <child>
                               <object class="GtkLabel" id="type_text">
+                                <property name="selectable">true</property>
+
+                                <attributes>
+                                  <attribute name="insert-hyphens" value="false"></attribute>
+                                </attributes>
                               </object>
                             </child>
                           </object>
@@ -150,7 +105,7 @@
 
 
                         <child>
-                          <object class="GtkBox">
+                          <object class="GtkBox" id="children_box">
                             <property name="orientation">horizontal</property>
 
                             <child>
@@ -165,7 +120,11 @@
                                 <child>
                                   <object class="GtkLabel">
                                     <property name="label">Contents:</property>
+                                    <property name="xalign">0</property>
 
+                                    <style>
+                                      <class name="prop-label"/>
+                                    </style>
                                   </object>
                                 </child>
 
@@ -177,7 +136,12 @@
                             </child>
 
                             <child>
-                              <object class="GtkLabel" id="children">
+                              <object class="GtkLabel" id="children_text">
+                                <property name="selectable">true</property>
+
+                                <attributes>
+                                  <attribute name="insert-hyphens" value="false"></attribute>
+                                </attributes>
                               </object>
                             </child>
                           </object>
@@ -190,6 +154,7 @@
                             <child>
                               <object class="GtkLabel">
                                 <property name="label">Size:</property>
+                                <property name="xalign">0</property>
 
                                 <style>
                                   <class name="prop-label"/>
@@ -198,7 +163,12 @@
                             </child>
 
                             <child>
-                              <object class="GtkLabel" id="size">
+                              <object class="GtkLabel" id="size_text">
+                                <property name="selectable">true</property>
+
+                                <attributes>
+                                  <attribute name="insert-hyphens" value="false"></attribute>
+                                </attributes>
                               </object>
                             </child>
                           </object>
@@ -211,6 +181,7 @@
                             <child>
                               <object class="GtkLabel">
                                 <property name="label">Size on Disk:</property>
+                                <property name="xalign">0</property>
 
                                 <style>
                                   <class name="prop-label"/>
@@ -219,7 +190,12 @@
                             </child>
 
                             <child>
-                              <object class="GtkLabel" id="allocated">
+                              <object class="GtkLabel" id="allocated_text">
+                                <property name="selectable">true</property>
+
+                                <attributes>
+                                  <attribute name="insert-hyphens" value="false"></attribute>
+                                </attributes>
                               </object>
                             </child>
                           </object>
@@ -232,6 +208,7 @@
                             <child>
                               <object class="GtkLabel">
                                 <property name="label">Location:</property>
+                                <property name="xalign">0</property>
 
                                 <style>
                                   <class name="prop-label"/>
@@ -241,18 +218,24 @@
 
                             <child>
                               <object class="GtkLabel" id="location">
+                                <property name="selectable">true</property>
+
+                                <attributes>
+                                  <attribute name="insert-hyphens" value="false"></attribute>
+                                </attributes>
                               </object>
                             </child>
                           </object>
                         </child>
 
                         <child>
-                          <object class="GtkBox">
+                          <object class="GtkBox" id="mtime_box">
                             <property name="orientation">horizontal</property>
 
                             <child>
                               <object class="GtkLabel">
                                 <property name="label">Modified:</property>
+                                <property name="xalign">0</property>
 
                                 <style>
                                   <class name="prop-label"/>
@@ -261,7 +244,12 @@
                             </child>
 
                             <child>
-                              <object class="GtkLabel" id="mtime">
+                              <object class="GtkLabel" id="mtime_text">
+                                <property name="selectable">true</property>
+
+                                <attributes>
+                                  <attribute name="insert-hyphens" value="false"></attribute>
+                                </attributes>
                               </object>
                             </child>
                           </object>

@@ -1,5 +1,6 @@
 use std::future::ready;
 use std::io::ErrorKind;
+use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
@@ -7,7 +8,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use constants::*;
-use gtk::glib;
+use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
+use gtk::gio::{
+    self, Cancellable, FileQueryInfoFlags, FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE,
+    FILE_ATTRIBUTE_STANDARD_SIZE, FILE_ATTRIBUTE_STANDARD_TYPE,
+};
+use gtk::glib::{self, GStr};
+use gtk::prelude::FileExt;
 use ignore::{WalkBuilder, WalkState};
 use once_cell::sync::Lazy;
 use rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -21,7 +28,7 @@ use tokio::time::{sleep, sleep_until, Instant};
 
 use super::Manager;
 use crate::com::{
-    DirSnapshot, Entry, GuiAction, SearchSnapshot, SnapshotKind, SortSettings, Update,
+    ChildInfo, DirSnapshot, Entry, GuiAction, SearchSnapshot, SnapshotKind, SortSettings, Update,
 };
 use crate::config::CONFIG;
 use crate::{closing, handle_panic};
@@ -190,6 +197,7 @@ fn recurse_dir_sync(
             .git_ignore(!show_all)
             .git_global(!show_all)
             .git_exclude(!show_all)
+            .parents(!show_all)
             .build_parallel();
 
         walker.run(|| {
@@ -642,6 +650,149 @@ fn count_dir_contents(path: Arc<Path>, send_update: impl FnOnce(Entry) + Send + 
     });
 }
 
+
+struct ChildAccumulator {
+    info: ChildInfo,
+    cancel: Arc<AtomicBool>,
+    sender: glib::Sender<GuiAction>,
+    unsent: usize,
+}
+
+impl Drop for ChildAccumulator {
+    fn drop(&mut self) {
+        if self.unsent != 0 {
+            trace!("Sending info about {} unsent children on drop", self.unsent);
+            drop(self.sender.send(GuiAction::DirChildren(self.cancel.clone(), self.info)));
+        }
+    }
+}
+
+impl ChildAccumulator {
+    fn send(&mut self) {
+        trace!("Sending info about {} children", self.unsent);
+        drop(self.sender.send(GuiAction::DirChildren(self.cancel.clone(), self.info)));
+        self.unsent = 0;
+        self.info = ChildInfo::default();
+    }
+}
+
+static CHILD_ATTRIBUTES: Lazy<String> = Lazy::new(|| {
+    [
+        FILE_ATTRIBUTE_STANDARD_TYPE,
+        FILE_ATTRIBUTE_STANDARD_SIZE,
+        FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE,
+    ]
+    .map(GStr::as_str)
+    .join(",")
+});
+
+fn recurse_children(
+    dirs: Vec<Arc<Path>>,
+    cancel: Arc<AtomicBool>,
+    sender: glib::Sender<GuiAction>,
+) {
+    debug!("Recursively measuring children of {} directories", dirs.len());
+    let start = Instant::now();
+
+    let dirs: Arc<[Arc<Path>]> = dirs.into();
+    let dir_count = dirs.len();
+    let max_dir_len = dirs.iter().map(|d| d.as_os_str().as_bytes().len()).max().unwrap();
+
+    READ_POOL.spawn(move || {
+        let mut builder = WalkBuilder::new(&dirs[0]);
+        builder
+            // Uncertain.
+            .follow_links(false)
+            // Excessive, hopefully, as a backstop
+            .max_depth(Some(50))
+            .hidden(false)
+            .ignore(false)
+            .git_ignore(false)
+            .git_global(false)
+            .git_exclude(false)
+            .parents(false);
+
+        for d in &dirs[1..] {
+            builder.add(d);
+        }
+
+        let inner_cancel = cancel.clone();
+        let inner_sender = sender.clone();
+        builder.build_parallel().run(move || {
+            let mut acc = ChildAccumulator {
+                info: ChildInfo::default(),
+                cancel: inner_cancel.clone(),
+                sender: inner_sender.clone(),
+                unsent: 0,
+            };
+
+            let dirs = dirs.clone();
+            let visitor = move |res: Result<ignore::DirEntry, ignore::Error>| {
+                if acc.cancel.load(Relaxed) || closing::closed() {
+                    return WalkState::Quit;
+                }
+
+                let path = match res {
+                    Ok(dirent) => dirent.into_path(),
+                    Err(e) => {
+                        error!("Unexpected error reading directory children: {e}");
+                        return WalkState::Continue;
+                    }
+                };
+
+                if path.as_os_str().as_bytes().len() <= max_dir_len
+                    && dirs.iter().any(|d| **d == path)
+                {
+                    return WalkState::Continue;
+                }
+
+                let info = match gio::File::for_path(path).query_info(
+                    CHILD_ATTRIBUTES.as_str(),
+                    FileQueryInfoFlags::empty(),
+                    Option::<&Cancellable>::None,
+                ) {
+                    Ok(info) => info,
+                    Err(e) => {
+                        error!("Unexpected error reading directory child info: {e}");
+                        return WalkState::Continue;
+                    }
+                };
+
+                let file_type = info.attribute_uint32(FILE_ATTRIBUTE_STANDARD_TYPE);
+
+                acc.info.allocated += info.attribute_uint64(FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE);
+
+                if file_type == G_FILE_TYPE_DIRECTORY as u32 {
+                    acc.info.dirs += 1;
+                } else {
+                    acc.info.files += 1;
+                    acc.info.size += info.attribute_uint64(FILE_ATTRIBUTE_STANDARD_SIZE);
+                }
+
+                acc.unsent += 1;
+
+
+                if acc.unsent % 1000 == 0 {
+                    acc.send();
+                }
+                WalkState::Continue
+            };
+
+            Box::new(visitor)
+        });
+
+        drop(sender.send(GuiAction::DirChildren(
+            cancel,
+            ChildInfo { done: true, ..ChildInfo::default() },
+        )));
+
+        trace!(
+            "Finished measuring children of {dir_count} directories in {:?}",
+            start.elapsed()
+        );
+    });
+}
+
 impl Manager {
     pub(super) fn start_read_dir(
         &self,
@@ -655,5 +806,9 @@ impl Manager {
 
     pub(super) fn recurse_dir(&self, path: Arc<Path>, cancel: Arc<AtomicBool>) {
         spawn_local(recurse_dir(path, cancel, self.gui_sender.clone()));
+    }
+
+    pub(super) fn get_children(&self, dirs: Vec<Arc<Path>>, cancel: Arc<AtomicBool>) {
+        recurse_children(dirs, cancel, self.gui_sender.clone());
     }
 }

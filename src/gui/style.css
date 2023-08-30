@@ -121,6 +121,10 @@ listview.tabs-list>* {
   opacity: 1;
 }
 
+.prop-label {
+  min-width: 140px;
+}
+
 /* Fix some parts of the title bar not being clickable by moving the padding to the interactive element. */
 headerbar {
   padding: 0;

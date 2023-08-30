@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -7,6 +8,7 @@ use gtk::glib::{self, Object};
 use gtk::prelude::ObjectExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{ButtonExt, GtkWindowExt, WidgetExt};
+use num_format::{Locale, ToFormattedString};
 
 use crate::com::{ChildInfo, EntryObject};
 use crate::gui::Gui;
@@ -18,10 +20,13 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Window;
 }
 
+
 // TODO -- also symlinks
 impl PropDialog {
     pub(super) fn show(
         gui: &Rc<Gui>,
+        location: &Path,
+        search: bool,
         cancel: Arc<AtomicBool>,
         files: Vec<EntryObject>,
         dirs: Vec<EntryObject>,
@@ -31,6 +36,12 @@ impl PropDialog {
         let s: Self = Object::new();
         let imp = s.imp();
         imp.cancel.set(cancel).unwrap();
+
+        if !search {
+            imp.location.set_text(&location.to_string_lossy());
+        } else {
+            imp.location.set_text(&format!("Search in {}", location.to_string_lossy()));
+        }
 
         let mut size = 0;
         let mut allocated = 0;
@@ -47,22 +58,30 @@ impl PropDialog {
         imp.size.set(size);
         imp.allocated.set(allocated);
 
-        if !dirs.is_empty() {
-            imp.spinner.set_spinning(true);
+        if dirs.is_empty() {
+            imp.children_box.set_visible(false);
+            imp.spinner.stop();
+            imp.spinner.set_visible(false);
+        } else {
+            imp.spinner.start();
             imp.spinner.set_visible(true);
         }
 
         if files.len() == 1 && dirs.is_empty() {
             imp.name_text.set_text(&files[0].get().name.to_string_lossy());
             imp.type_text.set_text(&files[0].get().mime);
+            imp.mtime_text.set_text(&files[0].get().mtime.seconds_string());
 
             s.set_image(gui, &files[0]);
         } else if files.is_empty() && dirs.len() == 1 {
             imp.name_text.set_text(&dirs[0].get().name.to_string_lossy());
             imp.type_text.set_text(&dirs[0].get().mime);
+            imp.mtime_text.set_text(&dirs[0].get().mtime.seconds_string());
 
             s.set_image(gui, &dirs[0]);
         } else if dirs.is_empty() {
+            imp.mtime_box.set_visible(false);
+
             imp.name_label.set_text("");
             imp.name_text.set_text(&format!("{} files", files.len()));
 
@@ -75,12 +94,17 @@ impl PropDialog {
                 s.set_image(gui, &files[0]);
             }
         } else if files.is_empty() {
+            imp.mtime_box.set_visible(false);
+
             imp.name_label.set_text("");
             imp.name_text.set_text(&format!("{} directories", dirs.len()));
 
             imp.type_text.set_text(&dirs[0].get().mime);
             s.set_image(gui, &dirs[0]);
         } else {
+            imp.type_box.set_visible(false);
+            imp.mtime_box.set_visible(false);
+
             imp.name_label.set_text("");
             imp.name_text.set_text(&format!(
                 "{} directories and {} files",
@@ -88,7 +112,6 @@ impl PropDialog {
                 files.len()
             ));
 
-            imp.type_box.set_visible(false);
             s.default_image();
         }
 
@@ -114,6 +137,7 @@ impl PropDialog {
         s.set_transient_for(Some(&gui.window));
         s.set_modal(true);
         s.set_visible(true);
+        s.update_text();
 
         s
     }
@@ -122,7 +146,7 @@ impl PropDialog {
         Arc::ptr_eq(self.imp().cancel.get().unwrap(), id)
     }
 
-    pub(super) fn add(&self, children: ChildInfo) {
+    pub(super) fn add_children(&self, children: ChildInfo) {
         let imp = self.imp();
 
         imp.size.set(imp.size.get() + children.size);
@@ -131,9 +155,11 @@ impl PropDialog {
         imp.child_dirs.set(imp.child_dirs.get() + children.dirs);
 
         if children.done {
-            imp.spinner.set_spinning(false);
+            imp.spinner.stop();
             imp.spinner.set_visible(false);
         }
+
+        self.update_text();
     }
 
     fn set_image(&self, g: &Gui, eo: &EntryObject) {
@@ -156,6 +182,39 @@ impl PropDialog {
     fn default_image(&self) {
         self.imp().icon.set_from_icon_name(Some("text-x-generic"));
     }
+
+    fn update_text(&self) {
+        let imp = self.imp();
+        let dirs = imp.child_dirs.get();
+        let files = imp.child_files.get();
+
+        if dirs > 0 && files > 0 {
+            imp.children_text.set_text(&format!(
+                "{dirs} director{} and {files} file{}",
+                if dirs > 1 { "ies" } else { "y" },
+                if files > 1 { "s" } else { "" }
+            ));
+        } else if dirs > 0 {
+            imp.children_text
+                .set_text(&format!("{dirs} director{}", if dirs > 1 { "ies" } else { "y" }));
+        } else if files > 0 {
+            imp.children_text
+                .set_text(&format!("{files} file{}", if files > 1 { "s" } else { "" }));
+        } else if !imp.spinner.is_spinning() {
+            imp.children_text.set_text("Nothing");
+        }
+
+        imp.size_text.set_text(&format!(
+            "{} ({} bytes)",
+            humansize::format_size(imp.size.get(), humansize::WINDOWS),
+            imp.size.get().to_formatted_string(&Locale::en)
+        ));
+        imp.allocated_text.set_text(&format!(
+            "{} ({} bytes)",
+            humansize::format_size(imp.allocated.get(), humansize::WINDOWS),
+            imp.allocated.get().to_formatted_string(&Locale::en)
+        ));
+    }
 }
 
 mod imp {
@@ -170,9 +229,6 @@ mod imp {
     #[template(file = "dialog.ui")]
     pub struct PropDialog {
         #[template_child]
-        pub top_text: TemplateChild<gtk::Label>,
-
-        #[template_child]
         pub icon: TemplateChild<gtk::Image>,
 
         #[template_child]
@@ -184,22 +240,26 @@ mod imp {
         pub type_box: TemplateChild<gtk::Box>,
         #[template_child]
         pub type_text: TemplateChild<gtk::Label>,
-        // Type(s)
-        // Size (on disk)
-
-        // Count(when relevant)
-
-        // Location -- keep search in mind
-
-        // Mtime
-        // Btime ??
-        #[template_child]
-        pub original_size: TemplateChild<gtk::Label>,
-        #[template_child]
-        pub original_mtime: TemplateChild<gtk::Label>,
 
         #[template_child]
-        pub(super) spinner: TemplateChild<gtk::Spinner>,
+        pub children_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub spinner: TemplateChild<gtk::Spinner>,
+        #[template_child]
+        pub children_text: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub size_text: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub allocated_text: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub location: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub mtime_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub mtime_text: TemplateChild<gtk::Label>,
 
         #[template_child]
         pub close: TemplateChild<gtk::Button>,

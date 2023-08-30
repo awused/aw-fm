@@ -97,7 +97,7 @@ specify them.
 * `Cut`/`Copy`
   * Cuts or copies the current selection.
   * Will set the clipboard even if nothing is selected.
-* `Paste` -- partially implemented
+* `Paste`
   * Pastes into the active tab.
   * Can receive cuts and copies from aw-fm, caja, or nautilus.
   * Using this in scripts would be odd.
@@ -108,6 +108,8 @@ specify them.
   * Spawns a confirmation dialog before permanently deleting the selected items.
 * `Rename`
   * Spawns a rename dialog for the current file.
+* `Properties`
+  * Opens a fairly standard properties dialog for the current selection.
 
 ##### Navigation Commands
 

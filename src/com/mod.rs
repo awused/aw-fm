@@ -56,13 +56,13 @@ pub enum ManagerAction {
     Execute(Arc<Path>, Vec<(String, OsString)>),
     Script(Arc<Path>, Vec<(String, OsString)>),
 
-    DirProperties(Vec<Arc<Path>>, Arc<AtomicBool>),
+    GetChildren(Vec<Arc<Path>>, Arc<AtomicBool>),
 
     Flush(Vec<PathBuf>, Sender<()>),
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct ChildInfo {
     pub size: u64,
     pub allocated: u64,

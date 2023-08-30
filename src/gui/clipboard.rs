@@ -279,20 +279,10 @@ mod imp {
             Box::pin(async move {
                 match &*mime_type {
                     SPECIAL | SPECIAL_MATE | SPECIAL_GNOME => {
-                        stream
-                            .write_bytes_future(
-                                &glib::Bytes::from_static(
-                                    <&'static str>::from(operation).as_bytes(),
-                                ),
-                                priority,
-                            )
-                            .await
-                            .map(|_| ())?;
+                        write_bytes(&stream, priority, <&'static str>::from(operation).as_bytes())
+                            .await?;
 
-                        stream
-                            .write_bytes_future(&glib::Bytes::from_static(b"\n"), priority)
-                            .await
-                            .map(|_| ())?;
+                        write_bytes(&stream, priority, b"\n").await?;
 
                         Self::write_uris(&stream, priority, &entries).await
                     }
