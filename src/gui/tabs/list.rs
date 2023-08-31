@@ -417,7 +417,14 @@ impl TabsList {
 
         let index = closed
             .after
-            .and_then(|a| self.element_position(a).map(|i| i + 1))
+            .and_then(|a| self.find(a))
+            .and_then(|t| {
+                if let Some(g) = t.multi_tab_group() {
+                    Some(self.element_position(g.borrow().parent).unwrap() + g.borrow().size())
+                } else {
+                    self.element_position(t.id()).map(|i| i + 1)
+                }
+            })
             .unwrap_or_default();
 
         let (new_tab, element) = Tab::reopen(closed, &self.tabs, |w| self.pane_container.append(w));
