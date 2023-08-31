@@ -1,12 +1,13 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::OsString;
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use ahash::AHashSet;
+use ahash::{AHashMap, AHashSet};
 use gtk::gio::Cancellable;
 use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -27,6 +28,7 @@ use crate::com::{
     ManagerAction, SearchSnapshot, SearchUpdate, SnapshotId, SortDir, SortMode, SortSettings,
 };
 use crate::config::CONFIG;
+use crate::database::SavedGroup;
 use crate::gui::clipboard::{handle_clipboard, handle_drop, Operation, SelectionProvider};
 use crate::gui::operations::{self, Kind, Outcome};
 use crate::gui::tabs::PartiallyAppliedUpdate;
@@ -57,6 +59,26 @@ enum MaybePane {
     Empty,
 }
 
+impl Deref for MaybePane {
+    type Target = Pane;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Pane(p) | Self::Pending(p, _) | Self::Detached { pane: p, .. } => p,
+            Self::Empty => unreachable!(),
+        }
+    }
+}
+
+impl DerefMut for MaybePane {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Pane(p) | Self::Pending(p, _) | Self::Detached { pane: p, .. } => p,
+            Self::Empty => unreachable!(),
+        }
+    }
+}
+
 impl MaybePane {
     const fn visible(&self) -> bool {
         match &self {
@@ -70,13 +92,6 @@ impl MaybePane {
         match self {
             Self::Pane(p) | Self::Pending(p, _) => Some(p),
             Self::Detached { .. } => None,
-            Self::Empty => unreachable!(),
-        }
-    }
-
-    const fn get(&self) -> &Pane {
-        match self {
-            Self::Pane(p) | Self::Pending(p, _) | Self::Detached { pane: p, .. } => p,
             Self::Empty => unreachable!(),
         }
     }
@@ -210,8 +225,34 @@ impl Tab {
         self.id.copy()
     }
 
-    pub fn group(&self) -> Option<Rc<RefCell<Group>>> {
-        self.group.clone()
+    // Returns the group only if it's got children
+    pub fn multi_tab_group(&self) -> Option<Rc<RefCell<Group>>> {
+        self.group.as_ref().filter(|g| !g.borrow().children.is_empty()).cloned()
+    }
+
+    pub fn get_or_start_group(&mut self) -> Rc<RefCell<Group>> {
+        self.group
+            .get_or_insert_with(|| {
+                Rc::new(RefCell::new(Group {
+                    parent: self.id.copy(),
+                    children: Vec::new(),
+                }))
+            })
+            .clone()
+    }
+
+    pub fn force_group(&mut self, group: &Rc<RefCell<Group>>) {
+        if self.group.as_ref().is_some_and(|g| Rc::ptr_eq(g, group)) {
+            return;
+        }
+
+        if group.borrow().parent == self.id() {
+            unreachable!()
+        }
+
+        group.borrow_mut().children.push(self.id());
+        self.group = Some(group.clone());
+        self.element.set_child(true);
     }
 
     pub const fn visible(&self) -> bool {
@@ -435,18 +476,17 @@ impl Tab {
     }
 
     #[must_use]
-    pub fn split(&mut self, orient: Orientation) -> Option<(gtk::Paned, Rc<RefCell<Group>>)> {
-        let Some(paned) = self.pane.get_visible().unwrap().split(orient) else {
+    pub fn split(
+        &mut self,
+        orient: Orientation,
+        forced: bool,
+    ) -> Option<(gtk::Paned, Rc<RefCell<Group>>)> {
+        let Some(paned) = self.pane.split(orient, forced) else {
             return None;
         };
-        if self.group.is_none() {
-            self.group = Some(Rc::new(RefCell::new(Group {
-                parent: self.id.copy(),
-                children: Vec::new(),
-            })));
-        }
 
-        Some((paned, self.group.clone().unwrap()))
+
+        Some((paned, self.get_or_start_group()))
     }
 
     fn open_search(&mut self, query: String) {
@@ -485,11 +525,7 @@ impl Tab {
 
         self.element.flat_title(self.dir.path());
 
-        let Some(pane) = self.pane.get_visible_mut() else {
-            return;
-        };
-
-        pane.search_to_flat(self.dir.path(), &self.contents.selection);
+        self.pane.search_to_flat(self.dir.path(), &self.contents.selection);
     }
 
     // Starts a new search or updates an existing one with a new query.
@@ -1144,7 +1180,7 @@ impl Tab {
         }
 
         if self.group.is_some() {
-            self.pane.get().show_ancestors();
+            self.pane.show_ancestors();
         }
 
         self.pane.make_visible();
@@ -1175,14 +1211,19 @@ impl Tab {
         }
 
         if self.group.is_some() {
-            self.pane.get().hide_ancestors();
+            self.pane.hide_ancestors();
         }
 
-        self.pane.get().set_visible(false);
+        self.pane.set_visible(false);
         self.element.set_pane_visible(false);
     }
 
-    pub fn make_visible_end_child(
+    pub fn force_end_child(&mut self, paned: gtk::Paned) {
+        self.pane.remove_from_parent();
+        self.pane.make_end_child(paned);
+    }
+
+    pub fn add_to_visible_group(
         &mut self,
         left: &[Self],
         right: &[Self],
@@ -1194,24 +1235,23 @@ impl Tab {
 
         self.element.set_child(true);
 
-        let p = self.pane.get();
-        p.remove_from_parent();
-        p.set_visible(true);
-        p.make_end_child(paned);
+        self.pane.remove_from_parent();
+        self.pane.set_visible(true);
+        self.pane.make_end_child(paned);
 
         self.make_visible(left, right);
     }
 
     pub fn reattach_and_hide_pane(&mut self, parent: &gtk::Box) {
         self.start_hide();
-        self.pane.get().remove_from_parent();
-        self.pane.get().append(parent);
+        self.pane.remove_from_parent();
+        self.pane.append(parent);
         self.finish_hide();
     }
 
     pub fn hide_pane(&mut self) {
         self.start_hide();
-        self.pane.get().set_visible(false);
+        self.pane.set_visible(false);
         self.element.set_active(false);
         self.element.set_pane_visible(false);
     }
@@ -1238,7 +1278,8 @@ impl Tab {
     }
 
     pub fn next_of_kin_by_pane(&self) -> Option<TabId> {
-        self.pane.get_visible().and_then(Pane::next_of_kin)
+        // If it's not in a group, it will not have kin
+        self.multi_tab_group().and_then(|_| self.pane.next_of_kin())
     }
 
     fn save_settings(&self) {
@@ -1683,18 +1724,21 @@ impl Tab {
         out
     }
 
-    // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
-    pub fn workaround_disable_rubberband(&self) {
-        if let Some(pane) = self.pane.get_visible() {
-            pane.workaround_disable_rubberband();
+    pub fn save_group(&self, ids: &AHashMap<TabId, u32>) -> SavedGroup {
+        SavedGroup {
+            parent: ids[&self.id()],
+            split: self.pane.save_splits(ids),
         }
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
+    pub fn workaround_disable_rubberband(&self) {
+        self.pane.workaround_disable_rubberband();
+    }
+
+    // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
     pub fn workaround_enable_rubberband(&self) {
-        if let Some(pane) = self.pane.get_visible() {
-            pane.workaround_enable_rubberband();
-        }
+        self.pane.workaround_enable_rubberband();
     }
 }
 

@@ -17,6 +17,10 @@ glib::wrapper! {
 }
 
 impl TabElement {
+    pub(super) fn tab(&self) -> TabId {
+        *self.imp().tab.get().unwrap()
+    }
+
     pub(super) fn new(tab: TabId, path: &Path) -> Self {
         let s: Self = glib::Object::new();
 

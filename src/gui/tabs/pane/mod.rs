@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
+use ahash::AHashMap;
 use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
 use gtk::glib::{self, Propagation, WeakRef};
-use gtk::prelude::{Cast, CastNone, IsA, ObjectExt};
+use gtk::prelude::{Cast, CastNone, IsA, ObjectExt, OrientableExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
     AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, GestureExt,
@@ -23,6 +24,7 @@ use super::id::TabId;
 use super::tab::Tab;
 use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
+use crate::database::{SavedSplit, SplitChild};
 use crate::gui::clipboard::Operation;
 use crate::gui::tabs::NavTarget;
 use crate::gui::{gui_run, tabs_run};
@@ -31,7 +33,7 @@ mod details;
 mod element;
 mod icon_view;
 
-static MIN_PANE_RES: i32 = 400;
+static MIN_PANE_RES: i32 = 250;
 // TODO [incremental] -- lower to 2 when incremental filtering isn't broken.
 static MIN_SEARCH: usize = 3;
 
@@ -101,7 +103,7 @@ pub(super) struct Pane {
 
 impl Drop for Pane {
     fn drop(&mut self) {
-        let Some(parent) = self.element.parent() else {
+        if self.element.parent().is_none() {
             // If parent is None here, we've explicitly detached it to replace it with another
             // pane.
             return trace!("Dropping detached pane");
@@ -112,10 +114,6 @@ impl Drop for Pane {
 }
 
 impl Pane {
-    pub const fn tab(&self) -> TabId {
-        self.tab
-    }
-
     pub fn set_visible(&self, visible: bool) {
         self.element.set_visible(visible);
     }
@@ -348,28 +346,6 @@ impl Pane {
         }
     }
 
-    pub(super) fn replace_with_other_tab(self, new: &Widget) {
-        let parent = self.element.parent().unwrap();
-        let Some(paned) = parent.downcast_ref::<gtk::Paned>() else {
-            let parent = parent.downcast::<gtk::Box>().unwrap();
-            parent.remove(&self.element);
-            parent.append(new);
-            return;
-        };
-
-        let old_is_start = paned
-            .start_child()
-            .unwrap()
-            .downcast_ref::<PaneElement>()
-            .map_or(false, |t| t.imp().tab.get().unwrap() == &self.tab);
-
-        if old_is_start {
-            paned.set_start_child(Some(new));
-        } else {
-            paned.set_end_child(Some(new));
-        }
-    }
-
     pub(super) fn remove_from_parent(&self) {
         let parent = self.element.parent().unwrap();
 
@@ -526,19 +502,38 @@ impl Pane {
         &self.element.imp().scroller
     }
 
-    pub fn split(&self, orient: Orientation) -> Option<gtk::Paned> {
+    pub fn split(&self, orient: Orientation, forced: bool) -> Option<gtk::Paned> {
+        let mapped = self.element.is_mapped();
+
+        let paned = gtk::Paned::builder()
+            .orientation(orient)
+            .shrink_start_child(false)
+            .shrink_end_child(false)
+            .visible(mapped);
+
+
         let paned = match orient {
-            Orientation::Horizontal if self.element.width() > MIN_PANE_RES * 2 => {
-                gtk::Paned::builder().orientation(orient).position(self.element.width() / 2)
+            Orientation::Horizontal if self.element.width() > MIN_PANE_RES * 2 || forced => {
+                if mapped {
+                    println!("mapped");
+                    paned.position(self.element.width() / 2)
+                } else {
+                    paned
+                }
             }
-            Orientation::Vertical if self.element.height() > MIN_PANE_RES * 2 => {
-                gtk::Paned::builder().orientation(orient).position(self.element.height() / 2)
+            Orientation::Vertical if self.element.height() > MIN_PANE_RES * 2 || forced => {
+                if mapped {
+                    println!("mapped");
+                    paned.position(self.element.height() / 2)
+                } else {
+                    paned
+                }
             }
             Orientation::Horizontal | Orientation::Vertical => return None,
             _ => unreachable!(),
-        };
+        }
+        .build();
         info!("Splitting pane for {:?}", self.tab);
-        let paned = paned.shrink_start_child(false).shrink_end_child(false).build();
 
         let parent = self.element.parent().unwrap();
 
@@ -615,15 +610,70 @@ impl Pane {
     pub fn show_ancestors(&self) {
         let mut parent = self.element.parent().unwrap();
 
+        let mut stack = Vec::new();
         while let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
             if paned.get_visible() {
-                return;
+                // This is to set a sane default position, because gtk
+                if !stack.is_empty() || paned.position() == 0 {
+                    stack.push(paned.clone());
+                }
+            } else {
+                paned.set_visible(true);
             }
-
-            paned.set_visible(true);
             parent = paned.parent().unwrap();
         }
+
+        if stack.is_empty() {
+            return;
+        }
+
+        let (mut w, mut h) = (parent.width(), parent.height());
+        info!("Generating paned positions based on box res {w}x{h}");
+
+        while let Some(paned) = stack.pop() {
+            if paned.orientation() == Orientation::Horizontal {
+                w /= 2;
+                paned.set_position(w);
+            } else {
+                h /= 2;
+                paned.set_position(h);
+            }
+        }
     }
+
+    pub fn save_splits(&self, ids: &AHashMap<TabId, u32>) -> SavedSplit {
+        // Only called in a group
+        let mut parent = self.element.parent().and_downcast::<gtk::Paned>().unwrap();
+
+        while let Some(paned) = parent.parent().and_downcast::<gtk::Paned>() {
+            parent = paned;
+        }
+
+        save_tree(parent, ids)
+    }
+}
+
+fn save_tree(paned: gtk::Paned, ids: &AHashMap<TabId, u32>) -> SavedSplit {
+    let first = paned.first_child().unwrap();
+    let second = paned.last_child().unwrap();
+
+    let start = if let Some(pane) = first.downcast_ref::<PaneElement>() {
+        SplitChild::Tab(ids[pane.imp().tab.get().unwrap()])
+    } else {
+        let paned = first.downcast::<gtk::Paned>().unwrap();
+        SplitChild::Split(Box::new(save_tree(paned, ids)))
+    };
+
+    let end = if let Some(pane) = second.downcast_ref::<PaneElement>() {
+        SplitChild::Tab(ids[pane.imp().tab.get().unwrap()])
+    } else {
+        let paned = second.downcast::<gtk::Paned>().unwrap();
+        SplitChild::Split(Box::new(save_tree(paned, ids)))
+    };
+
+    let horizontal = paned.orientation() == Orientation::Horizontal;
+
+    SavedSplit { horizontal, start, end }
 }
 
 fn firstmost_descendent(mut widget: Widget) -> TabId {

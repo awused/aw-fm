@@ -180,8 +180,7 @@ pub mod id {
     use std::cell::Cell;
 
     thread_local! {
-        static NEXT_TAB_ID: Cell<u64> = Cell::new(0);
-        static NEXT_GROUP_ID: Cell<u64> = Cell::new(0);
+        static NEXT_ID: Cell<u64> = Cell::new(0);
     }
 
     // A unique identifier for tabs.
@@ -215,7 +214,7 @@ pub mod id {
     pub struct TabId(u64);
 
     pub fn next_id() -> TabUid {
-        TabUid(NEXT_TAB_ID.with(|n| {
+        TabUid(NEXT_ID.with(|n| {
             let o = n.get();
             n.set(o + 1);
             o
@@ -227,24 +226,4 @@ pub mod id {
             TabId(self.0)
         }
     }
-
-    // #[derive(Debug, Eq, PartialEq)]
-    // pub struct GroupUid(u64);
-    //
-    // #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
-    // pub struct GroupId(u64);
-    //
-    // pub fn next_group() -> GroupUid {
-    //     GroupUid(NEXT_GROUP_ID.with(|n| {
-    //         let o = n.get();
-    //         n.set(o + 1);
-    //         o
-    //     }))
-    // }
-    //
-    // impl GroupUid {
-    //     pub const fn copy(&self) -> GroupId {
-    //         GroupId(self.0)
-    //     }
-    // }
 }

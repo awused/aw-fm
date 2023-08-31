@@ -10,6 +10,7 @@ use std::time::Instant;
 use dirs::data_dir;
 use rusqlite::types::{FromSql, FromSqlError};
 use rusqlite::{params, Connection, ToSql};
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
 use crate::com::{
@@ -18,8 +19,45 @@ use crate::com::{
 use crate::config::CONFIG;
 use crate::{closing, spawn_thread};
 
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum SplitChild {
+    Split(Box<SavedSplit>),
+    Tab(u32),
+}
+
+impl SplitChild {
+    pub fn first_child(mut self: &Self) -> u32 {
+        while let Self::Split(s) = self {
+            self = &s.start;
+        }
+
+        let Self::Tab(n) = self else {
+            unreachable!();
+        };
+
+        *n
+    }
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SavedSplit {
+    pub horizontal: bool,
+    pub start: SplitChild,
+    pub end: SplitChild,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SavedGroup {
+    pub parent: u32,
+    pub split: SavedSplit,
+}
+
+#[derive(Debug)]
 pub struct Session {
     pub paths: Vec<Arc<Path>>,
+    pub groups: Vec<SavedGroup>,
 }
 
 enum DBAction {
@@ -209,7 +247,7 @@ VALUES
     fn load_session(&self, name: &str) -> Option<Session> {
         let con = &self.0;
 
-        con.query_row("SELECT paths FROM sessions WHERE name = ?", [name], |row| {
+        con.query_row("SELECT paths, groups FROM sessions WHERE name = ?", [name], |row| {
             let raw: &[u8] = row.get_ref(0)?.as_bytes()?;
 
             let paths = raw
@@ -219,7 +257,19 @@ VALUES
                 .map(Into::into)
                 .collect();
 
-            Ok(Session { paths })
+            let groups = if let Some(raw) = row.get_ref(1)?.as_blob_or_null()? {
+                match rmp_serde::from_slice(raw) {
+                    Ok(gs) => gs,
+                    Err(e) => {
+                        error!("Error deserializing saved groups: {e}");
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+
+            Ok(Session { paths, groups })
         })
         .map_err(|e| {
             if e == rusqlite::Error::QueryReturnedNoRows {
@@ -243,9 +293,14 @@ VALUES
             .collect::<Vec<_>>()
             .join(&[0u8] as &[u8]);
 
+        // to_vec_named might be slightly more resilient to changes, but neither will really be
+        // forward compatible
+        // Should never fail.
+        let groups = rmp_serde::to_vec(&session.groups).unwrap();
+
         con.execute(
-            "INSERT OR REPLACE INTO sessions(name, paths) VALUES (?, ?);",
-            params![name, paths],
+            "INSERT OR REPLACE INTO sessions(name, paths, groups) VALUES (?, ?, ?);",
+            params![name, paths, groups],
         )
         .unwrap_or_else(|e| {
             if e == rusqlite::Error::QueryReturnedNoRows {
@@ -393,5 +448,14 @@ CREATE TABLE sessions(
     paths BLOB NOT NULL, -- null separated possibly invalid UTF-8, very few characters are disallowed in paths
     PRIMARY KEY(name)
 );"#,
+    );
+    update_to(
+        con,
+        3,
+        initial_version,
+        r#"
+ALTER TABLE sessions
+    ADD COLUMN groups BLOB; -- nullable
+"#,
     );
 }

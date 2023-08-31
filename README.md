@@ -15,7 +15,7 @@ actually do.
   * A reasonably complete set of text commands to control the application.
   * Define custom shortcuts, custom bookmarks, and custom context menu actions.
 * A UI charitably described as minimal.
-  * Panes/splits work out of the box, but are maybe _too_ flexible.
+  * Panes/splits and tab groups function like minimal workspaces.
 * Custom actions showing up in context menus.
   * Just flat scripts, easy to write and back up.
 * Not much more, anything I don't personally use doesn't get implemented.
@@ -144,10 +144,13 @@ specify them.
 * `CloseTab`, `ClosePane`, `CloseActive`
   * Close the active tab, pane, or both.
   * All panes can be closed without closing all tabs.
+  * Closing the pane of a tab inside a group will remove that tab from the group.
+<!-- * `HidePanes`
+  * Hides all visible panes. -->
 * `ReopenTab`
   * Reopens the last closed tabs in reverse order.
 * `Split horizontal|vertical`
-  * Splits the current tab in two.
+  * Splits the current tab in two, creating or adding to the existing group.
   * The new tab is on the right or bottom of the split.
   * If no tabs are visible, opens a new on.
 * `SaveSession name`, `LoadSession name`, and `DeleteSession name`
