@@ -360,6 +360,8 @@ impl Pane {
             let start_tab =
                 start.downcast_ref::<PaneElement>().map(|te| *te.imp().tab.get().unwrap());
             let sibling = if start_tab == Some(self.tab) { end } else { start };
+            // GTK focus tracking is just bad
+            let focus = sibling.focus_child();
 
             // A split will always have a parent.
             let grandparent = paned.parent().unwrap();
@@ -371,16 +373,30 @@ impl Pane {
                     .downcast_ref::<gtk::Paned>()
                     .map_or(false, |sc| sc.eq(paned));
 
+                if focus.is_some() {
+                    grandpane.grab_focus();
+                }
+
                 if parent_is_start {
                     grandpane.set_start_child(Some(&sibling));
                 } else {
                     grandpane.set_end_child(Some(&sibling));
                 }
+
+                if let Some(focus) = focus {
+                    focus.grab_focus();
+                }
                 grandpane.set_position(pos);
             } else {
+                if focus.is_some() {
+                    grandparent.grab_focus();
+                }
+
                 let grandparent = grandparent.downcast_ref::<gtk::Box>().unwrap();
                 grandparent.remove(paned);
                 grandparent.append(&sibling);
+
+                sibling.grab_focus();
             }
         } else {
             let parent = parent.downcast_ref::<gtk::Box>().unwrap();
