@@ -1185,6 +1185,7 @@ impl Tab {
 
         self.pane.make_visible();
         self.element.set_pane_visible(true);
+        self.element.set_active(false);
 
         self.load(left, right);
         self.apply_pane_state();

@@ -58,6 +58,10 @@ gridview>* {
   margin-right: 3px;
 }
 
+gridview {
+  margin-top: 4px;
+}
+
 gridview .name {
   padding-left: 2px;
   padding-right: 2px;
