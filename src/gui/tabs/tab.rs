@@ -1185,7 +1185,6 @@ impl Tab {
 
         self.pane.make_visible();
         self.element.set_pane_visible(true);
-        self.element.set_active(false);
 
         self.load(left, right);
         self.apply_pane_state();
@@ -1198,6 +1197,7 @@ impl Tab {
             return error!("Pane {:?} already hidden", self.id);
         }
 
+        self.set_inactive();
 
         if let Some(search) = &self.search {
             self.pane.mark_detached(search.contents());
