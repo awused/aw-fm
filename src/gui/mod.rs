@@ -5,6 +5,7 @@ use std::time::Duration;
 use ahash::AHashMap;
 use gtk::gdk::ModifierType;
 use gtk::glib::{ControlFlow, SourceId, WeakRef};
+use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib, Bitset, MultiSelection};
@@ -32,7 +33,15 @@ mod thumbnailer;
 // The Rc<> ends up more ergonomic in most cases but it's too much of a pain to pass things into
 // GObjects.
 // Rc<RefCell<Option<Gui>>> might work better in some cases.
-thread_local!(static GUI: OnceCell<Rc<Gui>> = OnceCell::default());
+thread_local! {
+    static GUI: OnceCell<Rc<Gui>> = OnceCell::default();
+
+    static PANGO_ATTRIBUTES: AttrList = {
+        let pango_list = AttrList::new();
+        pango_list.insert(AttrInt::new_insert_hyphens(false));
+        pango_list
+    }
+}
 
 fn gui_run<R, F: FnOnce(&Rc<Gui>) -> R>(f: F) -> R {
     GUI.with(|g| f(g.get().unwrap()))
@@ -392,4 +401,8 @@ impl Selected<'_> {
         let index = self.selected.nth(i);
         self.selection.item(index).unwrap().downcast().unwrap()
     }
+}
+
+fn label_attributes(label: &gtk::Label) {
+    PANGO_ATTRIBUTES.with(|pa| label.set_attributes(Some(pa)));
 }

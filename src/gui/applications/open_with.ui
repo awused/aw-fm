@@ -9,10 +9,16 @@
     <child>
       <object class="GtkBox">
         <property name="orientation">vertical</property>
-        <property name="spacing">0</property>
+        <property name="spacing">8</property>
 
         <child>
           <object class="GtkLabel" id="top_text">
+            <property name="wrap">true</property>
+            <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
+
+            <attributes>
+              <attribute name="insert-hyphens" value="false"></attribute>
+            </attributes>
           </object>
         </child>
 
@@ -39,7 +45,12 @@
         <child>
           <object class="GtkBox">
             <property name="orientation">horizontal</property>
+            <property name="spacing">8</property>
             <property name="halign">GTK_ALIGN_END</property>
+
+            <style>
+              <class name="action-box"/>
+            </style>
 
             <child>
               <object class="GtkButton" id="cancel">

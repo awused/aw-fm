@@ -1,20 +1,11 @@
 use gtk::glib;
-use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::ObjectExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::WidgetExt;
 
 use crate::com::{EntryObject, SignalHolder};
 use crate::gui::tabs::pane::Bound;
-
-
-thread_local! {
-   static PANGO_ATTRIBUTES: AttrList = {
-        let pango_list = AttrList::new();
-        pango_list.insert(AttrInt::new_insert_hyphens(false));
-        pango_list
-   }
-}
+use crate::gui::PANGO_ATTRIBUTES;
 
 
 glib::wrapper! {

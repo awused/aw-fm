@@ -6,8 +6,9 @@ use gtk::glib::prelude::*;
 use gtk::glib::{BoxedAnyObject, Propagation};
 use gtk::prelude::*;
 
+use super::wrap_in_box_with_close_button;
 use crate::config::{Shortcut, CONFIG};
-use crate::gui::Gui;
+use crate::gui::{label_attributes, Gui};
 
 impl Gui {
     pub(super) fn help_dialog(self: &Rc<Self>) {
@@ -18,12 +19,10 @@ impl Gui {
         }
 
         let dialog = gtk::Window::builder().title("Help").transient_for(&self.window).build();
-
-        self.close_on_quit_or_esc(&dialog);
-
-        // default size might want to scale based on dpi
         dialog.set_default_width(800);
         dialog.set_default_height(600);
+
+        self.close_on_quit_or_esc(&dialog);
 
         let store = gtk::gio::ListStore::new::<BoxedAnyObject>();
 
@@ -35,6 +34,8 @@ impl Gui {
         modifier_factory.connect_setup(move |_fact, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let label = gtk::Label::new(None);
+            label_attributes(&label);
+
             label.set_halign(gtk::Align::Start);
             item.set_child(Some(&label))
         });
@@ -50,6 +51,8 @@ impl Gui {
         key_factory.connect_setup(move |_fact, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let label = gtk::Label::new(None);
+            label_attributes(&label);
+
             label.set_halign(gtk::Align::Start);
             item.set_child(Some(&label))
         });
@@ -75,6 +78,8 @@ impl Gui {
         action_factory.connect_setup(move |_fact, item| {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let label = gtk::Label::new(None);
+            label_attributes(&label);
+
             label.set_halign(gtk::Align::Start);
             item.set_child(Some(&label))
         });
@@ -98,10 +103,11 @@ impl Gui {
 
         let scrolled =
             gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).build();
+        scrolled.set_vexpand(true);
 
         scrolled.set_child(Some(&view));
 
-        dialog.set_child(Some(&scrolled));
+        wrap_in_box_with_close_button(&dialog, scrolled, "Close");
 
         let g = self.clone();
         dialog.connect_close_request(move |d| {

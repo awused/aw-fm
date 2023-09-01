@@ -47,7 +47,7 @@ pub struct Thumbnailer {
     high: u16,
     low: u16,
 
-    sync_factory: DesktopThumbnailFactory,
+    sync_factory: Option<DesktopThumbnailFactory>,
 }
 
 impl Thumbnailer {
@@ -263,11 +263,15 @@ impl Thumbnailer {
     //
     // Worst-case we can make this async and parallel as well, but that shouldn't be necessary.
     pub(super) fn sync_thumbnail(&self, p: &Path, mime: &str, mtime: FileTime) -> Option<Texture> {
+        let Some(factory) = &self.sync_factory else {
+            return None;
+        };
+
         info!("Synchronously loading a thumbnail for {p:?}");
 
         let uri = File::for_path(p).uri();
 
-        if let Some(existing) = self.sync_factory.lookup(&uri, mtime.sec as i64) {
+        if let Some(existing) = factory.lookup(&uri, mtime.sec as i64) {
             let thumb = gtk::gio::File::for_path(existing);
             match Texture::from_file(&thumb) {
                 Ok(tex) => {
@@ -280,15 +284,15 @@ impl Thumbnailer {
             }
         }
 
-        if self.sync_factory.has_valid_failed_thumbnail(&uri, mtime.sec as i64) {
+        if factory.has_valid_failed_thumbnail(&uri, mtime.sec as i64) {
             return None;
         }
 
-        if !self.sync_factory.can_thumbnail(&uri, mime, mtime.sec as i64) {
+        if !factory.can_thumbnail(&uri, mime, mtime.sec as i64) {
             return None;
         }
 
-        generate_and_save_thumbnail(&self.sync_factory, &uri, mime, mtime.sec, false)
+        generate_and_save_thumbnail(factory, &uri, mime, mtime.sec, false)
     }
 }
 
@@ -336,18 +340,21 @@ mod send {
     }
 
     impl SendFactory {
-        pub fn make(n: u16) -> (DesktopThumbnailFactory, Vec<Self>) {
-            let f = DesktopThumbnailFactory::new(DesktopThumbnailSize::Normal);
-            let mut factories = Vec::with_capacity(n as usize);
+        pub fn make(n: u16) -> (Option<DesktopThumbnailFactory>, Vec<Self>) {
             if n > 0 {
+                let f = DesktopThumbnailFactory::new(DesktopThumbnailSize::Normal);
+                let mut factories = Vec::with_capacity(n as usize);
+
                 let current_thread = unsafe { g_thread_self() };
 
                 for _ in 0..n {
                     factories.push(Self(f.clone(), current_thread));
                 }
-            }
 
-            (f, factories)
+                (Some(f), factories)
+            } else {
+                (None, Vec::new())
+            }
         }
 
         pub fn lookup(&self, uri: &str, mtime_sec: u64) -> Option<GString> {

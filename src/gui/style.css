@@ -27,6 +27,12 @@
   background: none;
 }
 
+.action-box {
+  margin-left: 8px;
+  margin-right: 8px;
+  margin-bottom: 8px;
+}
+
 row:selected,
 child:selected label {
   background: rgba(1, 120, 255, 0.5);

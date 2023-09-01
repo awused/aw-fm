@@ -14,6 +14,10 @@
         <child>
           <object class="GtkLabel" id="top_text">
             <property name="wrap">true</property>
+            <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
+            <property name="margin-start">8</property>
+            <property name="margin-end">8</property>
+
             <attributes>
               <attribute name="insert-hyphens" value="false"></attribute>
             </attributes>
@@ -157,25 +161,14 @@
             <property name="spacing">8</property>
             <property name="halign">GTK_ALIGN_END</property>
 
+            <style>
+              <class name="action-box"/>
+            </style>
+
             <child>
               <object class="GtkButton" id="cancel">
                 <property name="label">Cancel</property>
                 <property name="width-request">96</property>
-              </object>
-            </child>
-
-            <child>
-              <object class="GtkButton" id="skip">
-                <property name="label">Skip</property>
-                <property name="width-request">96</property>
-              </object>
-            </child>
-
-            <child>
-              <object class="GtkButton" id="merge">
-                <property name="label">Merge</property>
-                <property name="width-request">96</property>
-                <property name="visible">false</property>
               </object>
             </child>
 
@@ -190,6 +183,21 @@
             <child>
               <object class="GtkButton" id="auto_rename">
                 <property name="label">Rename (auto)</property>
+                <property name="width-request">96</property>
+                <property name="visible">false</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkButton" id="skip">
+                <property name="label">Skip</property>
+                <property name="width-request">96</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkButton" id="merge">
+                <property name="label">Merge</property>
                 <property name="width-request">96</property>
                 <property name="visible">false</property>
               </object>

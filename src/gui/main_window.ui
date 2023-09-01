@@ -60,7 +60,6 @@
                 <property name="spacing">0</property>
 
 
-
                 <child>
                   <object class="GtkBox" id="panes">
                     <property name="orientation">horizontal</property>
@@ -88,6 +87,10 @@
             <property name="valign">end</property>
             <property name="wrap">true</property>
             <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
+
+            <attributes>
+              <attribute name="insert-hyphens" value="false"></attribute>
+            </attributes>
 
             <style>
               <class name="toast"/>

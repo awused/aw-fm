@@ -11,17 +11,17 @@ use dirs::home_dir;
 use gtk::gdk::{Key, ModifierType};
 use gtk::glib::clone::Downgrade;
 use gtk::glib::{self, Propagation};
-use gtk::pango::EllipsizeMode;
-use gtk::prelude::Cast;
+use gtk::pango::{EllipsizeMode, WrapMode};
+use gtk::prelude::{ButtonExt, Cast, IsA};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
     BoxExt, EditableExt, EntryExt, EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt,
 };
-use gtk::Orientation;
+use gtk::{Orientation, Widget, Window};
 
 use super::properties::dialog::PropDialog;
 use super::tabs::id::TabId;
-use super::Gui;
+use super::{label_attributes, Gui};
 use crate::closing;
 use crate::com::{DisplayMode, ManagerAction, SortDir, SortMode};
 use crate::config::CONFIG;
@@ -167,11 +167,15 @@ impl Gui {
         self.close_on_quit_or_esc(&dialog);
 
         dialog.set_default_width(800);
-        // dialog.set_default_height(80);
 
         let vbox = gtk::Box::new(Orientation::Vertical, 12);
 
         let label = gtk::Label::new(Some(&path.to_string_lossy()));
+        label.set_margin_start(8);
+        label.set_margin_end(8);
+        label.set_wrap(true);
+        label.set_wrap_mode(WrapMode::WordChar);
+        label_attributes(&label);
 
         let entry = gtk::Entry::new();
 
@@ -205,7 +209,15 @@ impl Gui {
         vbox.append(&label);
         vbox.append(&entry);
 
-        dialog.set_child(Some(&vbox));
+        let actions = wrap_in_box_with_close_button(&dialog, vbox, "Cancel");
+
+        let confirm = gtk::Button::with_label("Rename");
+        let e = entry.clone();
+        confirm.connect_clicked(move |_| {
+            e.activate();
+        });
+
+        actions.append(&confirm);
 
         dialog.connect_close_request(move |d| {
             d.destroy();
@@ -235,6 +247,11 @@ impl Gui {
             "Create new {} in {dir:?}",
             if folder { "folder" } else { "file" }
         )));
+        label.set_margin_start(8);
+        label.set_margin_end(8);
+        label.set_wrap(true);
+        label.set_wrap_mode(WrapMode::WordChar);
+        label_attributes(&label);
 
         let entry = gtk::Entry::new();
 
@@ -260,7 +277,15 @@ impl Gui {
         vbox.append(&label);
         vbox.append(&entry);
 
-        dialog.set_child(Some(&vbox));
+        let actions = wrap_in_box_with_close_button(&dialog, vbox, "Cancel");
+
+        let confirm = gtk::Button::with_label("Create");
+        let e = entry.clone();
+        confirm.connect_clicked(move |_| {
+            e.activate();
+        });
+
+        actions.append(&confirm);
 
         dialog.connect_close_request(move |d| {
             d.destroy();
@@ -478,4 +503,31 @@ impl Gui {
     pub(super) fn get_env(&self) -> Vec<(String, OsString)> {
         self.tabs.borrow().get_env()
     }
+}
+
+// Returns the box containing the actions so that more can be added
+pub(super) fn wrap_in_box_with_close_button(
+    dialog: &Window,
+    contents: impl IsA<Widget>,
+    label: &str,
+) -> gtk::Box {
+    let action_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    action_box.set_halign(gtk::Align::End);
+    action_box.add_css_class("action-box");
+
+    let w = dialog.downgrade();
+    let close = gtk::Button::with_label(label);
+    close.connect_clicked(move |_| {
+        w.upgrade().unwrap().close();
+    });
+
+    action_box.append(&close);
+
+    let dialog_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    dialog_box.append(&contents);
+    dialog_box.append(&action_box);
+
+    dialog.set_child(Some(&dialog_box));
+
+    action_box
 }

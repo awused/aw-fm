@@ -8,6 +8,7 @@
     <child>
       <object class="GtkBox">
         <property name="orientation">vertical</property>
+        <property name="spacing">8</property>
         <property name="hexpand">true</property>
 
 
@@ -66,6 +67,8 @@
                             <child>
                               <object class="GtkLabel" id="name_text">
                                 <property name="selectable">true</property>
+                                <property name="wrap">true</property>
+                                <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
 
                                 <attributes>
                                   <attribute name="insert-hyphens" value="false"></attribute>
@@ -219,6 +222,8 @@
                             <child>
                               <object class="GtkLabel" id="location">
                                 <property name="selectable">true</property>
+                                <property name="wrap">true</property>
+                                <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
 
                                 <attributes>
                                   <attribute name="insert-hyphens" value="false"></attribute>
@@ -298,11 +303,11 @@
         <child>
           <object class="GtkBox">
             <property name="orientation">horizontal</property>
-            <property name="spacing">8</property>
-            <property name="margin-top">8px</property>
-            <property name="margin-bottom">8px</property>
-            <property name="margin-end">8px</property>
             <property name="halign">GTK_ALIGN_END</property>
+
+            <style>
+              <class name="action-box"/>
+            </style>
 
             <child>
               <object class="GtkButton" id="close">

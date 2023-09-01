@@ -207,7 +207,7 @@ paste_into_search = false
 # directories with many cheap thumbnails cause the process to slow down. Too low and expensive
 # thumbnails take forever.
 #
-# Experimentally 8 is a bit past the acceptable limit in pathologically bad cases like many tiny
+# Experimentally, 8 is a bit past the acceptable limit in pathologically bad cases like many tiny
 # images, while in directories with many videos up to 16 is beneficial.
 #
 # Max 255 (bad idea), 0 entirely disables thumbnail loading.
