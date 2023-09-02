@@ -15,8 +15,8 @@ links = "GTK4, X11"
 ahash = "0.8.3"
 async-channel = "1.9.0"
 awconf = { git = "https://github.com/awused/awconf" }
-chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"] }
-clap = { version = "4.3.23", features = ["derive"] }
+chrono = { version = "0.4.28", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.4.2", features = ["derive"] }
 derive_more = { version = "0.99.17", default-features = false, features = ["deref", "deref_mut", "from"] }
 dirs = "5.0.1"
 env_logger = { version = "0.10.0", default-features = false, features = ["auto-color", "color"] }
@@ -31,13 +31,13 @@ notify = "6.1.1"
 num_cpus = "1.16.0"
 num-format = "0.4.4"
 once_cell = "1.18.0"
-ouroboros = "0.17.2"
+ouroboros = "0.18.0"
 path-clean = "1.0.1"
 rayon = "1.7.0"
-regex = "1.9.3"
+regex = "1.9.4"
 rmp-serde = "1.1.2"
 rusqlite = { version = "0.29.0", features = ["bundled"] }
-serde = { version = "1.0.185", default-features = false, features = ["derive"] }
+serde = { version = "1.0.188", default-features = false, features = ["derive"] }
 strum = "0.25.0"
 strum_macros = "0.25"
 tokio = { version = "1.32.0", features = ["fs", "net", "macros", "process", "rt", "sync", "time"] }
