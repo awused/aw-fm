@@ -177,8 +177,9 @@ impl Gui {
         label.set_wrap_mode(WrapMode::WordChar);
         label_attributes(&label);
 
-        let entry = gtk::Entry::new();
+        vbox.append(&label);
 
+        let entry = gtk::Entry::new();
         entry.set_text(&fname.to_string_lossy());
 
         let end_pos = if let Some(stem) = path.file_stem() {
@@ -188,7 +189,7 @@ impl Gui {
         };
 
         let d = dialog.downgrade();
-        entry.connect_activate(move |e| {
+        let rename = move |e: &gtk::Entry| {
             d.upgrade().unwrap().destroy();
 
             let new_name = e.text();
@@ -204,18 +205,18 @@ impl Gui {
                     vec![path.clone()].into(),
                 )
             });
-        });
+        };
 
-        vbox.append(&label);
+        // activates-default is slow, so clone this closure instead
+        entry.connect_activate(rename.clone());
+
         vbox.append(&entry);
 
         let actions = wrap_in_box_with_close_button(&dialog, vbox, "Cancel");
 
         let confirm = gtk::Button::with_label("Rename");
         let e = entry.clone();
-        confirm.connect_clicked(move |_| {
-            e.activate();
-        });
+        confirm.connect_clicked(move |_| rename(&e));
 
         actions.append(&confirm);
 
@@ -253,10 +254,8 @@ impl Gui {
         label.set_wrap_mode(WrapMode::WordChar);
         label_attributes(&label);
 
-        let entry = gtk::Entry::new();
-
         let d = dialog.downgrade();
-        entry.connect_activate(move |e| {
+        let create = move |e: &gtk::Entry| {
             d.upgrade().unwrap().destroy();
 
             let new_name = e.text();
@@ -272,7 +271,12 @@ impl Gui {
                     VecDeque::new(),
                 )
             });
-        });
+        };
+
+        let entry = gtk::Entry::new();
+        // activates-default is slow, so clone this closure instead
+        entry.connect_activate(create.clone());
+
 
         vbox.append(&label);
         vbox.append(&entry);
@@ -281,9 +285,7 @@ impl Gui {
 
         let confirm = gtk::Button::with_label("Create");
         let e = entry.clone();
-        confirm.connect_clicked(move |_| {
-            e.activate();
-        });
+        confirm.connect_clicked(move |_| create(&e));
 
         actions.append(&confirm);
 
