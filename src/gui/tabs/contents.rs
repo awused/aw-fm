@@ -130,9 +130,9 @@ impl Contents {
         if self.list.n_items() == 0 {
             let mut entries = snap.entries;
             entries.sort_by(|a, b| a.get().cmp(&b.get(), self.sort));
-            self.list.extend(entries.into_iter());
+            self.list.extend(entries);
         } else {
-            self.list.extend(snap.entries.into_iter());
+            self.list.extend(snap.entries);
             self.list.sort(self.sort.comparator());
         }
         trace!("Sorted {:?} search items in {:?}", self.list.n_items(), start.elapsed());
@@ -282,12 +282,11 @@ impl Contents {
     }
 
     pub fn sort(&mut self, sort: SortSettings) {
-        let old_sort = self.sort;
         if self.stale {
-            self.clear(sort);
+            return self.clear(sort);
         }
 
-        if old_sort == sort {
+        if self.sort == sort {
             return;
         }
 
@@ -299,6 +298,8 @@ impl Contents {
 
     pub fn clear(&mut self, sort: SortSettings) {
         self.stale = false;
+        self.sort = sort;
+
         if self.list.n_items() == 0 {
             return;
         }
@@ -328,8 +329,6 @@ impl Contents {
             old_list.splice(0, 1000, &[] as &[EntryObject]);
             ControlFlow::Continue
         });
-
-        self.sort = sort;
     }
 
     pub fn mark_stale(&mut self, sort: SortSettings) {
