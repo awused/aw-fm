@@ -839,7 +839,7 @@ impl Tab {
 
     pub fn set_active(&mut self) {
         assert!(self.visible(), "Called set_active on a tab that isn't visible");
-        self.pane.get_visible_mut().unwrap().set_active(true);
+        self.pane.set_active(true);
         self.element.set_active(true);
     }
 

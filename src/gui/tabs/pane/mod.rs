@@ -64,6 +64,13 @@ impl View {
             Self::Columns(details) => details.update_sort(settings.sort),
         }
     }
+
+    fn grab_focus(&self) {
+        match self {
+            Self::Icons(i) => i.grab_focus(),
+            Self::Columns(d) => d.grab_focus(),
+        }
+    }
 }
 
 fn get_last_visible_child(parent: &Widget) -> Option<Widget> {
@@ -437,7 +444,7 @@ impl Pane {
         self.element.imp().active.set(active);
         if active {
             self.element.add_css_class("active-pane");
-            self.element.imp().text_entry.grab_focus_without_selecting();
+            self.view.grab_focus();
         } else {
             self.element.remove_css_class("active-pane");
         }
@@ -843,7 +850,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
     let drag_source = DragSource::new();
     drag_source.set_actions(DragAction::all());
     drag_source.connect_prepare(move |ds, _x, _y| {
-        let paintable = paintable.upgrade().unwrap();
+        let pw = paintable.upgrade().unwrap();
         let bw = bound.upgrade().unwrap();
         let eo = bw.bound_object().unwrap();
 
@@ -854,9 +861,9 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
             t.content_provider(ClipboardOp::Cut)
         });
 
-        let paintable = WidgetPaintable::new(Some(&paintable));
+        let paintable = WidgetPaintable::new(Some(&pw));
 
-        ds.set_icon(Some(&paintable), bw.width() / 2, bw.height() / 2);
+        ds.set_icon(Some(&paintable), pw.width() / 2, pw.height() / 2);
         DRAGGING_TAB.with(|dt| dt.set(Some(tab)));
         Some(provider.into())
     });
