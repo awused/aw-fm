@@ -768,10 +768,11 @@ fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<
 
 // Sets up various controllers that should be set only on items, and not on dead space around
 // items.
-fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
+fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>>(
     tab: TabId,
     widget: &W,
     bound: WeakRef<B>,
+    paintable: WeakRef<P>,
     deny_view: Rc<Cell<bool>>,
 ) {
     let click = GestureClick::new();
@@ -842,6 +843,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
     let drag_source = DragSource::new();
     drag_source.set_actions(DragAction::all());
     drag_source.connect_prepare(move |ds, _x, _y| {
+        let paintable = paintable.upgrade().unwrap();
         let bw = bound.upgrade().unwrap();
         let eo = bw.bound_object().unwrap();
 
@@ -852,7 +854,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
             t.content_provider(ClipboardOp::Cut)
         });
 
-        let paintable = WidgetPaintable::new(Some(&bw));
+        let paintable = WidgetPaintable::new(Some(&paintable));
 
         ds.set_icon(Some(&paintable), bw.width() / 2, bw.height() / 2);
         DRAGGING_TAB.with(|dt| dt.set(Some(tab)));

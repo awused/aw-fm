@@ -35,9 +35,10 @@ impl IconView {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let tile = IconTile::default();
             // Bind to the individual items, not the entire massive tile.
-            setup_item_controllers(tab, &*tile.imp().image, tile.downgrade(), deny.clone());
-            setup_item_controllers(tab, &*tile.imp().name, tile.downgrade(), deny.clone());
-            setup_item_controllers(tab, &*tile.imp().size, tile.downgrade(), deny.clone());
+            let w = tile.downgrade();
+            setup_item_controllers(tab, &*tile.imp().image, w.clone(), w.clone(), deny.clone());
+            setup_item_controllers(tab, &*tile.imp().name, w.clone(), w.clone(), deny.clone());
+            setup_item_controllers(tab, &*tile.imp().size, w.clone(), w, deny.clone());
 
             let deny_bg_click = GestureClick::new();
             deny_bg_click.set_button(1);

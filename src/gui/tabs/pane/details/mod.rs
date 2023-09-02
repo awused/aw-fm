@@ -189,7 +189,9 @@ fn setup_columns(tab: TabId, column_view: &ColumnView, deny_view_click: Rc<Cell<
     icon_factory.connect_setup(move |_factory, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let cell = IconCell::default();
-        setup_item_controllers(tab, &cell, cell.downgrade(), deny.clone());
+        // This could be cell.parent for the paintable, but obsolete with 4.12
+        // TODO [gtk4.12]
+        setup_item_controllers(tab, &cell, cell.downgrade(), cell.downgrade(), deny.clone());
 
         item.set_child(Some(&cell));
     });
@@ -277,7 +279,14 @@ fn setup_string_binds(factory: &SignalListItemFactory, tab: TabId, deny: Rc<Cell
         child.bind(&entry);
 
         if !child.has_controllers() {
-            setup_item_controllers(tab, &child.parent().unwrap(), child.downgrade(), deny.clone());
+            let parent = child.parent().unwrap();
+            setup_item_controllers(
+                tab,
+                &parent,
+                child.downgrade(),
+                parent.parent().unwrap().downgrade(),
+                deny.clone(),
+            );
             child.set_controllers();
         }
     });
