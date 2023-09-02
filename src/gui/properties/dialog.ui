@@ -13,7 +13,7 @@
 
 
         <child>
-          <object class="GtkNotebook">
+          <object class="GtkNotebook" id="notebook">
             <property name="hexpand">true</property>
             <property name="vexpand">true</property>
 
@@ -295,6 +295,24 @@
               </object>
             </child>
 
+            <child>
+              <object class="GtkNotebookPage" id="media_page">
+                <property name="tab-expand">1</property>
+
+                <property name="child">
+                  <object class="GtkLabel">
+                    <property name="label">Not yet implemented</property>
+                  </object>
+                </property>
+
+                <property name="tab">
+                  <object class="GtkLabel" id="media_label">
+                    <property name="label">Media</property>
+                    <property name="use-underline">1</property>
+                  </object>
+                </property>
+              </object>
+            </child>
 
           </object>
         </child> <!-- notebook -->

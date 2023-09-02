@@ -29,7 +29,7 @@ use crate::com::{
 };
 use crate::config::CONFIG;
 use crate::database::SavedGroup;
-use crate::gui::clipboard::{handle_clipboard, handle_drop, Operation, SelectionProvider};
+use crate::gui::clipboard::{handle_clipboard, handle_drop, ClipboardOp, SelectionProvider};
 use crate::gui::operations::{self, Kind, Outcome};
 use crate::gui::tabs::PartiallyAppliedUpdate;
 use crate::gui::{applications, gui_run, show_error, show_warning, tabs_run, Selected, Update};
@@ -696,8 +696,13 @@ impl Tab {
         search.matches_update(update)
     }
 
-    pub fn apply_search_update(&mut self, update: SearchUpdate) {
-        self.search.as_mut().unwrap().apply_search_update(update);
+    pub fn overlaps_other_search_update(&self, update: &SearchUpdate) -> bool {
+        self.matches_flat_update(&update.update)
+            || (self.search.as_ref().is_some_and(|s| s.overlaps_other_update(update)))
+    }
+
+    pub fn apply_search_update(&mut self, update: SearchUpdate, allow_mutation: bool) {
+        self.search.as_mut().unwrap().apply_search_update(update, allow_mutation);
     }
 
     fn search_sort_after_snapshot(&mut self, path: &Path) {
@@ -790,10 +795,6 @@ impl Tab {
             return Some(target);
         }
 
-        if was_search {
-            // Clear so we don't flicker
-            self.contents.clear(self.settings.sort);
-        }
 
         self.element.flat_title(&target.dir);
 
@@ -802,6 +803,11 @@ impl Tab {
 
         let old_settings = self.settings;
         self.settings = gui_run(|g| g.database.get(self.dir.path().clone()));
+
+        if was_search {
+            // Clear so we don't flicker
+            self.contents.clear(self.settings.sort);
+        }
 
         if !self.copy_flat_from_donor(left, right) {
             // We couldn't find any state to steal, so we know we're the only matching tab.
@@ -1415,11 +1421,11 @@ impl Tab {
         }
     }
 
-    pub fn content_provider(&self, operation: Operation) -> SelectionProvider {
+    pub fn content_provider(&self, operation: ClipboardOp) -> SelectionProvider {
         SelectionProvider::new(operation, self.visible_selection())
     }
 
-    pub fn set_clipboard(&self, operation: Operation) {
+    pub fn set_clipboard(&self, operation: ClipboardOp) {
         let provider = self.content_provider(operation);
         let text = provider.display_string();
 
@@ -1468,7 +1474,7 @@ impl Tab {
         let files = Selected::from(self.visible_selection())
             .map(|eo| eo.get().abs_path.clone())
             .collect();
-        Self::run_deletion(self.id(), files, Kind::Trash);
+        Self::run_deletion(self.id(), files, Kind::Trash(self.dir()));
     }
 
     pub fn delete(&self) {
@@ -1496,11 +1502,12 @@ impl Tab {
             .message(query)
             .build();
 
+        let kind = Kind::Delete(self.dir());
         let tab = self.id();
         alert.choose(Some(&gui_run(|g| g.window.clone())), Cancellable::NONE, move |button| {
             if button == Ok(1) {
                 debug!("Confirmed deletion for {} items in {:?}", files.len(), tab);
-                Self::run_deletion(tab, files, Kind::Delete);
+                Self::run_deletion(tab, files, kind);
             }
         });
     }
@@ -1564,7 +1571,7 @@ impl Tab {
                 }
             }
             Kind::Undo { .. } => todo!(),
-            Kind::Trash | Kind::Delete => {
+            Kind::Trash(_) | Kind::Delete(_) => {
                 info!("Not scrolling to completed deletion or trash operation.");
                 false
             }
@@ -1595,8 +1602,8 @@ impl Tab {
             .collect()
     }
 
-    pub fn scroll_to_completed(&mut self, op: Rc<operations::Operation>) {
-        if !self.matches_completed_op(&op) {
+    pub fn scroll_to_completed(&mut self, op: &Rc<operations::Operation>) {
+        if !self.matches_completed_op(op) {
             return;
         }
 
@@ -1627,6 +1634,7 @@ impl Tab {
         // Lower than the normal priority for the main channel.
         let (s, r) = glib::MainContext::channel(glib::Priority::DEFAULT_IDLE);
 
+        let op = op.clone();
         r.attach(None, move |_| {
             tabs_run(|tlist| {
                 let Some(tab) = tlist.find_mut(op.tab) else {

@@ -35,6 +35,9 @@ mod imp {
         pub toast: TemplateChild<gtk::Label>,
 
         #[template_child]
+        pub progress_trackers: TemplateChild<gtk::Box>,
+
+        #[template_child]
         pub bookmarks: TemplateChild<gtk::Box>,
     }
 

@@ -20,7 +20,7 @@ use crate::com::{
     SortSettings, Update,
 };
 use crate::database::{SavedSplit, Session, SplitChild};
-use crate::gui::clipboard::Operation;
+use crate::gui::clipboard::ClipboardOp;
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
@@ -214,7 +214,6 @@ impl TabsList {
         }
 
 
-        // Normal updates
         if let Some(index) = self.tabs.iter().position(|t| t.matches_flat_update(&update)) {
             let (left_tabs, tab, right_tabs) = self.split_around_mut(index);
             tab.flat_update(left_tabs, right_tabs, update);
@@ -225,8 +224,15 @@ impl TabsList {
     // with the newest versions.
     // To prevent races, flat tab snapshots always take priority.
     pub fn search_update(&mut self, update: SearchUpdate) {
-        if let Some(t) = self.tabs.iter_mut().find(|t| t.matches_search_update(&update)) {
-            t.apply_search_update(update);
+        if let Some(pos) = self.tabs.iter().position(|t| t.matches_search_update(&update)) {
+            // If there are no other matching tabs we can apply mutations even in search tabs
+            let overlapping_tabs = self
+                .tabs
+                .iter()
+                .enumerate()
+                .any(|(i, t)| i != pos && t.overlaps_other_search_update(&update));
+
+            self.tabs[pos].apply_search_update(update, !overlapping_tabs);
         } else {
             warn!("Unmatched search update.");
         }
@@ -272,7 +278,7 @@ impl TabsList {
         tab.navigate(left, right, target)
     }
 
-    pub fn scroll_to_completed(&mut self, op: Rc<operations::Operation>) {
+    pub fn scroll_to_completed(&mut self, op: &Rc<operations::Operation>) {
         let Some(tab) = self.find_mut(op.tab) else {
             return info!("Not scrolling to completed operation in closed tab {:?}", op.tab);
         };
@@ -301,46 +307,7 @@ impl TabsList {
             return;
         }
 
-        if let Some(active) = self.active {
-            if let Some(group) = self.find(active).unwrap().multi_tab_group() {
-                let mut children = group.borrow().children.clone();
-
-                for t in &mut self.tabs {
-                    if children.is_empty() {
-                        break;
-                    };
-
-                    let Some(pos) = children.iter().position(|id| *id == t.id()) else {
-                        continue;
-                    };
-                    children.swap_remove(pos);
-
-                    t.start_hide();
-                }
-
-                let t = self.find_mut(group.borrow().parent).unwrap();
-                t.start_hide();
-                t.finish_hide();
-
-                let mut children = group.borrow().children.clone();
-                for t in &mut self.tabs {
-                    if children.is_empty() {
-                        break;
-                    };
-
-                    let Some(pos) = children.iter().position(|id| *id == t.id()) else {
-                        continue;
-                    };
-                    children.swap_remove(pos);
-
-                    t.finish_hide();
-                }
-            } else {
-                let t = self.find_mut(active).unwrap();
-                t.start_hide();
-                t.finish_hide();
-            }
-        }
+        self.active_hide();
 
 
         if let Some(group) = self.tabs[index].multi_tab_group() {
@@ -629,7 +596,7 @@ impl TabsList {
         self.tabs[index].leave_group();
     }
 
-    fn hide_pane(&mut self, id: TabId) {
+    fn hide_single_pane(&mut self, id: TabId) {
         let index = self.position(id).unwrap();
 
         if let Some(kin) = self.tabs[index].next_of_kin_by_pane() {
@@ -666,7 +633,7 @@ impl TabsList {
 
         if let Some(_group) = tab.multi_tab_group() {
             // Real pain here.
-            self.hide_pane(id);
+            self.hide_single_pane(id);
             // Closing the pane can change this
             eindex = self.element_position(id).unwrap();
         } else if self.tabs.len() > 1 && tab.visible() {
@@ -739,7 +706,7 @@ impl TabsList {
             return;
         };
 
-        self.find(active).unwrap().set_clipboard(Operation::Copy);
+        self.find(active).unwrap().set_clipboard(ClipboardOp::Copy);
     }
 
     pub fn active_cut(&self) {
@@ -747,7 +714,7 @@ impl TabsList {
             return;
         };
 
-        self.find(active).unwrap().set_clipboard(Operation::Cut);
+        self.find(active).unwrap().set_clipboard(ClipboardOp::Cut);
     }
 
     pub fn active_paste(&self) {
@@ -816,7 +783,45 @@ impl TabsList {
             return warn!("ClosePane called with no open panes");
         };
 
-        self.hide_pane(active);
+        self.hide_single_pane(active);
+    }
+
+    pub fn active_hide(&mut self) {
+        let Some(active) = self.active else {
+            return debug!("HidePanes called with no open panes");
+        };
+
+        let active_tab = self.find_mut(active).unwrap();
+
+        if let Some(group) = active_tab.multi_tab_group() {
+            let mut children = group.borrow().children.clone();
+            let mut to_finish = Vec::with_capacity(children.len());
+
+            for (i, t) in self.tabs.iter_mut().enumerate() {
+                let Some(pos) = children.iter().position(|id| *id == t.id()) else {
+                    continue;
+                };
+
+                children.swap_remove(pos);
+                to_finish.push(i);
+                t.start_hide();
+
+                if children.is_empty() {
+                    break;
+                };
+            }
+
+            let t = self.find_mut(group.borrow().parent).unwrap();
+            t.start_hide();
+            t.finish_hide();
+
+            for i in to_finish {
+                self.tabs[i].finish_hide();
+            }
+        } else {
+            active_tab.start_hide();
+            active_tab.finish_hide();
+        }
     }
 
     pub fn active_close_both(&mut self) {
@@ -824,7 +829,7 @@ impl TabsList {
             return warn!("CloseActive called with no open panes");
         };
 
-        self.hide_pane(old_active);
+        self.hide_single_pane(old_active);
 
         let index = self.position(old_active).unwrap();
         let eindex = self.element_position(old_active).unwrap();
@@ -947,7 +952,7 @@ impl TabsList {
             // Will not change dest_index since they're in different groups and this will, at
             // worst, reorder tabs within source's group.
             if self.tabs[src_idx].visible() {
-                self.hide_pane(source);
+                self.hide_single_pane(source);
             } else {
                 self.remove_tab_from_group(source);
             }

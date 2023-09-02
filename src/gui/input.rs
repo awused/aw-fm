@@ -364,6 +364,7 @@ impl Gui {
 
         debug!("Running command {}", cmd);
 
+        // This may not be worth the headache, but it saves a fair bit of boilerplate
         let mut tabs = self.tabs.borrow_mut();
 
 
@@ -463,7 +464,10 @@ impl Gui {
             "Cut" => return tabs.active_cut(),
             "Paste" => return tabs.active_paste(),
 
-            "Cancel" => return self.cancel_operations(),
+            "Cancel" => {
+                drop(tabs);
+                return self.cancel_operations();
+            }
 
             "Home" => {
                 return tabs.active_navigate(&home_dir().unwrap_or_default());
@@ -475,6 +479,7 @@ impl Gui {
             "Refresh" => return tabs.refresh(),
             "CloseTab" => return tabs.active_close_tab(),
             "ClosePane" => return tabs.active_close_pane(),
+            "HidePanes" => return tabs.active_hide(),
             "CloseActive" => return tabs.active_close_both(),
 
             "Forward" => return tabs.active_forward(),

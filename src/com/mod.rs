@@ -38,6 +38,15 @@ impl Update {
             Self::Removed(path) => path,
         }
     }
+
+    pub fn is_in_subdir(&self, ancestor: &Path) -> bool {
+        let path = self.path();
+        if path.parent() == Some(ancestor) {
+            return false;
+        }
+
+        path.starts_with(ancestor)
+    }
 }
 
 #[derive(Debug)]

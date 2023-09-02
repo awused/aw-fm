@@ -13,8 +13,6 @@ use num_format::{Locale, ToFormattedString};
 use crate::com::{ChildInfo, EntryObject};
 use crate::gui::Gui;
 
-// TODO -- tabs with per-mimetype content? Image resolution, etc?
-
 glib::wrapper! {
     pub struct PropDialog(ObjectSubclass<imp::PropDialog>)
         @extends gtk::Widget, gtk::Window;
@@ -43,76 +41,12 @@ impl PropDialog {
             imp.location.set_text(&format!("Search in {}", location.to_string_lossy()));
         }
 
-        let mut size = 0;
-        let mut allocated = 0;
-
-        for f in &files {
-            size += f.get().raw_size();
-            allocated += f.get().allocated_size;
-        }
-
-        for d in &dirs {
-            allocated += d.get().allocated_size;
-        }
-
-        imp.size.set(size);
-        imp.allocated.set(allocated);
-
-        if dirs.is_empty() {
-            imp.children_box.set_visible(false);
-            imp.spinner.stop();
-            imp.spinner.set_visible(false);
-        } else {
-            imp.spinner.start();
-            imp.spinner.set_visible(true);
-        }
+        s.setup_basic_metadata(gui, &files, &dirs);
 
         if files.len() == 1 && dirs.is_empty() {
-            imp.name_text.set_text(&files[0].get().name.to_string_lossy());
-            imp.type_text.set_text(&files[0].get().mime);
-            imp.mtime_text.set_text(&files[0].get().mtime.seconds_string());
-
-            s.set_image(gui, &files[0]);
-        } else if files.is_empty() && dirs.len() == 1 {
-            imp.name_text.set_text(&dirs[0].get().name.to_string_lossy());
-            imp.type_text.set_text(&dirs[0].get().mime);
-            imp.mtime_text.set_text(&dirs[0].get().mtime.seconds_string());
-
-            s.set_image(gui, &dirs[0]);
-        } else if dirs.is_empty() {
-            imp.mtime_box.set_visible(false);
-
-            imp.name_label.set_text("");
-            imp.name_text.set_text(&format!("{} files", files.len()));
-
-            let mimetype = files[0].get().mime.clone();
-            if files.iter().any(|f| f.get().mime != mimetype) {
-                imp.type_box.set_visible(false);
-                s.default_image();
-            } else {
-                imp.type_text.set_text(&mimetype);
-                s.set_image(gui, &files[0]);
-            }
-        } else if files.is_empty() {
-            imp.mtime_box.set_visible(false);
-
-            imp.name_label.set_text("");
-            imp.name_text.set_text(&format!("{} directories", dirs.len()));
-
-            imp.type_text.set_text(&dirs[0].get().mime);
-            s.set_image(gui, &dirs[0]);
+            // s.setup_media(&files[0]);
         } else {
-            imp.type_box.set_visible(false);
-            imp.mtime_box.set_visible(false);
-
-            imp.name_label.set_text("");
-            imp.name_text.set_text(&format!(
-                "{} directories and {} files",
-                dirs.len(),
-                files.len()
-            ));
-
-            s.default_image();
+            imp.notebook.remove_page(imp.media_page.position().try_into().ok());
         }
 
         let w = s.downgrade();
@@ -160,6 +94,87 @@ impl PropDialog {
         }
 
         self.update_text();
+    }
+
+    pub(super) fn setup_basic_metadata(
+        &self,
+        gui: &Gui,
+        files: &[EntryObject],
+        dirs: &[EntryObject],
+    ) {
+        let imp = self.imp();
+
+        let mut size = 0;
+        let mut allocated = 0;
+
+        for f in files {
+            size += f.get().raw_size();
+            allocated += f.get().allocated_size;
+        }
+
+        for d in dirs {
+            allocated += d.get().allocated_size;
+        }
+
+        imp.size.set(size);
+        imp.allocated.set(allocated);
+
+        if dirs.is_empty() {
+            imp.children_box.set_visible(false);
+            imp.spinner.stop();
+            imp.spinner.set_visible(false);
+        } else {
+            imp.spinner.start();
+            imp.spinner.set_visible(true);
+        }
+
+        if files.len() == 1 && dirs.is_empty() {
+            imp.name_text.set_text(&files[0].get().name.to_string_lossy());
+            imp.type_text.set_text(&files[0].get().mime);
+            imp.mtime_text.set_text(&files[0].get().mtime.seconds_string());
+
+            self.set_image(gui, &files[0]);
+        } else if files.is_empty() && dirs.len() == 1 {
+            imp.name_text.set_text(&dirs[0].get().name.to_string_lossy());
+            imp.type_text.set_text(&dirs[0].get().mime);
+            imp.mtime_text.set_text(&dirs[0].get().mtime.seconds_string());
+
+            self.set_image(gui, &dirs[0]);
+        } else if dirs.is_empty() {
+            imp.mtime_box.set_visible(false);
+
+            imp.name_label.set_text("");
+            imp.name_text.set_text(&format!("{} files", files.len()));
+
+            let mimetype = files[0].get().mime.clone();
+            if files.iter().any(|f| f.get().mime != mimetype) {
+                imp.type_box.set_visible(false);
+                self.default_image();
+            } else {
+                imp.type_text.set_text(&mimetype);
+                self.set_image(gui, &files[0]);
+            }
+        } else if files.is_empty() {
+            imp.mtime_box.set_visible(false);
+
+            imp.name_label.set_text("");
+            imp.name_text.set_text(&format!("{} directories", dirs.len()));
+
+            imp.type_text.set_text(&dirs[0].get().mime);
+            self.set_image(gui, &dirs[0]);
+        } else {
+            imp.type_box.set_visible(false);
+            imp.mtime_box.set_visible(false);
+
+            imp.name_label.set_text("");
+            imp.name_text.set_text(&format!(
+                "{} directories and {} files",
+                dirs.len(),
+                files.len()
+            ));
+
+            self.default_image();
+        }
     }
 
     fn set_image(&self, g: &Gui, eo: &EntryObject) {
@@ -229,6 +244,9 @@ mod imp {
     #[template(file = "dialog.ui")]
     pub struct PropDialog {
         #[template_child]
+        pub notebook: TemplateChild<gtk::Notebook>,
+
+        #[template_child]
         pub icon: TemplateChild<gtk::Image>,
 
         #[template_child]
@@ -261,6 +279,25 @@ mod imp {
         #[template_child]
         pub mtime_text: TemplateChild<gtk::Label>,
 
+        // Permissions page
+
+        // Image/Video/Music page
+        #[template_child]
+        pub media_page: TemplateChild<gtk::NotebookPage>,
+
+        #[template_child]
+        pub media_label: TemplateChild<gtk::Label>,
+
+        // Format
+        // Container
+        //
+        // Images: Resolution, ??colorspace??, ??mode??, animation duration/frame count
+        //
+        // Video: Resolution, duration, codecs, ?bitrates?
+        // Duration
+        // Codec?
+        // Colorspace?
+        // Artist, Album, Album Artist, ??year??, bitrate
         #[template_child]
         pub close: TemplateChild<gtk::Button>,
 
@@ -296,6 +333,4 @@ mod imp {
 
     impl WindowImpl for PropDialog {}
     impl WidgetImpl for PropDialog {}
-
-    impl PropDialog {}
 }

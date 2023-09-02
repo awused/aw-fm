@@ -33,7 +33,7 @@ impl PartiallyAppliedUpdate {
             Self::Mutate(_, eo) | Self::Insert(eo) | Self::Delete(eo) => eo.get(),
         };
 
-        if Some(ancestor) == entry.abs_path.parent() {
+        if entry.abs_path.parent() == Some(ancestor) {
             return false;
         }
 

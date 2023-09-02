@@ -396,6 +396,11 @@ async fn consume_entries(
         _ = sleep_until(fast_deadline) => {
             trace!("Starting slow directory handling at {} entries", entries.len());
 
+            #[cfg(feature = "debug-forced-slow")]
+            {
+                sleep(BATCH_TIMEOUT).await;
+            }
+
             if let Err(e) = gui_sender.send(snap(&path, &cancel, SnapshotKind::Start, entries)) {
                 if !closing::closed() {
                     error!("{e}");
@@ -418,6 +423,7 @@ async fn consume_entries(
 //   - Continue to consume entries until 5ms have passed without a new entry, up to BATCH_TIMEOUT
 //   - If BATCH_TIMEOUT has passed, consume only immediately available entrie
 //   - Send the batch
+#[cfg_attr(feature = "debug-forced-slow", allow(unreachable_code, unused))]
 async fn read_slow_dir(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,

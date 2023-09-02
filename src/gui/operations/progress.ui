@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="AwFmProgressTracker" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="spacing">4</property>
+    <property name="margin-top">4</property>
+    <property name="margin-bottom">4</property>
+    <property name="margin-start">4</property>
+    <property name="margin-end">4</property>
+    <property name="width-request">500</property>
+
+    <style>
+      <class name="progress-tracker"/>
+    </style>
+
+    <child>
+      <object class="GtkLabel" id="title">
+        <property name="halign">start</property>
+
+        <style>
+          <class name="title-4" />
+        </style>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkLabel" id="subtitle">
+        <property name="halign">start</property>
+        <property name="wrap">true</property>
+        <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
+
+        <attributes>
+          <attribute name="insert-hyphens" value="false"></attribute>
+        </attributes>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkLabel" id="current">
+        <property name="halign">start</property>
+        <property name="wrap">true</property>
+        <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
+
+        <attributes>
+          <attribute name="insert-hyphens" value="false"></attribute>
+        </attributes>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">4</property>
+        <property name="hexpand">true</property>
+
+        <!-- Progress n/total, speed if available, duration -->
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">4</property>
+        <property name="hexpand">true</property>
+        <property name="halign">GTK_ALIGN_END</property>
+
+        <child>
+          <object class="GtkButton" id="cancel">
+            <property name="icon-name">process-stop-symbolic</property>
+          </object>
+        </child>
+
+      </object>
+    </child>
+
+  </template>
+</interface>

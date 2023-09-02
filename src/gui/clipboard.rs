@@ -28,12 +28,12 @@ glib::wrapper! {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumString, IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
-pub enum Operation {
+pub enum ClipboardOp {
     Copy,
     Cut,
 }
 
-impl Operation {
+impl ClipboardOp {
     const fn verb(self) -> &'static str {
         match self {
             Self::Copy => "copied",
@@ -44,7 +44,7 @@ impl Operation {
 
 impl SelectionProvider {
     // It's fine if the selection is empty.
-    pub fn new(operation: Operation, selection: &MultiSelection) -> Self {
+    pub fn new(operation: ClipboardOp, selection: &MultiSelection) -> Self {
         let s: Self = glib::Object::new();
 
         let files: Vec<_> = Selected::from(selection).collect();
@@ -81,7 +81,7 @@ fn bytes_to_operation(tab: TabId, path: Arc<Path>, uri_list: bool, bytes: &[u8])
             return;
         };
 
-        match Operation::from_str(first) {
+        match ClipboardOp::from_str(first) {
             Ok(o) => o,
             Err(e) => {
                 error!("Got invalid operation from contents: {e}");
@@ -89,7 +89,7 @@ fn bytes_to_operation(tab: TabId, path: Arc<Path>, uri_list: bool, bytes: &[u8])
             }
         }
     } else {
-        Operation::Cut
+        ClipboardOp::Cut
     };
 
     // for_uri can panic
@@ -102,8 +102,8 @@ fn bytes_to_operation(tab: TabId, path: Arc<Path>, uri_list: bool, bytes: &[u8])
 
     glib::idle_add_once(move || {
         let kind = match operation {
-            Operation::Copy => operations::Kind::Copy(path),
-            Operation::Cut => operations::Kind::Move(path),
+            ClipboardOp::Copy => operations::Kind::Copy(path),
+            ClipboardOp::Cut => operations::Kind::Move(path),
         };
 
         gui_run(|g| g.start_operation(tab, kind, files));
@@ -229,7 +229,7 @@ mod imp {
     use gtk::{gdk, gio, glib};
     use once_cell::unsync::OnceCell;
 
-    use super::{Operation, SPECIAL, SPECIAL_GNOME, SPECIAL_MATE, URIS};
+    use super::{ClipboardOp, SPECIAL, SPECIAL_GNOME, SPECIAL_MATE, URIS};
     use crate::com::EntryObject;
 
 
@@ -239,7 +239,7 @@ mod imp {
 
     #[derive(Default)]
     pub struct ClipboardProvider {
-        pub operation: OnceCell<Operation>,
+        pub operation: OnceCell<ClipboardOp>,
         // This needs to outlive the tab it came from, hence the copy.
         pub entries: OnceCell<Rc<[EntryObject]>>,
     }

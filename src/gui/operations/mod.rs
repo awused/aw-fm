@@ -1,36 +1,34 @@
-// Until all the rest are implemented
-
-use std::cell::{Cell, Ref, RefCell};
+use std::cell::{Ref, RefCell};
 use std::collections::VecDeque;
-use std::ffi::{OsStr, OsString};
 use std::fs::{remove_dir, ReadDir};
-use std::os::unix::prelude::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::time::Duration;
 
-use ahash::AHashMap;
 use gtk::gio::{self, Cancellable, FileCopyFlags, FileInfo, FileQueryInfoFlags};
-use gtk::glib::{self, SourceId};
-use gtk::prelude::{CancellableExt, FileExt, FileExtManual};
+use gtk::glib;
+use gtk::prelude::*;
 use once_cell::unsync::Lazy;
 use regex::bytes::{Captures, Regex};
 
-use self::ask::{DirChoice, FileChoice};
+use self::progress::Progress;
 use super::tabs::id::TabId;
 use super::{gui_run, Gui};
 use crate::com::{GuiAction, Update};
-use crate::config::{DirectoryCollision, FileCollision, CONFIG};
+use crate::config::{DirectoryCollision, FileCollision};
 use crate::gui::operations::ask::AskDialog;
 use crate::gui::{show_error, show_warning, tabs_run};
 
 mod ask;
+mod progress;
 
 thread_local! {
-    static COPY_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"^(.*)( \(copy (\d+)\))(\.[^/]+)?$").unwrap());
-    static COPIED_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"^(.*)( \(copied (\d+)\))(\.[^/]+)?$").unwrap());
-    static MOVED_REGEX: Lazy<Regex> = Lazy::new(||Regex::new(r"^(.*)( \(moved (\d+)\))(\.[^/]+)?$").unwrap());
+    static COPY_REGEX: Lazy<Regex> =
+        Lazy::new(||Regex::new(r"^(.*)( \(copy (\d+)\))(\.[^/]+)?$").unwrap());
+    static COPIED_REGEX: Lazy<Regex> =
+        Lazy::new(||Regex::new(r"^(.*)( \(copied (\d+)\))(\.[^/]+)?$").unwrap());
+    static MOVED_REGEX: Lazy<Regex> =
+        Lazy::new(||Regex::new(r"^(.*)( \(moved (\d+)\))(\.[^/]+)?$").unwrap());
 }
 
 // Whatever we add to a name to resolve collisions
@@ -63,7 +61,7 @@ impl Fragment {
 // in roughly reverse order.
 #[derive(Debug)]
 pub enum Outcome {
-    // Includes overwrites, undo -> move back
+    // Includes overwrites, undo -> move back if no conflict
     Move { source: Arc<Path>, dest: PathBuf },
     // Does not include overwrite copies, undo -> delete with no confirmation
     Create(PathBuf),
@@ -99,9 +97,11 @@ pub enum Kind {
         prev_progress: Box<RefCell<Progress>>,
         // These should be processed FILO, just like outcomes from progress.log
         pending_dir_info: RefCell<Vec<(Arc<Path>, FileInfo)>>,
+        // TODO
+        // destroy_overwrites: Cell<bool>,
     },
-    Trash,
-    Delete,
+    Trash(Arc<Path>),
+    Delete(Arc<Path>),
 }
 
 impl std::fmt::Display for Kind {
@@ -113,14 +113,24 @@ impl std::fmt::Display for Kind {
 impl Kind {
     const fn str(&self) -> &'static str {
         match self {
-            Self::Move(_) => "move",
-            Self::Copy(_) => "copy",
-            Self::Rename(_) => "rename",
-            Self::MakeDir(_) => "makedir",
-            Self::MakeFile(_) => "makefile",
-            Self::Undo { .. } => "undo",
-            Self::Trash => "trash",
-            Self::Delete => "delete",
+            Self::Move(_) => "Move",
+            Self::Copy(_) => "Copy",
+            Self::Rename(_) => "Rename",
+            Self::MakeDir(_) => "MakeDir",
+            Self::MakeFile(_) => "MakeFile",
+            Self::Undo { .. } => "Undo",
+            Self::Trash(_) => "Trash",
+            Self::Delete(_) => "Delete",
+        }
+    }
+
+    // Some of these should never be displayed unless something is seriously wrong
+    fn dir(&self) -> &Path {
+        match self {
+            Kind::Move(d) | Kind::Copy(d) | Self::Trash(d) | Self::Delete(d) => &d,
+            Kind::Rename(p) | Kind::MakeDir(p) | Self::MakeFile(p) => &p,
+            // Should only ever go one level deep
+            Kind::Undo { prev, .. } => prev.dir(),
         }
     }
 
@@ -132,19 +142,18 @@ impl Kind {
             | Self::MakeDir(_)
             | Self::MakeFile(_)
             | Self::Undo { .. }
-            | Self::Trash
-            | Self::Delete => unreachable!(),
+            | Self::Trash(_)
+            | Self::Delete(_) => unreachable!(),
         }
     }
 }
 
-// Basic directory state machine
+// Basic directory state machine, processing is depth-first.
 // Flow is:
 // Encounter a source directory.
 // Create a destination directory or resolve collision.
 // Push the directory onto the stack.
 // Enter a directory-> process all its files -> exit a directory.
-// We DFS and when we finish with a directory we process that directory.
 #[derive(Debug)]
 struct Directory {
     abs_path: Arc<Path>,
@@ -199,32 +208,6 @@ struct Conflict {
     dst: PathBuf,
 }
 
-#[derive(Debug)]
-pub struct Progress {
-    dirs: Vec<Directory>,
-    // Set for every operation except undo, which plays back outcomes instead.
-    source_files: VecDeque<Arc<Path>>,
-
-    log: Vec<Outcome>,
-
-    finished: usize,
-    // Would be nice to compute this more eagerly so it gets ahead of the processing
-    total: usize,
-
-    conflict: Option<Conflict>,
-
-    directory_collisions: DirectoryCollision,
-    file_collisions: FileCollision,
-    // Used when "ask" is only setting a result for this particular file/folder.
-    directory_override_next: Option<DirectoryCollision>,
-    file_override_next: Option<FileCollision>,
-
-    // Maps prefix + to last highest existing number
-    collision_cache: AHashMap<(OsString, OsString), u64>,
-
-    // process_callback: Option<SourceId>,
-    update_timeout: Option<SourceId>,
-}
 
 #[derive(Debug)]
 enum NextCopyMove {
@@ -238,243 +221,6 @@ enum NextRemove {
     File(Arc<Path>),
 }
 
-impl Progress {
-    fn next_copymove_pair(&mut self, dest_root: &Path) -> Option<NextCopyMove> {
-        if let Some(Conflict { src, dst, .. }) = self.conflict.take() {
-            return Some(NextCopyMove::Files(src, dst));
-        }
-
-        if let Some(dir) = &mut self.dirs.last_mut() {
-            for next in dir.iter.by_ref() {
-                let name = match next {
-                    Ok(de) => de.file_name(),
-                    Err(e) => {
-                        show_warning(&format!(
-                            "Failed to read contents of directory {:?}: {e}",
-                            dir.abs_path
-                        ));
-                        continue;
-                    }
-                };
-
-                return Some(NextCopyMove::Files(
-                    dir.abs_path.join(&name).into(),
-                    dir.dest.join(name),
-                ));
-            }
-
-            return Some(NextCopyMove::FinishedDir(self.dirs.pop().unwrap()));
-        }
-
-        let mut src = self.source_files.pop_front()?;
-
-        while src.file_name().is_none() {
-            error!("Tried to move file without filename");
-            src = self.source_files.pop_front()?;
-        }
-
-        let name = src.file_name().unwrap();
-        let dest = dest_root.to_path_buf().join(name);
-
-        Some(NextCopyMove::Files(src, dest))
-    }
-
-    fn next_remove(&mut self) -> Option<NextRemove> {
-        if let Some(dir) = &mut self.dirs.last_mut() {
-            for next in dir.iter.by_ref() {
-                let path = match next {
-                    Ok(de) => de.path(),
-                    Err(e) => {
-                        show_warning(&format!(
-                            "Failed to read contents of directory {:?}: {e}",
-                            dir.abs_path
-                        ));
-                        continue;
-                    }
-                };
-
-                return Some(NextRemove::File(path.into()));
-            }
-
-            return Some(NextRemove::FinishedDir(self.dirs.pop().unwrap()));
-        }
-
-        Some(NextRemove::File(self.source_files.pop_front()?))
-    }
-
-    fn push_outcome(&mut self, action: Outcome) {
-        match &action {
-            Outcome::Move { .. }
-            | Outcome::Create(_)
-            | Outcome::CopyOverwrite(_)
-            | Outcome::Trash
-            | Outcome::CreateDestDir(_)
-            | Outcome::MergeDestDir(_) // does this really count?
-            | Outcome::Delete
-            | Outcome::DeleteDir => {
-                self.total += 1;
-                self.finished += 1
-            }
-            Outcome::Skip => self.total += 1,
-            Outcome::RemoveSourceDir(..) => {}
-        }
-
-        self.log.push(action);
-    }
-
-    fn new_name_for(&mut self, path: &Path, fragment: Fragment) -> Option<PathBuf> {
-        trace!("Finding new name for copy onto self for {path:?}");
-
-        let Some(name) = path.file_name() else {
-            show_warning(format!("Can't make new name for {path:?}"));
-            return None;
-        };
-
-        let Some(parent) = path.parent() else {
-            show_warning(format!("Can't make new name for {path:?}"));
-            return None;
-        };
-
-        let (prefix, suffix, mut n) = if let Some(cap) = fragment.captures(name.as_bytes()) {
-            let n: u64 = OsStr::from_bytes(&cap[3]).to_string_lossy().parse().unwrap_or(0);
-            let prefix = cap.get(1).unwrap().as_bytes();
-            let suffix = cap.get(4).map_or(&[][..], |m| m.as_bytes());
-
-            (OsStr::from_bytes(prefix), OsStr::from_bytes(suffix), n)
-        } else if let Some(prefix) = path.file_stem() {
-            let suffix = path.file_name().unwrap();
-            let suffix = &suffix.as_bytes()[prefix.as_bytes().len()..];
-            let suffix = OsStr::from_bytes(suffix);
-
-            (prefix, suffix, 0)
-        } else {
-            (name, OsStr::new(""), 0)
-        };
-
-        let target = parent.join(prefix);
-        let mut target = target.into_os_string();
-        target.push(" (");
-        target.push(fragment.str());
-
-
-        // Wasteful allocations, but by this point we're already doing I/O
-        if let Some(old_n) = self.collision_cache.get(&(target.clone(), suffix.to_os_string())) {
-            n = *old_n;
-        }
-
-
-        let mut target = target.into_vec();
-        let length = target.len();
-
-        let mut n_available = |n| {
-            target.truncate(length);
-            target.extend_from_slice(format!(" {n})").as_bytes());
-            target.extend_from_slice(suffix.as_bytes());
-
-            let new_path: &Path = Path::new(OsStr::from_bytes(&target));
-            if !new_path.exists() {
-                return true;
-            }
-            false
-        };
-
-        // Small linear search first, so we avoid easily found gaps
-        static MAX_LINEAR: usize = 64;
-        for _ in 0..MAX_LINEAR {
-            n += 1;
-
-            if n_available(n) {
-                self.collision_cache
-                    .insert((OsStr::from_bytes(&target[0..length]).into(), suffix.into()), n);
-                let new_path = OsString::from_vec(target).into();
-                debug!("Found new name {new_path:?} for {path:?}");
-                return Some(new_path);
-            }
-        }
-
-        let mut start = n;
-        let mut end = u64::MAX;
-
-        // This is vulnerable to maliciously or mischievously crafted directories where we could
-        // believe all numbers are taken based on intentionally seeded files.
-        //
-        // But that's a stupid, self-sabotaging thing to do.
-        while start < end {
-            let mid = start + (end - start) / 2;
-
-            if n_available(mid) {
-                end = mid;
-            } else {
-                start = mid + 1;
-            }
-        }
-
-        if n_available(start) {
-            self.collision_cache
-                .insert((OsStr::from_bytes(&target[0..length]).into(), suffix.into()), start);
-            let new_path = OsString::from_vec(target).into();
-            debug!("Found new name {new_path:?} for {path:?}");
-            Some(new_path)
-        } else {
-            None
-        }
-    }
-
-    fn directory_strat(&mut self) -> DirectoryCollision {
-        self.directory_override_next.take().unwrap_or(self.directory_collisions)
-    }
-
-    fn set_directory_strat(&mut self, choice: DirChoice) {
-        match choice {
-            DirChoice::Skip(true) => {
-                self.directory_collisions = DirectoryCollision::Skip;
-            }
-            DirChoice::Merge(true) => {
-                self.directory_collisions = DirectoryCollision::Merge;
-            }
-            DirChoice::Skip(false) => {
-                self.directory_override_next = Some(DirectoryCollision::Skip);
-            }
-            DirChoice::Merge(false) => {
-                self.directory_override_next = Some(DirectoryCollision::Merge);
-            }
-        }
-    }
-
-    fn file_strat(&mut self) -> FileCollision {
-        self.file_override_next.take().unwrap_or(self.file_collisions)
-    }
-
-    fn set_file_strat(&mut self, choice: FileChoice) {
-        match choice.collision() {
-            (true, c) => self.file_collisions = c,
-            (false, c) => self.file_override_next = Some(c),
-        }
-    }
-
-    fn conflict_rename(&mut self, name: &str) {
-        let c = self.conflict.as_mut().unwrap();
-        let Some(parent) = c.dst.parent() else {
-            return show_warning(format!(
-                "Could not rename destination {}, choose a different strategy",
-                match c.kind {
-                    ConflictKind::DirDir => "directory",
-                    ConflictKind::FileFile => "file",
-                },
-            ));
-        };
-
-        c.dst = parent.join(name);
-    }
-}
-
-impl Drop for Progress {
-    fn drop(&mut self) {
-        if let Some(s) = self.update_timeout.take() {
-            s.remove();
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct Operation {
@@ -482,8 +228,6 @@ pub struct Operation {
     pub tab: TabId,
     pub kind: Kind,
     cancellable: Cancellable,
-    // Fast operations don't live long enough to display on-screen
-    slow: Cell<bool>,
     // Just clone the paths directly instead of needing to convert everything to an Rc up front.
     progress: RefCell<Progress>,
 }
@@ -543,48 +287,16 @@ impl Operation {
                     return None;
                 }
             }
-            Kind::Undo { .. } | Kind::Trash | Kind::Delete => {}
+            Kind::Undo { .. } | Kind::Trash(_) | Kind::Delete(_) => {}
         }
 
 
         let rc = Rc::new_cyclic(|weak: &Weak<Self>| {
-            // Start with nothing shown.
-            let w = weak.clone();
-            let update_timeout = glib::timeout_add_local_once(Duration::from_secs(1), move || {
-                let Some(op) = w.upgrade() else {
-                    return;
-                };
-
-                op.slow.set(true);
-
-                op.progress.borrow_mut().update_timeout.take();
-                error!("TODO -- show progress bar");
-            });
-
-            let progress = Progress {
-                source_files,
-                dirs: Vec::new(),
-
-                log: Vec::new(),
-
-                total: 0,
-                finished: 0,
-
-                conflict: None,
-                directory_collisions: CONFIG.directory_collisions,
-                file_collisions: CONFIG.file_collisions,
-                directory_override_next: None,
-                file_override_next: None,
-
-                collision_cache: AHashMap::default(),
-
-                update_timeout: Some(update_timeout),
-            };
+            let progress = Progress::new(weak.clone(), source_files);
 
             Self {
                 tab,
                 cancellable: Cancellable::new(),
-                slow: Cell::default(),
                 kind,
                 progress: RefCell::new(progress),
             }
@@ -599,7 +311,7 @@ impl Operation {
 
     pub fn outcomes(&self) -> Ref<'_, [Outcome]> {
         let p = self.progress.borrow();
-        Ref::map(p, |p| &*p.log)
+        Ref::map(p, Progress::log)
     }
 
     fn process_next(self: Rc<Self>) {
@@ -616,8 +328,8 @@ impl Operation {
             Kind::MakeDir(p) => self.process_make_dir(p),
             Kind::MakeFile(p) => self.process_make_file(p),
             Kind::Undo { .. } => todo!(),
-            Kind::Trash => self.process_next_trash(),
-            Kind::Delete => self.process_next_delete(),
+            Kind::Trash(_) => self.process_next_trash(),
+            Kind::Delete(_) => self.process_next_delete(),
         };
 
         match status {
@@ -682,6 +394,7 @@ impl Operation {
 
         #[cfg(feature = "debug-forced-slow")]
         {
+            use std::time::Duration;
             let s = self.clone();
             glib::timeout_add_local_once(Duration::from_secs(1), move || s.do_move(prep));
         }
@@ -768,6 +481,7 @@ impl Operation {
 
         #[cfg(feature = "debug-forced-slow")]
         {
+            use std::time::Duration;
             let s = self.clone();
             glib::timeout_add_local_once(Duration::from_secs(1), move || s.do_copy(prep));
         }
@@ -971,7 +685,7 @@ impl Operation {
             }
         };
 
-        progress.dirs.push(Directory {
+        progress.push_dir(Directory {
             abs_path: src,
             dest: dst,
             iter: read_dir,
@@ -990,6 +704,7 @@ impl Operation {
 
         #[cfg(feature = "debug-forced-slow")]
         {
+            use std::time::Duration;
             let s = self.clone();
             glib::timeout_add_local_once(Duration::from_secs(1), move || s.do_trash(next));
         }
@@ -1035,7 +750,7 @@ impl Operation {
                             return Status::Done;
                         }
                     };
-                    progress.dirs.push(Directory {
+                    progress.push_dir(Directory {
                         abs_path: p,
                         dest: PathBuf::new(),
                         iter,
@@ -1053,6 +768,7 @@ impl Operation {
 
         #[cfg(feature = "debug-forced-slow")]
         {
+            use std::time::Duration;
             let s = self.clone();
             glib::timeout_add_local_once(Duration::from_secs(1), move || {
                 s.do_delete(next, was_dir)
@@ -1104,7 +820,7 @@ impl Operation {
             return Status::Done;
         }
 
-        let source = self.progress.borrow_mut().source_files.pop_front().unwrap();
+        let source = self.progress.borrow_mut().pop_source().unwrap();
         let dest = new_path.to_path_buf();
 
         let s = self.clone();
@@ -1189,13 +905,15 @@ impl Gui {
     // This is idempotent and can be called multiple times depending on exactly when an operation
     // is cancelled.
     fn finish_operation(self: &Rc<Self>, finished: &Rc<Operation>) {
+        finished.progress.borrow_mut().close();
+
+        tabs_run(|tlist| tlist.scroll_to_completed(finished));
+
         let mut ops = self.ongoing_operations.borrow_mut();
         let Some(index) = ops.iter().position(|o| Rc::ptr_eq(o, finished)) else {
             return;
         };
-        let op = ops.swap_remove(index);
-
-        tabs_run(|tlist| tlist.scroll_to_completed(op));
+        ops.swap_remove(index);
     }
 
     pub(super) fn start_operation(

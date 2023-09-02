@@ -8,10 +8,15 @@
   opacity: 0;
 }
 
-.toast {
+.toast,
+.progress-tracker {
   color: white;
   background: black;
   padding: 16px 24px;
+}
+
+.progress-tracker {
+  border: 1px solid white;
 }
 
 .main-nobg header>button {

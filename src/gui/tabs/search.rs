@@ -132,6 +132,13 @@ impl Search {
         self.contents.finish_update(update);
     }
 
+    pub fn overlaps_other_update(&self, update: &SearchUpdate) -> bool {
+        match &self.state {
+            State::Unloaded => false,
+            State::Loading(..) | State::Done(_) => update.update.is_in_subdir(&self.path),
+        }
+    }
+
     // Special handling for flat events in other tabs that might overlap this search.
     // They might need to be immediately applied, even during loading, because they could
     // change sort order.
@@ -140,17 +147,19 @@ impl Search {
             return;
         }
 
-        if let PartiallyAppliedUpdate::Delete(old) = update {
-            if let Some(pos) = self.contents.total_position_by_sorted(&old.get()) {
-                self.contents.remove(pos);
+        match update {
+            PartiallyAppliedUpdate::Delete(old) => {
+                if let Some(pos) = self.contents.total_position_by_sorted(&old.get()) {
+                    self.contents.remove(pos);
+                }
             }
-        } else if let PartiallyAppliedUpdate::Mutate(old, new) = update {
-            // This needs to be applied immediately if the item is present to maintain sorting.
-            if let Some(pos) = self.contents.total_position_by_sorted(old) {
-                self.contents.reinsert_updated(pos, new, old);
+            PartiallyAppliedUpdate::Mutate(old, new) => {
+                // This needs to be applied immediately if the item is present to maintain sorting.
+                if let Some(pos) = self.contents.total_position_by_sorted(old) {
+                    self.contents.reinsert_updated(pos, new, old);
+                }
             }
-        } else {
-            unreachable!()
+            PartiallyAppliedUpdate::Insert(_) => unreachable!(),
         }
     }
 
@@ -164,16 +173,18 @@ impl Search {
             };
 
             for u in pending {
-                self.apply_search_update_inner(u);
+                self.apply_search_update_inner(u, false);
             }
 
             self.state = State::Done(id);
         }
     }
 
-    fn apply_search_update_inner(&mut self, s_update: SearchUpdate) {
+    fn apply_search_update_inner(&mut self, s_update: SearchUpdate, allow_mutation: bool) {
         let update = s_update.update;
-        // For consistency reasons we only process local inserts or deletions here.
+        // For consistency reasons we only process mutations here when no other tabs might match
+        // this mutation.
+        //
         // Do not process global or local mutations as they could overlap with another search or
         // with flat directories and cause sort issues.
         //
@@ -196,8 +207,18 @@ impl Search {
                 trace!("Inserting existing item from update in search tab.");
                 self.contents.insert(&eo);
             }
-            (Update::Entry(_), Some(_), Some(_)) => {
-                debug!("Dropping mutation in search tab {:?}", self.path);
+            (Update::Entry(entry), Some(pos), Some(obj)) => {
+                if !allow_mutation {
+                    return debug!("Dropping mutation in search tab {:?}", self.path);
+                }
+
+                // It exists in this tab, but no other tabs, so mutating it is safe.
+                let Some(old) = obj.update(entry) else {
+                    return;
+                };
+
+                self.contents.reinsert_updated(pos, &obj, &old);
+                debug!("Updated {:?} from event in search tab", old.abs_path);
             }
             (Update::Removed(_), None, _) => {}
             (Update::Removed(_), Some(pos), Some(_)) => {
@@ -207,7 +228,7 @@ impl Search {
         }
     }
 
-    pub fn apply_search_update(&mut self, s_update: SearchUpdate) {
+    pub fn apply_search_update(&mut self, s_update: SearchUpdate, allow_mutation: bool) {
         match &mut self.state {
             State::Unloaded => unreachable!(),
             State::Loading(_, pending) => {
@@ -217,7 +238,7 @@ impl Search {
                 );
                 pending.push(s_update);
             }
-            State::Done(_) => self.apply_search_update_inner(s_update),
+            State::Done(_) => self.apply_search_update_inner(s_update, allow_mutation),
         }
     }
 

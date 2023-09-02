@@ -25,7 +25,7 @@ use super::tab::Tab;
 use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
 use crate::database::{SavedSplit, SplitChild};
-use crate::gui::clipboard::Operation;
+use crate::gui::clipboard::ClipboardOp;
 use crate::gui::tabs::NavTarget;
 use crate::gui::{gui_run, tabs_run};
 
@@ -849,7 +849,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound>(
             tlist.set_active(tab);
             let t = tlist.find(tab).unwrap();
             t.select_if_not(eo);
-            t.content_provider(Operation::Cut)
+            t.content_provider(ClipboardOp::Cut)
         });
 
         let paintable = WidgetPaintable::new(Some(&bw));

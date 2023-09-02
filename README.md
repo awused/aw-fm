@@ -145,8 +145,8 @@ specify them.
   * Close the active tab, pane, or both.
   * All panes can be closed without closing all tabs.
   * Closing the pane of a tab inside a group will remove that tab from the group.
-<!-- * `HidePanes`
-  * Hides all visible panes. -->
+* `HidePanes`
+  * Hides all visible panes.
 * `ReopenTab`
   * Reopens the last closed tabs in reverse order.
 * `Split horizontal|vertical`

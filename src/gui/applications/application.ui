@@ -11,22 +11,17 @@
     </child>
 
     <child>
-      <object class="GtkBox">
-        <property name="orientation">vertical</property>
+      <object class="GtkLabel" id="name">
         <property name="margin-top">6</property>
         <property name="margin-bottom">6</property>
+        <property name="halign">start</property>
 
-        <child>
-          <object class="GtkLabel" id="name">
-            <property name="halign">start</property>
-            <style>
-              <class name="title-4" />
-            </style>
-          </object>
-        </child>
-
+        <style>
+          <class name="title-4" />
+        </style>
       </object>
     </child>
+
   </template>
 </interface>
 
