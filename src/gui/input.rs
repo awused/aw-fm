@@ -23,7 +23,7 @@ use super::properties::dialog::PropDialog;
 use super::tabs::id::TabId;
 use super::{label_attributes, Gui};
 use crate::closing;
-use crate::com::{DisplayMode, ManagerAction, SortDir, SortMode};
+use crate::com::{DisplayMode, EntryObject, ManagerAction, SortDir, SortMode};
 use crate::config::CONFIG;
 use crate::gui::operations::Kind;
 use crate::gui::{gui_run, show_warning};
@@ -153,7 +153,9 @@ impl Gui {
         container.append(&header);
     }
 
-    pub(super) fn rename_dialog(self: &Rc<Self>, tab: TabId, path: Arc<Path>) {
+    pub(super) fn rename_dialog(self: &Rc<Self>, tab: TabId, eo: EntryObject) {
+        let path = eo.get().abs_path.clone();
+
         let Some(fname) = path.file_name() else {
             return info!("Can't rename without file name");
         };
@@ -182,7 +184,9 @@ impl Gui {
         let entry = gtk::Entry::new();
         entry.set_text(&fname.to_string_lossy());
 
-        let end_pos = if let Some(stem) = path.file_stem() {
+        let end_pos = if eo.get().dir() {
+            -1
+        } else if let Some(stem) = path.file_stem() {
             stem.to_string_lossy().chars().count() as i32
         } else {
             -1

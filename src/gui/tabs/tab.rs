@@ -1518,9 +1518,7 @@ impl Tab {
             return info!("Can't rename {} files", files.len());
         }
 
-        let path = files.next().unwrap().get().abs_path.clone();
-
-        gui_run(|g| g.rename_dialog(self.id(), path));
+        gui_run(|g| g.rename_dialog(self.id(), files.next().unwrap()));
     }
 
     pub fn properties(&self) {

@@ -4,6 +4,7 @@ use std::fs::{remove_dir, ReadDir};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use std::time::Instant;
 
 use gtk::gio::{self, Cancellable, FileCopyFlags, FileInfo, FileQueryInfoFlags};
 use gtk::glib;
@@ -379,6 +380,31 @@ impl Operation {
             break (src, dst);
         };
 
+        if src.is_dir() && !src.is_symlink() && !dst.exists() {
+            // Attempt a rename with no fallbacks.
+            // This will be fast enough to just try synchronously.
+            let source = gio::File::for_path(&src);
+            let dest = gio::File::for_path(&dst);
+            let flags = FileCopyFlags::NOFOLLOW_SYMLINKS
+                | FileCopyFlags::ALL_METADATA
+                | FileCopyFlags::NO_FALLBACK_FOR_MOVE;
+
+            let start = Instant::now();
+            match source.move_(&dest, flags, Some(&self.cancellable), None) {
+                Ok(_) => {
+                    debug!("Moved directory {src:?} via rename");
+                    debug!("Moved directory {src:?} via rename {:?}", start.elapsed());
+                    self.progress
+                        .borrow_mut()
+                        .push_outcome(Outcome::Move { source: src, dest: dst });
+                    return Status::CallAgain;
+                }
+                Err(e) => {
+                    trace!("Failed to rename directory, falling back to normal move: {e}");
+                    debug!("Moved directory {src:?} via rename {:?}", start.elapsed());
+                }
+            }
+        }
 
         let prep = match self.prepare_copymove(src, dst) {
             CopyMovePrep::Asking => return Status::AsyncScheduled,
