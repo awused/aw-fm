@@ -16,7 +16,6 @@ mod icon_tile;
 #[derive(Debug)]
 pub(super) struct IconView {
     grid: GridView,
-    selection: MultiSelection,
 
     _workaround_rubber: SignalHolder<MultiSelection>,
 }
@@ -111,14 +110,14 @@ impl IconView {
 
         Self {
             grid,
-            selection: selection.clone(),
             _workaround_rubber: workaround_rubberband,
         }
     }
 
     pub(super) fn scroll_to(&self, pos: u32) {
         // TODO [gtk4.12] use GridView.scroll_to
-        if self.selection.n_items() <= pos {
+        let model = self.grid.model().unwrap();
+        if model.n_items() == 0 {
             return;
         }
 
@@ -160,7 +159,7 @@ impl IconView {
     }
 
     pub(super) fn workaround_enable_rubberband(&self) {
-        if self.selection.n_items() != 0 {
+        if self.grid.model().unwrap().n_items() != 0 {
             self.grid.set_enable_rubberband(true);
         }
     }

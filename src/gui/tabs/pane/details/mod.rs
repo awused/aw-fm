@@ -26,7 +26,6 @@ const DATE_MODIFIED: &str = "Date Modified";
 #[derive(Debug)]
 pub(super) struct DetailsView {
     column_view: ColumnView,
-    selection: MultiSelection,
     current_sort: Rc<Cell<SortSettings>>,
 
     _workaround_rubber: SignalHolder<MultiSelection>,
@@ -98,7 +97,6 @@ impl DetailsView {
         Self {
             column_view,
             current_sort,
-            selection: selection.clone(),
 
             _workaround_rubber: workaround_rubberband,
         }
@@ -116,7 +114,8 @@ impl DetailsView {
 
     pub(super) fn scroll_to(&self, pos: u32) {
         // TODO [gtk4.12] use ColumnView.scroll_to
-        if self.selection.n_items() <= pos {
+        let model = self.column_view.model().unwrap();
+        if model.n_items() == 0 {
             return;
         }
 
@@ -149,7 +148,7 @@ impl DetailsView {
             .and_downcast::<IconCell>()
             .and_then(|c| c.bound_object());
 
-        if obj.is_none() && self.selection.n_items() != 0 {
+        if obj.is_none() && model.n_items() != 0 {
             error!("Failed to find visible item in list with at least one item");
         }
 
@@ -173,7 +172,7 @@ impl DetailsView {
     }
 
     pub(super) fn workaround_enable_rubberband(&self) {
-        if self.selection.n_items() != 0 {
+        if self.column_view.model().unwrap().n_items() != 0 {
             self.column_view.set_enable_rubberband(true);
         }
     }

@@ -493,17 +493,12 @@ impl Tab {
         trace!("Creating Search for {:?}", self.id);
         let mut search = Search::new(self.dir.path().clone(), &self.contents, query);
 
-        let Some(pane) = self.pane.get_visible_mut() else {
-            self.search = Some(search);
-            return;
-        };
-
         self.element.search_title(self.dir.path());
 
         search.start_load();
         self.element.spin();
 
-        pane.flat_to_search(
+        self.pane.flat_to_search(
             search.query(),
             &search.contents().selection,
             search.filter.clone(),
@@ -533,8 +528,7 @@ impl Tab {
         assert!(self.visible());
 
         if let Some(_search) = &mut self.search {
-            let pane = self.pane.get_visible_mut().unwrap();
-            pane.update_search(&query);
+            self.pane.update_search(&query);
             return;
         }
 
@@ -593,13 +587,11 @@ impl Tab {
     }
 
     fn apply_snapshot_inner(&mut self, snap: EntryObjectSnapshot) {
-        if self.settings.display_mode == DisplayMode::Icons {
-            if let Some(scroller) = self.pane.get_visible().map(Pane::workaround_scroller) {
-                if scroller.vscrollbar_policy() != gtk::PolicyType::Never {
-                    warn!("Locking scrolling to work around gtk crash");
-                    scroller.set_vscrollbar_policy(gtk::PolicyType::Never);
-                }
-            }
+        if self.settings.display_mode == DisplayMode::Icons
+            && self.pane.workaround_scroller().vscrollbar_policy() != gtk::PolicyType::Never
+        {
+            warn!("Locking scrolling to work around gtk crash");
+            self.pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Never);
         }
 
         if let Some(search) = &mut self.search {
@@ -747,11 +739,9 @@ impl Tab {
         if let Some(search) = &mut self.search {
             search.update_settings(self.settings);
 
-            if let Some(p) = self.pane.get_visible_mut() {
-                p.update_settings(self.settings, search.contents())
-            }
-        } else if let Some(p) = self.pane.get_visible_mut() {
-            p.update_settings(self.settings, &self.contents)
+            self.pane.update_settings(self.settings, search.contents());
+        } else {
+            self.pane.update_settings(self.settings, &self.contents)
         }
         self.save_settings();
     }
@@ -828,11 +818,9 @@ impl Tab {
             self.close_search();
         }
 
-        if let Some(pane) = self.pane.get_visible_mut() {
-            // Cannot be a search pane
-            debug_assert!(self.search.is_none());
-            pane.update_location(self.dir.path(), self.settings, &self.contents);
-        }
+        // Cannot be a search pane
+        debug_assert!(self.search.is_none());
+        self.pane.update_location(self.dir.path(), self.settings, &self.contents);
         self.load(left, right);
         None
     }
@@ -844,9 +832,7 @@ impl Tab {
     }
 
     pub fn set_inactive(&mut self) {
-        if let Some(pane) = self.pane.get_visible_mut() {
-            pane.set_active(false);
-        }
+        self.pane.set_active(false);
         self.element.set_active(false);
     }
 
@@ -1163,9 +1149,6 @@ impl Tab {
 
         info!("Applying {:?} to tab {:?}", state, self.id);
 
-        if self.settings.display_mode == DisplayMode::Icons {
-            warn!("Unsetting GTK crash workaround");
-        }
         // Unconditionally unset it in case mode was swapped.
         pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
 
