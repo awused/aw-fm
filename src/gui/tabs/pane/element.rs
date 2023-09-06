@@ -154,6 +154,10 @@ impl PaneElement {
         });
 
         drop_target.connect_drop(move |_dta, dr, _x, _y| {
+            // Workaround for https://gitlab.gnome.org/GNOME/gtk/-/issues/6086
+            warn!("Manually clearing DROP_ACTIVE flag");
+            _dta.widget().unset_state_flags(gtk::StateFlags::DROP_ACTIVE);
+
             tabs_run(|tlist| {
                 info!("Handling drop in {tab:?}");
                 let t = tlist.find(tab).unwrap();

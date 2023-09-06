@@ -392,7 +392,6 @@ impl Operation {
             let start = Instant::now();
             match source.move_(&dest, flags, Some(&self.cancellable), None) {
                 Ok(_) => {
-                    debug!("Moved directory {src:?} via rename");
                     debug!("Moved directory {src:?} via rename {:?}", start.elapsed());
                     self.progress
                         .borrow_mut()
@@ -400,8 +399,10 @@ impl Operation {
                     return Status::CallAgain;
                 }
                 Err(e) => {
-                    trace!("Failed to rename directory, falling back to normal move: {e}");
-                    debug!("Moved directory {src:?} via rename {:?}", start.elapsed());
+                    trace!(
+                        "Failed to rename directory in {:?}, falling back to normal move: {e}",
+                        start.elapsed()
+                    );
                 }
             }
         }

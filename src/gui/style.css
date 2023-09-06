@@ -78,9 +78,6 @@ gridview .name {
   padding-right: 2px;
 }
 
-gridview:drop(active) {
-  box-shadow: none;
-}
 
 .left-bar {
   border-right: 1px solid black;

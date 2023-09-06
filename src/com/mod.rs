@@ -62,8 +62,12 @@ pub enum ManagerAction {
     Unwatch(Arc<Path>),
     Search(Arc<Path>, Arc<AtomicBool>),
     EndSearch(Arc<AtomicBool>),
+
+    // For commands from configs/scripts
     Execute(Arc<Path>, Vec<(String, OsString)>),
     Script(Arc<Path>, Vec<(String, OsString)>),
+    // When launching an application or executable directly
+    Launch(Arc<Path>, Vec<(String, OsString)>),
 
     GetChildren(Vec<Arc<Path>>, Arc<AtomicBool>),
 

@@ -88,8 +88,6 @@ pub enum Selection {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
-    // #[serde(default, deserialize_with = "empty_path_is_none")]
-    // pub temp_directory: Option<PathBuf>,
     #[serde(default)]
     pub unique: bool,
 

@@ -10,7 +10,7 @@ use gtk::prelude::{AppInfoExt, DisplayExt, GdkAppLaunchContextExt};
 use self::open_with::OpenWith;
 use super::tabs::id::TabId;
 use super::{show_error, show_warning, tabs_run, Gui, Selected};
-use crate::com::{EntryKind, EntryObject};
+use crate::com::{EntryKind, EntryObject, ManagerAction};
 use crate::gui::gui_run;
 
 mod application;
@@ -110,10 +110,7 @@ pub(super) fn open(tab: TabId, display: &Display, selected: Selected<'_>, execut
             // Can be called while the TabsList lock is held.
             glib::idle_add_local_once(move || {
                 gui_run(|g| {
-                    g.send_manager(crate::com::ManagerAction::Execute(
-                        f.get().abs_path.clone(),
-                        g.get_env(),
-                    ))
+                    g.send_manager(ManagerAction::Launch(f.get().abs_path.clone(), g.get_env()))
                 })
             });
 

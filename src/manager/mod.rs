@@ -154,6 +154,7 @@ impl Manager {
 
             Execute(s, env) => self.execute(s, env),
             Script(s, env) => self.script(s, env),
+            Launch(s, env) => self.launch(s, env),
 
             GetChildren(dirs, cancel) => self.get_children(dirs, cancel),
 

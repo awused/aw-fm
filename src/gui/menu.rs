@@ -19,7 +19,7 @@ use once_cell::unsync::Lazy;
 use regex::bytes::Regex;
 
 use super::Gui;
-use crate::com::{DirSettings, Entry, EntryObject};
+use crate::com::{DirSettings, Entry, EntryObject, ManagerAction};
 use crate::config::{ContextMenuEntry, ContextMenuGroup, Selection, ACTIONS_DIR, CONFIG};
 use crate::gui::clipboard;
 
@@ -404,9 +404,9 @@ impl CustomAction {
         let p = path.clone();
         action.connect_activate(move |_a, _v| {
             if settings.parse_output {
-                g.send_manager(crate::com::ManagerAction::Script(p.clone(), g.get_env()))
+                g.send_manager(ManagerAction::Script(p.clone(), g.get_env()))
             } else {
-                g.send_manager(crate::com::ManagerAction::Execute(p.clone(), g.get_env()))
+                g.send_manager(ManagerAction::Execute(p.clone(), g.get_env()))
             }
         });
 

@@ -13,8 +13,8 @@ use gtk::traits::{
     GestureSingleExt, PopoverExt, WidgetExt,
 };
 use gtk::{
-    CustomFilter, DragSource, EventControllerKey, FilterChange, FilterListModel, GestureClick,
-    MultiSelection, Orientation, ScrolledWindow, Widget, WidgetPaintable,
+    CustomFilter, DragSource, DropTargetAsync, EventControllerKey, FilterChange, FilterListModel,
+    GestureClick, MultiSelection, Orientation, ScrolledWindow, Widget, WidgetPaintable,
 };
 
 use self::details::DetailsView;
@@ -25,7 +25,7 @@ use super::tab::Tab;
 use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
 use crate::database::{SavedSplit, SplitChild};
-use crate::gui::clipboard::ClipboardOp;
+use crate::gui::clipboard::{ClipboardOp, URIS};
 use crate::gui::tabs::NavTarget;
 use crate::gui::{gui_run, tabs_run};
 
@@ -163,6 +163,22 @@ impl Pane {
         });
         element.imp().text_entry.add_controller(key);
 
+        let click = GestureClick::new();
+        click.set_button(0);
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+
+        click.connect_pressed(move |c, _n, x, y| {
+            // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
+            let alloc = c.widget().allocation();
+            if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
+                warn!("Workaround -- ignoring junk mouse event in {tab:?}");
+                return;
+            }
+
+            tabs_run(|tlist| tlist.set_active(tab));
+        });
+
+        element.imp().scroller.vscrollbar().add_controller(click);
 
         Self {
             view,
@@ -849,9 +865,11 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
 
     let drag_source = DragSource::new();
     drag_source.set_actions(DragAction::all());
+
+    let b = bound.clone();
     drag_source.connect_prepare(move |ds, _x, _y| {
         let pw = paintable.upgrade().unwrap();
-        let bw = bound.upgrade().unwrap();
+        let bw = b.upgrade().unwrap();
         let eo = bw.bound_object().unwrap();
 
         let provider = tabs_run(|tlist| {
@@ -874,6 +892,47 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
     });
     drag_source.set_propagation_phase(gtk::PropagationPhase::Capture);
 
+
+    let drop_target = DropTargetAsync::new(None, DragAction::all());
+    let b = bound.clone();
+    drop_target.connect_accept(move |_dta, dr| {
+        if !dr.formats().contain_mime_type(URIS) {
+            return false;
+        }
+
+        let bw = b.upgrade().unwrap();
+        let eo = bw.bound_object().unwrap();
+
+        if !eo.get().dir() {
+            return false;
+        }
+
+        true
+    });
+
+    drop_target.connect_drop(move |_dta, dr, _x, _y| {
+        // Workaround for https://gitlab.gnome.org/GNOME/gtk/-/issues/6086
+        warn!("Manually clearing DROP_ACTIVE flag");
+        _dta.widget().unset_state_flags(gtk::StateFlags::DROP_ACTIVE);
+
+        let bw = bound.upgrade().unwrap();
+        let eo = bw.bound_object().unwrap();
+
+        if !eo.get().dir() {
+            warn!("Ignoring drop on regular file {:?}", eo.get().dir());
+            return false;
+        }
+
+
+        tabs_run(|tlist| {
+            info!("Handling drop in {tab:?} on {:?}", &*eo.get().name);
+            let t = tlist.find(tab).unwrap();
+
+            t.drag_drop(dr, Some(eo))
+        })
+    });
+
     widget.add_controller(click);
     widget.add_controller(drag_source);
+    widget.add_controller(drop_target);
 }

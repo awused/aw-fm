@@ -1452,9 +1452,13 @@ impl Tab {
 
     pub fn drag_drop(&self, drop_ev: &gtk::gdk::Drop, eo: Option<EntryObject>) -> bool {
         if let Some(eo) = eo {
-            if eo.get().dir() {
-                todo!()
+            if !eo.get().dir() {
+                warn!("drag_drop called on a regular file, this shouldn't happen");
+                return false;
             }
+
+            debug!("Dropping onto directory {:?} in tab {:?}", eo.get().abs_path, self.id);
+            return handle_drop(drop_ev, self.id(), eo.get().abs_path.clone());
         }
 
         if !self.accepts_paste() {
@@ -1534,6 +1538,7 @@ impl Tab {
         gui_run(|g| g.create_dialog(self.id(), self.dir(), folder));
     }
 
+    // TODO -- handle operations inside a dir during search? (annoying edge case)
     fn matches_completed_op(&self, op: &operations::Operation) -> bool {
         if !self.loaded() || !self.visible() {
             info!(
