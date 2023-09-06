@@ -147,11 +147,23 @@ impl Manager {
             // Other events are probably meaningless
             // For renames we use the single path events
             Access(_) | Other | Modify(ModifyKind::Name(RenameMode::Both)) => return,
-            // Creations jump the queue and reset it to dedupe mode.
             Create(_) | Modify(ModifyKind::Name(RenameMode::To)) => {
                 trace!("Create {:?}", event.paths);
                 assert_eq!(event.paths.len(), 1);
-                self.recent_mutations.remove(&*event.paths[0]);
+
+                let path = &*event.paths[0];
+
+                // Creations jump the queue and reset it to dedupe mode.
+                if let Some(PendingUpdates(expiry, state, _)) = self.recent_mutations.get_mut(path)
+                {
+                    if *state != State::Deduping {
+                        *state = State::Deduping;
+                        *expiry = Instant::now() + DEDUPE_DELAY + BATCH_GRACE;
+
+                        self.next_tick =
+                            self.next_tick.map_or(Some(*expiry), |nt| Some(nt.min(*expiry)));
+                    }
+                }
             }
             Remove(_) | Modify(ModifyKind::Name(RenameMode::From)) => {
                 trace!("Remove {:?}", event.paths);
