@@ -9,6 +9,7 @@ use gtk::prelude::{AppInfoExt, DisplayExt, GdkAppLaunchContextExt};
 
 use self::open_with::OpenWith;
 use super::tabs::id::TabId;
+use super::tabs::list::TabPosition;
 use super::{show_error, show_warning, tabs_run, Gui, Selected};
 use crate::com::{EntryKind, EntryObject, ManagerAction};
 use crate::gui::gui_run;
@@ -138,7 +139,7 @@ pub(super) fn open(tab: TabId, display: &Display, selected: Selected<'_>, execut
             // Open tabs in reverse order.
             // directories.reverse();
             for d in directories.into_iter().rev() {
-                t.open_tab(&d, false);
+                t.open_tab(&d, TabPosition::AfterActive, false);
             }
         })
     });

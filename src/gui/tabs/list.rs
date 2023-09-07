@@ -49,6 +49,14 @@ impl Group {
 }
 
 
+#[derive(Debug)]
+pub enum TabPosition {
+    AfterActive,
+    After(TabId),
+    End,
+}
+
+
 // This is tightly coupled the Tab implementation, right now.
 #[derive(Debug)]
 pub struct TabsList {
@@ -170,6 +178,21 @@ impl TabsList {
             .map(|u| u as u32)
     }
 
+    // Only returns None when after has already been closed
+    fn element_insertion_index(&self, after: TabId) -> Option<u32> {
+        let Some(tab) = self.find(after) else {
+            warn!("Called element_insertion_index with dangling ID {after:?}");
+            return None;
+        };
+
+        if let Some(g) = tab.multi_tab_group() {
+            let b = g.borrow();
+            Some(self.element_position(b.parent).unwrap() + b.size())
+        } else {
+            self.element_position(tab.id()).map(|i| i + 1)
+        }
+    }
+
     fn element(&self, i: u32) -> TabElement {
         self.tab_elements.item(i).and_downcast().unwrap()
     }
@@ -226,6 +249,9 @@ impl TabsList {
     pub fn search_update(&mut self, update: SearchUpdate) {
         if let Some(pos) = self.tabs.iter().position(|t| t.matches_search_update(&update)) {
             // If there are no other matching tabs we can apply mutations even in search tabs
+            //
+            // NOTE: This must be checked here, even if Sources was piped through from the watcher
+            // code, it would allow for races with new searches opening.
             let overlapping_tabs = self
                 .tabs
                 .iter()
@@ -327,7 +353,8 @@ impl TabsList {
         self.set_active(id);
     }
 
-    fn clone_active(&mut self, for_split: bool) -> Option<(TabId, usize)> {
+    // New tab is always at the end of self.tabs
+    fn clone_active(&mut self, for_split: bool) -> Option<TabId> {
         let Some(active) = self.active else {
             return None;
         };
@@ -337,9 +364,8 @@ impl TabsList {
         let element_index = if for_split {
             self.element_position(active).unwrap() + 1
         } else {
-            let group = self.tabs[active_index].multi_tab_group();
-            let parent = group.as_ref().map_or(active, |g| g.borrow().parent);
-            self.element_position(parent).unwrap() + group.map_or(1, |g| g.borrow().size())
+            // Bit inefficient, extra linear search
+            self.element_insertion_index(active).unwrap()
         };
 
         let (new_tab, element) =
@@ -349,12 +375,12 @@ impl TabsList {
         self.tabs.push(new_tab);
         self.tab_elements.insert(element_index, &element);
 
-        Some((id, self.tabs.len() - 1))
+        Some(id)
     }
 
     pub(super) fn create_tab(
         &mut self,
-        after: Option<TabId>,
+        position: TabPosition,
         target: NavTarget,
         activate: bool,
     ) -> TabId {
@@ -364,15 +390,22 @@ impl TabsList {
         let id = new_tab.id();
         self.tabs.push(new_tab);
 
-        if let Some(index) = after.and_then(|a| self.element_position(a)) {
-            self.tab_elements.insert(index + 1, &element);
-        } else {
-            self.tab_elements.append(&element);
-        }
+        let after = match position {
+            TabPosition::AfterActive => self.active,
+            TabPosition::After(id) => Some(id),
+            TabPosition::End => None,
+        };
+
+        let index = after
+            .and_then(|a| self.element_insertion_index(a))
+            .unwrap_or_else(|| self.tab_elements.n_items());
+
+        self.tab_elements.insert(index, &element);
 
         if activate {
             self.switch_active_tab(id)
         }
+
         id
     }
 
@@ -382,17 +415,7 @@ impl TabsList {
         };
         info!("Reopening closed tab");
 
-        let index = closed
-            .after
-            .and_then(|a| self.find(a))
-            .and_then(|t| {
-                if let Some(g) = t.multi_tab_group() {
-                    Some(self.element_position(g.borrow().parent).unwrap() + g.borrow().size())
-                } else {
-                    self.element_position(t.id()).map(|i| i + 1)
-                }
-            })
-            .unwrap_or_default();
+        let index = closed.after.and_then(|a| self.element_insertion_index(a)).unwrap_or_default();
 
         let (new_tab, element) = Tab::reopen(closed, &self.tabs, |w| self.pane_container.append(w));
 
@@ -406,17 +429,17 @@ impl TabsList {
 
     // For now, tabs always open after the active tab
     // !activate -> background tab
-    pub fn open_tab<P: AsRef<Path>>(&mut self, path: P, activate: bool) {
+    pub fn open_tab<P: AsRef<Path>>(&mut self, path: P, pos: TabPosition, activate: bool) {
         let Some(target) = NavTarget::open_or_jump(path, self) else {
             return;
         };
 
-        self.create_tab(self.active, target, activate);
+        self.create_tab(pos, target, activate);
     }
 
     // Clones the active tab or opens a new tab to the user's home directory.
     pub fn new_tab(&mut self, activate: bool) {
-        if let Some((id, _)) = self.clone_active(false) {
+        if let Some(id) = self.clone_active(false) {
             if activate {
                 self.switch_active_tab(id)
             }
@@ -431,7 +454,7 @@ impl TabsList {
             return;
         };
 
-        self.create_tab(self.active, target, activate);
+        self.create_tab(TabPosition::AfterActive, target, activate);
     }
 
     // Restores splits from saved groups in a session.
@@ -512,7 +535,10 @@ impl TabsList {
             None
         };
 
-        let (id, index) = existing.unwrap_or_else(|| self.clone_active(true).unwrap());
+        let (id, index) = existing.unwrap_or_else(|| {
+            let new = self.clone_active(true).unwrap();
+            (new, self.tabs.len() - 1)
+        });
 
         let (left, tab, right) = self.split_around_mut(index);
         tab.add_to_visible_group(left, right, group, paned);
@@ -732,7 +758,7 @@ impl TabsList {
             return;
         }
 
-        self.open_tab(path, true);
+        self.open_tab(path, TabPosition::AfterActive, true);
     }
 
     pub fn active_jump(&mut self, path: &Path) {
@@ -747,7 +773,7 @@ impl TabsList {
             return;
         }
 
-        self.create_tab(self.active, jump, true);
+        self.create_tab(TabPosition::AfterActive, jump, true);
     }
 
     pub fn active_forward(&mut self) {
@@ -1016,7 +1042,7 @@ impl TabsList {
         let old_tabs = self.tabs.len();
         for path in session.paths {
             let target = NavTarget::assume_dir(path);
-            self.create_tab(None, target, false);
+            self.create_tab(TabPosition::End, target, false);
         }
 
         for n in 0..old_tabs {

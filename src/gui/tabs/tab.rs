@@ -127,7 +127,6 @@ impl MaybePane {
         }
     }
 
-    // TODO
     fn make_visible(&mut self) {
         match self {
             Self::Detached { .. } => {
@@ -316,21 +315,6 @@ impl Tab {
 
         let pane = Pane::new_flat(id.copy(), dir.path(), settings, &contents.selection, insert);
 
-        // if let Some(search) = &self.search {
-        //     let pane = Pane::new_search(
-        //         self.id(),
-        //         search.query(),
-        //         self.settings,
-        //         &search.contents().selection,
-        //         search.filter.clone(),
-        //         search.contents().filtered.clone().unwrap(),
-        //         attach,
-        // );
-        // self.pane.set_pane(pane);
-        // } else {
-        // self.pane.set_pane(pane);
-        // }
-
         let mut t = Self {
             id,
             group: None,
@@ -364,7 +348,7 @@ impl Tab {
         // again once the tab is selected.
         if source.dir.state().loading() {
             element.spin();
-        } else if source.dir.state().loading() {
+        } else {
             element.stop_spin();
         }
 

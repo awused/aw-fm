@@ -15,6 +15,14 @@
 # Comment out or set to 0 to disable.
 idle_timeout = 21600
 
+
+# Whether to limit aw-fm to a single window or not.
+#
+# If true, only one aw-fm window can be open at a time. Running "aw-fm directory" with an
+# open window will open "directory" in a tab in the existing window instead of a new window.
+unique = false
+
+
 # Shortcuts
 #
 # All shortcuts must have a key and an action, and optionally one or more modifiers.
@@ -170,6 +178,7 @@ file_collisions = "ask"
 #
 # Defaults to ~/.config/aw-fm/actions/, or ${XDG_CONFIG_HOME}/aw-fm/actions/
 actions_directory = ""
+
 
 # ------------------------------------------------------------------------------------------------
 # More advanced configuration options below. They probably do not need to be changed.

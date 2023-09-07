@@ -1,4 +1,5 @@
 use std::cell::{Cell, OnceCell, RefCell};
+use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -9,6 +10,7 @@ use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib, Bitset, MultiSelection};
+use path_clean::PathClean;
 use tokio::sync::mpsc::UnboundedSender;
 
 use self::main_window::MainWindow;
@@ -19,6 +21,7 @@ use super::com::*;
 use crate::closing;
 use crate::config::CONFIG;
 use crate::database::DBCon;
+use crate::gui::tabs::list::TabPosition;
 
 mod applications;
 mod clipboard;
@@ -116,7 +119,7 @@ pub fn run(
     gui_receiver: glib::Receiver<GuiAction>,
 ) {
     let flags = if CONFIG.unique {
-        gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::SEND_ENVIRONMENT
+        gio::ApplicationFlags::HANDLES_COMMAND_LINE
     } else {
         gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::NON_UNIQUE
     };
@@ -131,10 +134,39 @@ pub fn run(
     });
 
     // This is a stupid hack around glib trying to exert exclusive control over the command line.
-    application.connect_command_line(|a, _| {
+    application.connect_command_line(|a, cl| {
         GUI.with(|g| match g.get() {
             None => a.activate(),
-            Some(_g) => todo!("TODO -- Handling command line from another process"),
+            Some(g) => {
+                let args = cl.arguments();
+
+                let mut path = if args.len() < 2 {
+                    let Some(cwd) = cl.cwd() else {
+                        return show_warning("Got request to open tab with no directory");
+                    };
+
+                    cwd.clean()
+                } else {
+                    Path::new(&args[1]).clean()
+                };
+
+
+                if path.is_relative() {
+                    let Some(cwd) = cl.cwd() else {
+                        return show_warning(
+                            "Got request to open tab with relative path and no working directory",
+                        );
+                    };
+
+                    path = cwd.join(path).clean();
+                }
+
+                if path.is_relative() {
+                    return show_warning("Could not make {path:?} absolute");
+                }
+
+                g.tabs.borrow_mut().open_tab(path, TabPosition::End, true);
+            }
         });
         0
     });

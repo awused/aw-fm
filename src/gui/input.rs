@@ -26,6 +26,7 @@ use crate::closing;
 use crate::com::{DisplayMode, EntryObject, ManagerAction, SortDir, SortMode};
 use crate::config::CONFIG;
 use crate::gui::operations::Kind;
+use crate::gui::tabs::list::TabPosition;
 use crate::gui::{gui_run, show_warning};
 
 mod help;
@@ -393,9 +394,9 @@ impl Gui {
 
                 "Navigate" => return tabs.active_navigate(Path::new(arg)),
                 "JumpTo" => return tabs.active_jump(Path::new(arg)),
-                "NewTab" => return tabs.open_tab(Path::new(arg), true),
+                "NewTab" => return tabs.open_tab(Path::new(arg), TabPosition::AfterActive, true),
                 "NewBackgroundTab" => {
-                    return tabs.open_tab(Path::new(arg), false);
+                    return tabs.open_tab(Path::new(arg), TabPosition::AfterActive, false);
                 }
 
                 "Split" => match arg {
@@ -447,13 +448,6 @@ impl Gui {
 
                 _ => true,
             };
-
-            // For now only toggles work here. Some of the regexes could be eliminated instead.
-            // if let Ok(arg) = Toggle::try_from(arg) {
-            //     let _ = match cmd {
-            //         _ => true,
-            //     };
-            // }
         }
 
         let _ = match cmd {

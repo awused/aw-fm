@@ -26,6 +26,7 @@ use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
 use crate::database::{SavedSplit, SplitChild};
 use crate::gui::clipboard::{ClipboardOp, URIS};
+use crate::gui::tabs::list::TabPosition;
 use crate::gui::tabs::NavTarget;
 use crate::gui::{gui_run, tabs_run};
 
@@ -825,7 +826,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
         } else if c.current_button() == 2 {
             let path = eo.get().abs_path.clone();
             if let Some(nav) = NavTarget::open_or_jump_abs(path) {
-                tabs_run(|t| t.create_tab(Some(tab), nav, false));
+                tabs_run(|t| t.create_tab(TabPosition::After(tab), nav, false));
             }
         } else if c.current_event().unwrap().triggers_context_menu() {
             let w = c.widget();

@@ -128,10 +128,10 @@ impl Kind {
     // Some of these should never be displayed unless something is seriously wrong
     fn dir(&self) -> &Path {
         match self {
-            Kind::Move(d) | Kind::Copy(d) | Self::Trash(d) | Self::Delete(d) => &d,
-            Kind::Rename(p) | Kind::MakeDir(p) | Self::MakeFile(p) => &p,
+            Self::Move(d) | Self::Copy(d) | Self::Trash(d) | Self::Delete(d) => d,
+            Self::Rename(p) | Self::MakeDir(p) | Self::MakeFile(p) => p,
             // Should only ever go one level deep
-            Kind::Undo { prev, .. } => prev.dir(),
+            Self::Undo { prev, .. } => prev.dir(),
         }
     }
 
