@@ -1,10 +1,13 @@
+use std::path::Path;
 use std::rc::Rc;
 
 use ahash::AHashSet;
 use gtk::gdk::Display;
-use gtk::gio::{AppInfo, File, ListStore};
+use gtk::gio::{AppInfo, AppInfoCreateFlags, File, ListStore};
+use gtk::glib::{shell_parse_argv, shell_unquote};
 use gtk::prelude::{
-    AppInfoExt, Cast, CastNone, DisplayExt, GdkAppLaunchContextExt, ListModelExt, ObjectExt,
+    AppInfoExt, Cast, CastNone, DisplayExt, EditableExt, GdkAppLaunchContextExt, ListModelExt,
+    ObjectExt,
 };
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{ButtonExt, CheckButtonExt, GtkWindowExt, ListItemExt, WidgetExt};
@@ -120,6 +123,13 @@ impl OpenWith {
         });
 
         let w = s.downgrade();
+        imp.create.connect_clicked(move |_b| {
+            let s = w.upgrade().unwrap();
+
+            s.create_application(&s.imp().command_line.get().text());
+        });
+
+        let w = s.downgrade();
         let display = gui.window.display();
         imp.open.connect_clicked(move |_b| {
             let s = w.upgrade().unwrap();
@@ -167,6 +177,42 @@ impl OpenWith {
             show_error(format!("Application launch error: {app:?} {e:?}"));
         }
     }
+
+    fn create_application(&self, command_line: &str) {
+        let args = match shell_parse_argv(command_line) {
+            Ok(a) => a,
+            Err(e) => return show_warning(format!("Couldn't parse command line: {e}")),
+        };
+
+        if args.is_empty() {
+            return;
+        }
+
+        let app_name = match shell_unquote(&args[0]) {
+            Ok(unquoted) => Path::new(&unquoted)
+                .file_name()
+                .unwrap_or(&unquoted)
+                .to_string_lossy()
+                .to_string(),
+            Err(_) => args[0].to_string_lossy().to_string(),
+        };
+
+        match AppInfo::create_from_commandline(
+            command_line,
+            Some(&app_name),
+            AppInfoCreateFlags::NONE,
+        ) {
+            Ok(app) => {
+                let model = self.imp().list.model().and_downcast::<SingleSelection>().unwrap();
+                let list = model.model().and_downcast::<ListStore>().unwrap();
+                list.insert(0, &app);
+
+                model.set_selected(0);
+                // TODO [gtk4.12] scroll up
+            }
+            Err(e) => show_error(format!("Couldn't create application: {e}")),
+        }
+    }
 }
 
 mod imp {
@@ -181,6 +227,12 @@ mod imp {
 
         #[template_child]
         pub list: TemplateChild<gtk::ListView>,
+
+        #[template_child]
+        pub command_line: TemplateChild<gtk::Entry>,
+
+        #[template_child]
+        pub create: TemplateChild<gtk::Button>,
 
         #[template_child]
         pub set_default: TemplateChild<gtk::CheckButton>,
