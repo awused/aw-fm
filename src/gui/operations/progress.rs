@@ -358,7 +358,7 @@ impl Tracker {
         imp.operation.set(op.clone()).unwrap();
 
         imp.title.set_text(op.kind.str());
-        imp.subtitle.set_text(&op.kind.dir().to_string_lossy());
+        imp.subtitle.set_text(&format!("Within {}", op.kind.dir().to_string_lossy()));
 
         let o = op.clone();
         imp.cancel.connect_clicked(move |_| o.cancel());

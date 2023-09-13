@@ -86,10 +86,12 @@ impl Bound for IconTile {
 mod imp {
     use std::cell::{Cell, RefCell};
 
+    use gtk::prelude::WidgetExt;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
     use crate::com::{EntryObject, SignalHolder};
+    use crate::gui::tabs::pane::SYMLINK_BADGE;
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "icon_tile.ui")]
@@ -100,6 +102,11 @@ mod imp {
         pub name: TemplateChild<gtk::Inscription>,
         #[template_child]
         pub size: TemplateChild<gtk::Inscription>,
+
+        #[template_child]
+        pub overlay: TemplateChild<gtk::Overlay>,
+
+        pub symlink_badge: Cell<Option<gtk::Image>>,
 
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
         pub bound_object: RefCell<Option<EntryObject>>,
@@ -145,6 +152,25 @@ mod imp {
 
             let entry = obj.get();
 
+            if let Some(badge) = self.symlink_badge.take() {
+                if entry.symlink {
+                    self.symlink_badge.set(Some(badge));
+                } else {
+                    self.overlay.remove_overlay(&badge);
+                }
+            } else if entry.symlink {
+                SYMLINK_BADGE.with(|sb| {
+                    let Some(icon) = &**sb else {
+                        return;
+                    };
+
+                    let badge = gtk::Image::from_gicon(icon);
+                    badge.set_valign(gtk::Align::End);
+                    badge.set_halign(gtk::Align::Start);
+
+                    self.overlay.add_overlay(&badge);
+                });
+            }
 
             let size_string = entry.long_size_string();
             if !matches!(self.size.text(), Some(existing) if existing.as_str() == size_string) {

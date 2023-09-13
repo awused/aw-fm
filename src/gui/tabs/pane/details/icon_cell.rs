@@ -72,16 +72,23 @@ impl Bound for IconCell {
 mod imp {
     use std::cell::{Cell, RefCell};
 
+    use gtk::prelude::WidgetExt;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
     use crate::com::{EntryObject, SignalHolder};
+    use crate::gui::tabs::pane::SYMLINK_BADGE;
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "icon_cell.ui")]
     pub struct IconCell {
         #[template_child]
         pub image: TemplateChild<gtk::Image>,
+
+        #[template_child]
+        pub overlay: TemplateChild<gtk::Overlay>,
+
+        pub symlink_badge: Cell<Option<gtk::Image>>,
 
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
         pub bound_object: RefCell<Option<EntryObject>>,
@@ -122,6 +129,26 @@ mod imp {
                 self.image.set_from_paintable(Some(&texture));
             } else {
                 self.image.set_from_gicon(&obj.icon());
+            }
+
+            if let Some(badge) = self.symlink_badge.take() {
+                if obj.get().symlink {
+                    self.symlink_badge.set(Some(badge));
+                } else {
+                    self.overlay.remove_overlay(&badge);
+                }
+            } else if obj.get().symlink {
+                SYMLINK_BADGE.with(|sb| {
+                    let Some(icon) = &**sb else {
+                        return;
+                    };
+
+                    let badge = gtk::Image::from_gicon(icon);
+                    badge.set_valign(gtk::Align::End);
+                    badge.set_halign(gtk::Align::Start);
+
+                    self.overlay.add_overlay(&badge);
+                });
             }
 
             self.bound_object.replace(Some(obj.clone()));

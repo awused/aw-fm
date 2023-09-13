@@ -130,16 +130,28 @@ impl PropDialog {
 
         if files.len() == 1 && dirs.is_empty() {
             imp.name_text.set_text(&files[0].get().name.to_string_lossy());
-            imp.type_text.set_text(&files[0].get().mime);
             imp.mtime_text.set_text(&files[0].get().mtime.seconds_string());
 
             self.set_image(gui, &files[0]);
+
+            if files[0].get().symlink && files[0].get().mime != "inode/symlink" {
+                imp.type_text.set_text(&format!("{} (symlink)", files[0].get().mime));
+                // TODO -- symlink target
+            } else {
+                imp.type_text.set_text(&files[0].get().mime);
+            }
         } else if files.is_empty() && dirs.len() == 1 {
             imp.name_text.set_text(&dirs[0].get().name.to_string_lossy());
-            imp.type_text.set_text(&dirs[0].get().mime);
             imp.mtime_text.set_text(&dirs[0].get().mtime.seconds_string());
 
             self.set_image(gui, &dirs[0]);
+
+            if dirs[0].get().symlink {
+                imp.type_text.set_text(&format!("{} (symlink)", dirs[0].get().mime));
+                // TODO -- symlink target
+            } else {
+                imp.type_text.set_text(&dirs[0].get().mime);
+            }
         } else if dirs.is_empty() {
             imp.mtime_box.set_visible(false);
 

@@ -6,11 +6,18 @@
     <property name="height-request">100</property>
 
     <child>
-      <object class="GtkImage" id="image">
-        <property name="pixel-size">128</property>
-        <property name="width-request">128</property>
-        <property name="height-request">128</property>
-        <property name="halign">GTK_ALIGN_CENTER</property>
+      <object class="GtkOverlay" id="overlay">
+        <property name="halign">center</property>
+
+        <child>
+          <object class="GtkImage" id="image">
+            <property name="pixel-size">128</property>
+            <property name="width-request">128</property>
+            <property name="height-request">128</property>
+            <property name="halign">GTK_ALIGN_CENTER</property>
+          </object>
+        </child>
+
       </object>
     </child>
 

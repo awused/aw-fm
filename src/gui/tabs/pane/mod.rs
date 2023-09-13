@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use ahash::AHashMap;
 use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
+use gtk::gio::Icon;
 use gtk::glib::{self, Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt, OrientableExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -16,6 +17,7 @@ use gtk::{
     CustomFilter, DragSource, DropTargetAsync, EventControllerKey, FilterChange, FilterListModel,
     GestureClick, MultiSelection, Orientation, ScrolledWindow, Widget, WidgetPaintable,
 };
+use once_cell::unsync::Lazy;
 
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
@@ -40,6 +42,13 @@ static MIN_SEARCH: usize = 3;
 
 thread_local! {
     static DRAGGING_TAB: Cell<Option<TabId>> = Cell::default();
+    static SYMLINK_BADGE: Lazy<Option<Icon>> = Lazy::new(|| match Icon::for_string("emblem-symbolic-link") {
+        Ok(icon) => Some(icon),
+        Err(e) => {
+            error!("Failed to load symbolic link badge: {e}");
+            None
+        },
+    });
 }
 
 
