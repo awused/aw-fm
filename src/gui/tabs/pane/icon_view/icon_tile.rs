@@ -153,12 +153,12 @@ mod imp {
             let entry = obj.get();
 
             if let Some(badge) = self.symlink_badge.take() {
-                if entry.symlink {
+                if entry.symlink.is_some() {
                     self.symlink_badge.set(Some(badge));
                 } else {
                     self.overlay.remove_overlay(&badge);
                 }
-            } else if entry.symlink {
+            } else if entry.symlink.is_some() {
                 SYMLINK_BADGE.with(|sb| {
                     let Some(icon) = &**sb else {
                         return;

@@ -22,10 +22,10 @@ static DIR_OPEN_LIMIT: usize = 10;
 
 thread_local! {
     // Avoid repeat lookups, even if nothing was found.
-    static DEFAULT_CACHE: RefCell<AHashMap<String, Option<AppInfo>>> = RefCell::default()
+    static DEFAULT_CACHE: RefCell<AHashMap<&'static str, Option<AppInfo>>> = RefCell::default()
 }
 
-fn cached_lookup(mime: &str) -> Option<AppInfo> {
+fn cached_lookup(mime: &'static str) -> Option<AppInfo> {
     DEFAULT_CACHE.with(|c| {
         let mut m = c.borrow_mut();
 
@@ -35,7 +35,7 @@ fn cached_lookup(mime: &str) -> Option<AppInfo> {
 
         let ai = AppInfo::default_for_type(mime, false);
 
-        m.insert(mime.to_string(), ai.clone());
+        m.insert(mime, ai.clone());
         ai
     })
 }
@@ -49,7 +49,7 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
     for entry in entries {
         let entry = entry.get();
 
-        let Some(app) = cached_lookup(&entry.mime) else {
+        let Some(app) = cached_lookup(entry.mime) else {
             if !sent_error {
                 show_warning(&format!("Couldn't find application for mimetype: {}", entry.mime));
                 sent_error = true;

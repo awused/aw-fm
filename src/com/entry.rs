@@ -1,10 +1,10 @@
 use std::borrow::Borrow;
 use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
-use std::collections::hash_map;
+use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet};
 use std::fmt::{self, Formatter};
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 use ahash::AHashMap;
 use chrono::{Local, TimeZone};
@@ -14,10 +14,12 @@ use gtk::gio::{
     self, Cancellable, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE,
     FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE, FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
     FILE_ATTRIBUTE_STANDARD_ICON, FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
-    FILE_ATTRIBUTE_STANDARD_TYPE, FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+    FILE_ATTRIBUTE_STANDARD_SYMLINK_TARGET, FILE_ATTRIBUTE_STANDARD_TYPE,
+    FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
     FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
 };
-use gtk::glib::{self, GStr, Object, Variant, WeakRef};
+use gtk::glib::ffi::GVariant;
+use gtk::glib::{self, GStr, GString, Object, Variant, WeakRef};
 use gtk::prelude::{FileExt, IconExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use once_cell::sync::Lazy;
@@ -25,6 +27,7 @@ use once_cell::sync::Lazy;
 use super::{SortDir, SortMode, SortSettings};
 use crate::gui::{queue_thumb, ThumbPriority};
 use crate::natsort::{self, ParsedString};
+
 
 // In theory could use standard::edit-name and standard::display-name instead of taking
 // those from the path. In practice none of my own files are that broken.
@@ -36,6 +39,7 @@ static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
         FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
         FILE_ATTRIBUTE_STANDARD_ICON,
         FILE_ATTRIBUTE_STANDARD_IS_SYMLINK,
+        FILE_ATTRIBUTE_STANDARD_SYMLINK_TARGET,
         FILE_ATTRIBUTE_STANDARD_SIZE,
         FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE,
         FILE_ATTRIBUTE_TIME_MODIFIED,
@@ -102,13 +106,8 @@ pub struct Entry {
     // Doesn't work over NFS, could fall back to "changed" time but that's not what we really
     // want. Given how I use my NAS this just isn't useful right now.
     // pub btime: FileTime,
-
-    // TODO -- Arc<> or some other mechanism for interning them, otherwise this is a large
-    // number of wasted tiny allocations.
-    // Could do String::into_boxed_str()::leak() to get &'static str
-    pub mime: String,
-    pub symlink: bool,
-    // pub info: String,
+    pub mime: &'static str,
+    pub symlink: Option<PathBuf>,
     pub icon: Variant,
 }
 
@@ -197,7 +196,9 @@ impl Entry {
         //     usec: info.attribute_uint32(FILE_ATTRIBUTE_TIME_CREATED_USEC),
         // };
 
-        let mime = info.attribute_string(FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE).unwrap().to_string();
+        let mime = info.attribute_string(FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE).unwrap();
+
+        let mime = intern_mimetype(mime);
 
         let size = info.attribute_uint64(FILE_ATTRIBUTE_STANDARD_SIZE);
         let allocated_size = info.attribute_uint64(FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE);
@@ -228,8 +229,8 @@ impl Entry {
         };
 
 
-        let icon = info.icon().unwrap().serialize().unwrap();
-        let symlink = info.is_symlink();
+        let symlink = if info.is_symlink() { info.symlink_target() } else { None };
+        let icon = intern_icon(info.icon().unwrap());
 
         Ok((
             Self {
@@ -313,7 +314,7 @@ impl Entry {
             name: self.name.clone(),
             mtime: self.mtime,
             mime: self.mime.clone(),
-            symlink: self.symlink,
+            symlink: self.symlink.clone(),
             icon: self.icon.clone(),
         }
     }
@@ -340,8 +341,6 @@ impl Thumbnail {
     }
 }
 
-
-// All the ugly GTK wrapper code below this
 
 mod internal {
     use std::cell::{Ref, RefCell};
@@ -615,6 +614,8 @@ mod internal {
 thread_local! {
     static ALL_ENTRY_OBJECTS: RefCell<AHashMap<Arc<Path>, WeakRef<EntryObject>>> =
         AHashMap::new().into();
+
+    static ICON_MAP: RefCell<BTreeMap<*mut GVariant, Icon>> = RefCell::default();
 }
 
 glib::wrapper! {
@@ -746,12 +747,78 @@ impl EntryObject {
     }
 
     pub fn icon(&self) -> Icon {
-        // 5-6 microseconds, so doing it all up-front for a large directory would be too wasteful
-        // Memoizing it seems questionable given the low cost
-        Icon::deserialize(&self.get().icon).unwrap()
+        ICON_MAP.with(|im| {
+            let mut map = im.borrow_mut();
+
+            let key = self.get().icon.as_ptr();
+
+            match map.entry(key) {
+                btree_map::Entry::Occupied(o) => o.get().clone(),
+                btree_map::Entry::Vacant(v) => {
+                    let icon = Icon::deserialize(&self.get().icon).unwrap();
+                    v.insert(icon).clone()
+                }
+            }
+        })
     }
 
     pub fn matches_seek(&self, lowercase: &str) -> bool {
         self.get().name.lowercase().contains(lowercase)
     }
+}
+
+
+// Mimetypes are small but very often shared between many files.
+// There might be some slight write contention early on but RwLock should pay for itself fairly
+// quickly.
+static INTERNED_MIMETYPES: RwLock<BTreeSet<&'static str>> = RwLock::new(BTreeSet::new());
+
+#[allow(clippy::significant_drop_tightening)]
+fn intern_mimetype(mime: GString) -> &'static str {
+    let ir = INTERNED_MIMETYPES.read().unwrap();
+
+    let Some(existing) = ir.get(mime.as_str()) else {
+        drop(ir);
+        let mut iw = INTERNED_MIMETYPES.write().unwrap();
+
+        if let Some(existing) = iw.get(mime.as_str()) {
+            error!("already Interned mimetype {existing}");
+            return existing;
+        }
+
+        let leaked: &'static str = Box::leak(mime.to_string().into_boxed_str());
+        trace!("Interned mimetype {leaked}");
+        iw.insert(leaked);
+        return leaked;
+    };
+
+    existing
+}
+
+// Same for icons, but variants are larger and have their own refcounting
+static INTERNED_ICONS: RwLock<BTreeMap<Box<str>, Variant>> = RwLock::new(BTreeMap::new());
+
+#[allow(
+    clippy::significant_drop_tightening,
+    clippy::significant_drop_in_scrutinee
+)]
+fn intern_icon(icon: Icon) -> Variant {
+    let key = IconExt::to_string(&icon).unwrap().to_string().into_boxed_str();
+    let ir = INTERNED_ICONS.read().unwrap();
+
+    let Some(existing) = ir.get(&key) else {
+        drop(ir);
+        let mut iw = INTERNED_ICONS.write().unwrap();
+
+
+        match iw.entry(key) {
+            btree_map::Entry::Occupied(o) => return o.get().clone(),
+            btree_map::Entry::Vacant(v) => {
+                let variant = icon.serialize().unwrap();
+                return v.insert(variant).clone();
+            }
+        }
+    };
+
+    existing.clone()
 }

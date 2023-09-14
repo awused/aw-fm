@@ -50,7 +50,7 @@ impl OpenWith {
         for eo in &entries {
             let s = &eo.get().mime;
             if !mimetypes.contains(s) {
-                mimetypes.push(s.clone());
+                mimetypes.push(s);
             }
         }
 
@@ -142,7 +142,12 @@ impl OpenWith {
         s.set_visible(true);
     }
 
-    fn open_application(&self, display: &Display, mimetypes: &[String], files: &[EntryObject]) {
+    fn open_application(
+        &self,
+        display: &Display,
+        mimetypes: &[&'static str],
+        files: &[EntryObject],
+    ) {
         let imp = self.imp();
 
         let model = imp.list.model().and_downcast::<SingleSelection>().unwrap();
@@ -162,7 +167,7 @@ impl OpenWith {
 
             info!("Setting default application for {} to {:?}", mimetypes[0], app.id());
 
-            if let Err(e) = app.set_as_default_for_type(&mimetypes[0]) {
+            if let Err(e) = app.set_as_default_for_type(mimetypes[0]) {
                 show_error(format!("Error setting default application for {}: {e}", mimetypes[0]));
             }
 
@@ -272,7 +277,7 @@ mod imp {
     impl OpenWith {}
 }
 
-fn partition_app_infos(mimetypes: &[String]) -> PartitionedAppInfos {
+fn partition_app_infos(mimetypes: &[&'static str]) -> PartitionedAppInfos {
     // App IDs are assumed to be unique,
     let mut app_ids = AHashSet::new();
     let mut defaults = Vec::new();

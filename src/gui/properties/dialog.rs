@@ -134,11 +134,11 @@ impl PropDialog {
 
             self.set_image(gui, &files[0]);
 
-            if files[0].get().symlink && files[0].get().mime != "inode/symlink" {
+            if files[0].get().symlink.is_some() && files[0].get().mime != "inode/symlink" {
                 imp.type_text.set_text(&format!("{} (symlink)", files[0].get().mime));
                 // TODO -- symlink target
             } else {
-                imp.type_text.set_text(&files[0].get().mime);
+                imp.type_text.set_text(files[0].get().mime);
             }
         } else if files.is_empty() && dirs.len() == 1 {
             imp.name_text.set_text(&dirs[0].get().name.to_string_lossy());
@@ -146,11 +146,11 @@ impl PropDialog {
 
             self.set_image(gui, &dirs[0]);
 
-            if dirs[0].get().symlink {
+            if dirs[0].get().symlink.is_some() {
                 imp.type_text.set_text(&format!("{} (symlink)", dirs[0].get().mime));
                 // TODO -- symlink target
             } else {
-                imp.type_text.set_text(&dirs[0].get().mime);
+                imp.type_text.set_text(dirs[0].get().mime);
             }
         } else if dirs.is_empty() {
             imp.mtime_box.set_visible(false);
@@ -163,7 +163,7 @@ impl PropDialog {
                 imp.type_box.set_visible(false);
                 self.default_image();
             } else {
-                imp.type_text.set_text(&mimetype);
+                imp.type_text.set_text(mimetype);
                 self.set_image(gui, &files[0]);
             }
         } else if files.is_empty() {
@@ -172,7 +172,7 @@ impl PropDialog {
             imp.name_label.set_text("");
             imp.name_text.set_text(&format!("{} directories", dirs.len()));
 
-            imp.type_text.set_text(&dirs[0].get().mime);
+            imp.type_text.set_text(dirs[0].get().mime);
             self.set_image(gui, &dirs[0]);
         } else {
             imp.type_box.set_visible(false);
@@ -196,7 +196,7 @@ impl PropDialog {
 
         if eo.imp().can_sync_thumbnail() {
             let e = eo.get();
-            let tex = g.thumbnailer.sync_thumbnail(&e.abs_path, &e.mime, e.mtime);
+            let tex = g.thumbnailer.sync_thumbnail(&e.abs_path, e.mime, e.mtime);
 
             if let Some(tex) = tex {
                 return self.imp().icon.set_from_paintable(Some(&tex));

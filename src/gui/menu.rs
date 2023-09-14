@@ -8,6 +8,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use ahash::AHashMap;
 use gtk::gio::{Menu, MenuItem, SimpleAction, SimpleActionGroup};
@@ -316,7 +317,7 @@ impl ActionSettings {
 
         if !dir {
             let rejected_by_ext = self.rejects_extension(&entry.abs_path);
-            let rejected_by_mime = self.rejects_mime(&entry.mime);
+            let rejected_by_mime = self.rejects_mime(entry.mime);
 
             #[allow(clippy::nonminimal_bool)]
             if (rejected_by_ext && rejected_by_mime)
@@ -647,6 +648,7 @@ impl GuiMenu {
         entries: Vec<EntryObject>,
         dir: &Path,
     ) -> PopoverMenu {
+        let start = Instant::now();
         self.display.change_state(&settings.display_mode.as_ref().to_variant());
         self.sort_mode.change_state(&settings.sort.mode.as_ref().to_variant());
         self.sort_dir.change_state(&settings.sort.direction.as_ref().to_variant());
@@ -694,6 +696,7 @@ impl GuiMenu {
 
         for eo in entries {
             if custom.is_empty() {
+                trace!("Finished filtering custom actions in {:?}", start.elapsed());
                 return self.menu.clone();
             }
 
@@ -721,7 +724,7 @@ impl GuiMenu {
             ca.action.set_enabled(true);
         }
 
-        trace!("Finished filtering custom actions");
+        trace!("Finished filtering custom actions in {:?}", start.elapsed());
         self.menu.clone()
     }
 }
