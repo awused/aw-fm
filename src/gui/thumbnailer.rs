@@ -201,14 +201,18 @@ impl Thumbnailer {
 
         let entry = obj.get();
         let path = entry.abs_path.clone();
-        let uri = gtk::gio::File::for_path(&entry.abs_path).uri();
         // It only cares about seconds
         let mtime = obj.get().mtime;
-        let mime_type = entry.mime.clone();
+        let mime_type = entry.mime;
 
         // let start = Instant::now();
 
         let gen_thumb = move || {
+            let uri = match path.canonicalize() {
+                Ok(canon) => File::for_path(canon).uri(),
+                Err(_e) => File::for_path(&path).uri(),
+            };
+
             // Exceedingly rare for any kind of event-based operation to already have a valid
             // thumbnail, so don't even check. For things like images that can have valid
             // thumbnails while being incomplete, this can be a stale partial thumbnail.
@@ -236,12 +240,12 @@ impl Thumbnailer {
                 return Self::fail_thumbnail(factory, path, mtime);
             }
 
-            if !factory.can_thumbnail(&uri, &mime_type, mtime.sec) {
+            if !factory.can_thumbnail(&uri, mime_type, mtime.sec) {
                 // trace!("Marking thumbnail as failed, though it wasn't attempted.");
                 return Self::fail_thumbnail(factory, path, mtime);
             }
 
-            match factory.generate_and_save_thumbnail(&uri, &mime_type, mtime.sec, from_event) {
+            match factory.generate_and_save_thumbnail(&uri, mime_type, mtime.sec, from_event) {
                 Some(tex) => {
                     // Spammy
                     // trace!(
