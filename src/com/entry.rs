@@ -782,7 +782,6 @@ fn intern_mimetype(mime: GString) -> &'static str {
         let mut iw = INTERNED_MIMETYPES.write().unwrap();
 
         if let Some(existing) = iw.get(mime.as_str()) {
-            error!("already Interned mimetype {existing}");
             return existing;
         }
 

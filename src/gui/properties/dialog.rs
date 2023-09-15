@@ -19,7 +19,6 @@ glib::wrapper! {
 }
 
 
-// TODO -- also symlinks
 impl PropDialog {
     pub(super) fn show(
         gui: &Rc<Gui>,
@@ -134,9 +133,15 @@ impl PropDialog {
 
             self.set_image(gui, &files[0]);
 
-            if files[0].get().symlink.is_some() && files[0].get().mime != "inode/symlink" {
-                imp.type_text.set_text(&format!("{} (symlink)", files[0].get().mime));
-                // TODO -- symlink target
+            if let Some(link) = &files[0].get().symlink {
+                imp.link_box.set_visible(true);
+                imp.link_text.set_text(&link.to_string_lossy());
+
+                if files[0].get().mime != "inode/symlink" {
+                    imp.type_text.set_text(&format!("{} (symlink)", files[0].get().mime));
+                } else {
+                    imp.type_text.set_text(files[0].get().mime);
+                }
             } else {
                 imp.type_text.set_text(files[0].get().mime);
             }
@@ -146,9 +151,10 @@ impl PropDialog {
 
             self.set_image(gui, &dirs[0]);
 
-            if dirs[0].get().symlink.is_some() {
+            if let Some(link) = &dirs[0].get().symlink {
                 imp.type_text.set_text(&format!("{} (symlink)", dirs[0].get().mime));
-                // TODO -- symlink target
+                imp.link_box.set_visible(true);
+                imp.link_text.set_text(&link.to_string_lossy());
             } else {
                 imp.type_text.set_text(dirs[0].get().mime);
             }
@@ -277,6 +283,11 @@ mod imp {
         pub spinner: TemplateChild<gtk::Spinner>,
         #[template_child]
         pub children_text: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub link_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub link_text: TemplateChild<gtk::Label>,
 
         #[template_child]
         pub size_text: TemplateChild<gtk::Label>,

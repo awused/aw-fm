@@ -696,8 +696,7 @@ impl GuiMenu {
 
         for eo in entries {
             if custom.is_empty() {
-                trace!("Finished filtering custom actions in {:?}", start.elapsed());
-                return self.menu.clone();
+                break;
             }
 
             let entry = eo.get();
