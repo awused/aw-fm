@@ -86,8 +86,10 @@ pub struct ChildInfo {
 
 #[derive(Debug)]
 pub enum GuiAction {
+    Watching(Arc<AtomicBool>),
     Snapshot(DirSnapshot),
     Update(Update),
+
     SearchSnapshot(SearchSnapshot),
     SearchUpdate(SearchUpdate),
 

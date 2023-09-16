@@ -42,13 +42,15 @@ static MIN_SEARCH: usize = 3;
 
 thread_local! {
     static DRAGGING_TAB: Cell<Option<TabId>> = Cell::default();
-    static SYMLINK_BADGE: Lazy<Option<Icon>> = Lazy::new(|| match Icon::for_string("emblem-symbolic-link") {
-        Ok(icon) => Some(icon),
-        Err(e) => {
-            error!("Failed to load symbolic link badge: {e}");
-            None
-        },
-    });
+    static SYMLINK_BADGE: Lazy<Option<Icon>> = Lazy::new(||
+        match Icon::for_string("emblem-symbolic-link") {
+            Ok(icon) => Some(icon),
+            Err(e) => {
+                error!("Failed to load symbolic link badge: {e}");
+                None
+            },
+        }
+    );
 }
 
 

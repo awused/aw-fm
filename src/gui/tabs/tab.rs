@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,7 +14,7 @@ use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{SelectionModelExt, WidgetExt};
 use gtk::{glib, AlertDialog, MultiSelection, Orientation, PopoverMenu, Widget};
-use MaybePane as MP;
+use TabPane as TP;
 
 use self::flat_dir::FlatDir;
 use super::contents::Contents;
@@ -25,7 +26,7 @@ use super::search::Search;
 use super::{HistoryEntry, NavTarget, PaneState, ScrollPosition};
 use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, GetEntry,
-    ManagerAction, SearchSnapshot, SearchUpdate, SnapshotId, SortDir, SortMode, SortSettings,
+    ManagerAction, SearchSnapshot, SearchUpdate, SortDir, SortMode, SortSettings,
 };
 use crate::config::CONFIG;
 use crate::database::SavedGroup;
@@ -44,7 +45,7 @@ use crate::gui::{applications, gui_run, show_error, show_warning, tabs_run, Sele
 
 
 #[derive(Debug)]
-enum MaybePane {
+enum TabPane {
     Pane(Pane),
     Pending(Pane, PaneState),
     Detached {
@@ -59,7 +60,7 @@ enum MaybePane {
     Empty,
 }
 
-impl Deref for MaybePane {
+impl Deref for TabPane {
     type Target = Pane;
 
     fn deref(&self) -> &Self::Target {
@@ -70,7 +71,7 @@ impl Deref for MaybePane {
     }
 }
 
-impl DerefMut for MaybePane {
+impl DerefMut for TabPane {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
             Self::Pane(p) | Self::Pending(p, _) | Self::Detached { pane: p, .. } => p,
@@ -79,7 +80,7 @@ impl DerefMut for MaybePane {
     }
 }
 
-impl MaybePane {
+impl TabPane {
     const fn visible(&self) -> bool {
         match &self {
             Self::Pane(_) | Self::Pending(..) => true,
@@ -196,7 +197,7 @@ pub(super) struct Tab {
     group: Option<Rc<RefCell<Group>>>,
 
     dir: FlatDir,
-    pane: MaybePane,
+    pane: TabPane,
 
     settings: DirSettings,
     contents: Contents,
@@ -320,7 +321,7 @@ impl Tab {
             group: None,
 
             dir,
-            pane: MP::Detached { pane, state, pending: true },
+            pane: TP::Detached { pane, state, pending: true },
 
             settings,
             contents,
@@ -382,7 +383,7 @@ impl Tab {
                 group: None,
 
                 dir: source.dir.clone(),
-                pane: MP::Detached { pane, state, pending: true },
+                pane: TP::Detached { pane, state, pending: true },
 
                 settings: source.settings,
                 contents,
@@ -416,7 +417,7 @@ impl Tab {
             group: None,
 
             dir,
-            pane: MP::Detached {
+            pane: TP::Detached {
                 pane,
                 state: closed.current.state,
                 pending: true,
@@ -561,13 +562,12 @@ impl Tab {
         }
     }
 
-    pub fn matches_snapshot(&self, snap: &SnapshotId) -> bool {
-        if !Arc::ptr_eq(self.dir.path(), &snap.path) {
-            return false;
-        }
+    pub fn matches_watch(&self, id: &Arc<AtomicBool>) -> bool {
+        self.dir.matches(id)
+    }
 
-
-        self.dir.matches(snap)
+    pub fn mark_watch_started(&self, id: Arc<AtomicBool>) {
+        self.dir.mark_watch_started(id);
     }
 
     fn apply_snapshot_inner(&mut self, snap: EntryObjectSnapshot) {
@@ -586,7 +586,7 @@ impl Tab {
 
     pub fn apply_snapshot(&mut self, left: &mut [Self], right: &mut [Self], snap: DirSnapshot) {
         let start = Instant::now();
-        assert!(self.matches_snapshot(&snap.id));
+        assert!(self.matches_watch(&snap.id.id));
         let snap: EntryObjectSnapshot = snap.into();
 
 
@@ -1122,7 +1122,7 @@ impl Tab {
             return;
         }
 
-        let MP::Pending(pane, state) = &mut self.pane else {
+        let TP::Pending(pane, state) = &mut self.pane else {
             debug!(
                 "Ignoring apply_pane_state on tab {:?} without pending state and ready pane {:?}",
                 self.id,
@@ -1602,6 +1602,7 @@ impl Tab {
         info!("Found {} unmatched paths after file operation.", unmatched_paths.len());
 
         // Lower than the normal priority for the main channel.
+        // This guarantees that the flushed events are processed first.
         let (s, r) = glib::MainContext::channel(glib::Priority::DEFAULT_IDLE);
 
         let op = op.clone();
@@ -1732,7 +1733,7 @@ mod flat_dir {
     use std::sync::Arc;
     use std::time::Instant;
 
-    use crate::com::{ManagerAction, SnapshotId, SnapshotKind, SortSettings, Update};
+    use crate::com::{ManagerAction, SortSettings, Update};
     use crate::gui::gui_run;
 
     #[derive(Debug)]
@@ -1767,6 +1768,10 @@ mod flat_dir {
     pub enum DirState {
         #[default]
         Unloaded,
+        Initializating {
+            watch: WatchedDir,
+            start: Instant,
+        },
         Loading {
             watch: WatchedDir,
             pending_updates: Vec<Update>,
@@ -1781,27 +1786,29 @@ mod flat_dir {
         pub const fn watched(&self) -> Option<&WatchedDir> {
             match self {
                 Self::Unloaded => None,
-                Self::Loading { watch, .. } | Self::Loaded(watch) => Some(watch),
+                Self::Initializating { watch, .. }
+                | Self::Loading { watch, .. }
+                | Self::Loaded(watch) => Some(watch),
             }
         }
 
         pub const fn unloaded(&self) -> bool {
             match self {
                 Self::Unloaded => true,
-                Self::Loading { .. } | Self::Loaded(_) => false,
+                Self::Initializating { .. } | Self::Loading { .. } | Self::Loaded(_) => false,
             }
         }
 
         pub const fn loading(&self) -> bool {
             match self {
                 Self::Unloaded | Self::Loaded(_) => false,
-                Self::Loading { .. } => true,
+                Self::Initializating { .. } | Self::Loading { .. } => true,
             }
         }
 
         pub const fn loaded(&self) -> bool {
             match self {
-                Self::Unloaded | Self::Loading { .. } => false,
+                Self::Unloaded | Self::Initializating { .. } | Self::Loading { .. } => false,
                 Self::Loaded(_) => true,
             }
         }
@@ -1827,16 +1834,12 @@ mod flat_dir {
             self.state.borrow()
         }
 
-        pub fn matches(&self, snap: &SnapshotId) -> bool {
-            use SnapshotKind::*;
-
-            let sb = self.state.borrow();
-
-            match (&snap.kind, &*sb) {
-                (_, DirState::Unloaded | DirState::Loaded(_)) => false,
-                (Complete | Start | Middle | End, DirState::Loading { watch, .. }) => {
-                    Arc::ptr_eq(&watch.cancel, &snap.id)
-                }
+        pub fn matches(&self, id: &Arc<AtomicBool>) -> bool {
+            match &*self.state.borrow() {
+                DirState::Unloaded => false,
+                DirState::Initializating { watch, .. }
+                | DirState::Loading { watch, .. }
+                | DirState::Loaded(watch) => Arc::ptr_eq(&watch.cancel, id),
             }
         }
 
@@ -1845,7 +1848,11 @@ mod flat_dir {
             let mut sb = self.state.borrow_mut();
             match &mut *sb {
                 DirState::Unloaded => {
-                    warn!("Dropping update {up:?} for unloaded tab.");
+                    info!("Dropping update {up:?} for unloaded tab.");
+                    None
+                }
+                DirState::Initializating { .. } => {
+                    debug!("Dropping update {up:?} for initializing tab.");
                     None
                 }
                 DirState::Loading { pending_updates, .. } => {
@@ -1862,18 +1869,38 @@ mod flat_dir {
             let mut sb = self.state.borrow_mut();
             let dstate = &mut *sb;
             match dstate {
-                DirState::Loading { .. } | DirState::Loaded(_) => false,
+                DirState::Loading { .. }
+                | DirState::Initializating { .. }
+                | DirState::Loaded(_) => false,
                 DirState::Unloaded => {
                     let start = Instant::now();
                     debug!("Opening directory for {:?}", self.path);
                     let watch = WatchedDir::start(self.path.clone(), sort);
+
+                    *dstate = DirState::Initializating { watch, start };
+                    true
+                }
+            }
+        }
+
+        pub fn mark_watch_started(&self, id: Arc<AtomicBool>) {
+            let mut sb = self.state.borrow_mut();
+            let dstate = &mut *sb;
+            let old = std::mem::take(dstate);
+
+            match old {
+                DirState::Unloaded | DirState::Loading { .. } | DirState::Loaded(_) => {
+                    unreachable!()
+                }
+                DirState::Initializating { watch, start } => {
+                    assert!(Arc::ptr_eq(&watch.cancel, &id));
+                    debug!("Marking watch started in {:?}", self.path);
 
                     *dstate = DirState::Loading {
                         watch,
                         pending_updates: Vec::new(),
                         start,
                     };
-                    true
                 }
             }
         }
@@ -1885,7 +1912,9 @@ mod flat_dir {
         pub fn take_loaded(&self) -> (Vec<Update>, Instant) {
             let mut sb = self.state.borrow_mut();
             match std::mem::take(&mut *sb) {
-                DirState::Unloaded | DirState::Loaded(_) => unreachable!(),
+                DirState::Unloaded | DirState::Initializating { .. } | DirState::Loaded(_) => {
+                    unreachable!()
+                }
                 DirState::Loading { watch, pending_updates, start } => {
                     *sb = DirState::Loaded(watch);
                     (pending_updates, start)

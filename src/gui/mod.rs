@@ -318,8 +318,10 @@ impl Gui {
         use crate::com::GuiAction::*;
 
         match gu {
+            Watching(id) => self.tabs.borrow_mut().mark_watching(id),
             Snapshot(snap) => self.tabs.borrow_mut().apply_snapshot(snap),
             Update(update) => self.tabs.borrow_mut().update(update),
+
             SearchSnapshot(snap) => self.tabs.borrow_mut().apply_search_snapshot(snap),
             SearchUpdate(update) => self.tabs.borrow_mut().search_update(update),
             DirChildren(id, children) => self.handle_properties_update(id, children),

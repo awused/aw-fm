@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::ffi::OsString;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use ahash::{AHashMap, AHashSet};
@@ -206,8 +207,14 @@ impl TabsList {
         (left, center, right)
     }
 
+    pub fn mark_watching(&mut self, id: Arc<AtomicBool>) {
+        if let Some(t) = self.tabs.iter().find(|t| t.matches_watch(&id)) {
+            t.mark_watch_started(id);
+        }
+    }
+
     pub fn apply_snapshot(&mut self, snap: DirSnapshot) {
-        let first_match = self.tabs.iter().position(|t| t.matches_snapshot(&snap.id));
+        let first_match = self.tabs.iter().position(|t| t.matches_watch(&snap.id.id));
         if let Some(i) = first_match {
             let (left_tabs, first_tab, right_tabs) = self.split_around_mut(i);
             first_tab.apply_snapshot(left_tabs, right_tabs, snap);
@@ -235,7 +242,6 @@ impl TabsList {
                 i += 1
             }
         }
-
 
         if let Some(index) = self.tabs.iter().position(|t| t.matches_flat_update(&update)) {
             let (left_tabs, tab, right_tabs) = self.split_around_mut(index);

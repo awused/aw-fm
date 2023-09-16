@@ -166,7 +166,7 @@ impl Manager {
                 }
             }
             Remove(_) | Modify(ModifyKind::Name(RenameMode::From)) => {
-                trace!("Remove {:?}", event.paths);
+                trace!("Remove {:?} {:?}", event.kind, event.paths);
                 assert_eq!(event.paths.len(), 1);
 
                 let mut event = event;
@@ -284,6 +284,13 @@ impl Manager {
     }
 
     pub(super) fn flush_updates(&mut self, mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
+        // Grab any pending updates waiting in the channel.
+        // A more robust option would be to wait for ~1ms up to ~5ms, but this is always going to
+        // be best-effort.
+        while let Ok((ev, id)) = self.notify_receiver.try_recv() {
+            self.handle_event(ev, id);
+        }
+
         paths.retain_mut(|p| {
             let Some(PendingUpdates(_expiry, state, sources)) = self.recent_mutations.get_mut(&**p)
             else {

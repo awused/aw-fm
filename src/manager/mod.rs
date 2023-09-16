@@ -140,7 +140,10 @@ impl Manager {
 
         match ma {
             Open(path, sort, cancel) => {
+                self.flush_updates(Vec::new());
+
                 if self.watch_dir(&path) {
+                    self.send(GuiAction::Watching(cancel.clone()));
                     self.start_read_dir(path, sort, cancel);
                 }
             }
