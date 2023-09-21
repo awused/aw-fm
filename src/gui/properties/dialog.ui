@@ -27,8 +27,8 @@
 
                     <!-- icon -->
                     <child>
-                      <object class="GtkBox">
-                        <property name="orientation">vertical</property>
+                      <object class="GtkOverlay">
+                        <property name="valign">start</property>
 
                         <child>
                           <object class="GtkImage" id="icon">
@@ -37,6 +37,15 @@
                             <property name="margin-start">6</property>
                             <property name="margin-end">6</property>
                             <property name="pixel-size">128</property>
+                          </object>
+                        </child>
+
+                        <child type="overlay">
+                          <object class="GtkImage" id="link_badge">
+                            <property name="halign">start</property>
+                            <property name="valign">end</property>
+                            <property name="visible">false</property>
+                            <property name="icon-name">emblem-symbolic-link</property>
                           </object>
                         </child>
 
@@ -315,11 +324,179 @@
             </child>
 
             <child>
-              <object class="GtkNotebookPage">
+              <object class="GtkNotebookPage" id="permissions_page">
                 <property name="tab-expand">1</property>
                 <property name="child">
-                  <object class="GtkLabel">
-                    <property name="label">Not yet implemented</property>
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">8</property>
+
+                    <child>
+                      <object class="GtkGrid">
+                        <property name="column-homogeneous">true</property>
+                        <property name="row-spacing">8</property>
+
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label">Read</property>
+                            <layout>
+                              <property name="column">1</property>
+                              <property name="row">0</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label">Write</property>
+                            <layout>
+                              <property name="column">2</property>
+                              <property name="row">0</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label">Execute</property>
+                            <layout>
+                              <property name="column">3</property>
+                              <property name="row">0</property>
+                            </layout>
+                          </object>
+                        </child>
+
+
+                        <child>
+                          <object class="GtkLabel" id="perm_owner">
+                            <layout>
+                              <property name="column">0</property>
+                              <property name="row">1</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkLabel" id="perm_group">
+                            <layout>
+                              <property name="column">0</property>
+                              <property name="row">2</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="label">All</property>
+                            <layout>
+                              <property name="column">0</property>
+                              <property name="row">3</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkCheckButton" id="u_r">
+                            <property name="halign">center</property>
+
+                            <layout>
+                              <property name="column">1</property>
+                              <property name="row">1</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkCheckButton" id="u_w">
+                            <property name="halign">center</property>
+
+                            <layout>
+                              <property name="column">2</property>
+                              <property name="row">1</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkCheckButton" id="u_x">
+                            <property name="halign">center</property>
+
+                            <layout>
+                              <property name="column">3</property>
+                              <property name="row">1</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkCheckButton" id="g_r">
+                            <property name="halign">center</property>
+
+                            <layout>
+                              <property name="column">1</property>
+                              <property name="row">2</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkCheckButton" id="g_w">
+                            <property name="halign">center</property>
+
+                            <layout>
+                              <property name="column">2</property>
+                              <property name="row">2</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkCheckButton" id="g_x">
+                            <property name="halign">center</property>
+
+                            <layout>
+                              <property name="column">3</property>
+                              <property name="row">2</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkCheckButton" id="a_r">
+                            <property name="halign">center</property>
+
+                            <layout>
+                              <property name="column">1</property>
+                              <property name="row">3</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkCheckButton" id="a_w">
+                            <property name="halign">center</property>
+
+                            <layout>
+                              <property name="column">2</property>
+                              <property name="row">3</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                        <child>
+                          <object class="GtkCheckButton" id="a_x">
+                            <property name="halign">center</property>
+
+                            <layout>
+                              <property name="column">3</property>
+                              <property name="row">3</property>
+                            </layout>
+                          </object>
+                        </child>
+
+                      </object>
+                    </child>
+
                   </object>
                 </property>
 

@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+use std::cell::Cell;
+use std::os::unix::prelude::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -5,13 +8,14 @@ use std::sync::Arc;
 
 use gtk::gio::Icon;
 use gtk::glib::{self, Object};
-use gtk::prelude::ObjectExt;
+use gtk::prelude::{CheckButtonExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{ButtonExt, GtkWindowExt, WidgetExt};
 use num_format::{Locale, ToFormattedString};
+use users::{get_group_by_gid, get_user_by_uid};
 
 use crate::com::{ChildInfo, EntryObject};
-use crate::gui::Gui;
+use crate::gui::{show_warning, Gui};
 
 glib::wrapper! {
     pub struct PropDialog(ObjectSubclass<imp::PropDialog>)
@@ -46,6 +50,13 @@ impl PropDialog {
             // s.setup_media(&files[0]);
         } else {
             imp.notebook.remove_page(imp.media_page.position().try_into().ok());
+        }
+
+        if files.len() + dirs.len() > 1 {
+            imp.notebook.remove_page(imp.permissions_page.position().try_into().ok());
+        } else {
+            let entry = files.get(0).unwrap_or_else(|| &dirs[0]);
+            s.setup_permissions(entry);
         }
 
         let w = s.downgrade();
@@ -128,12 +139,17 @@ impl PropDialog {
         }
 
         if files.len() == 1 && dirs.is_empty() {
+            self.set_title(Some(&format!(
+                "Properties - {}",
+                files[0].get().name.to_string_lossy()
+            )));
             imp.name_text.set_text(&files[0].get().name.to_string_lossy());
             imp.mtime_text.set_text(&files[0].get().mtime.seconds_string());
 
             self.set_image(gui, &files[0]);
 
             if let Some(link) = &files[0].get().symlink {
+                imp.link_badge.set_visible(true);
                 imp.link_box.set_visible(true);
                 imp.link_text.set_text(&link.to_string_lossy());
 
@@ -146,12 +162,14 @@ impl PropDialog {
                 imp.type_text.set_text(files[0].get().mime);
             }
         } else if files.is_empty() && dirs.len() == 1 {
+            self.set_title(Some(&format!("Properties - {}", dirs[0].get().name.to_string_lossy())));
             imp.name_text.set_text(&dirs[0].get().name.to_string_lossy());
             imp.mtime_text.set_text(&dirs[0].get().mtime.seconds_string());
 
             self.set_image(gui, &dirs[0]);
 
             if let Some(link) = &dirs[0].get().symlink {
+                imp.link_badge.set_visible(true);
                 imp.type_text.set_text(&format!("{} (symlink)", dirs[0].get().mime));
                 imp.link_box.set_visible(true);
                 imp.link_text.set_text(&link.to_string_lossy());
@@ -248,6 +266,65 @@ impl PropDialog {
             imp.allocated.get().to_formatted_string(&Locale::en)
         ));
     }
+
+    fn setup_permissions(&self, eo: &EntryObject) {
+        let imp = self.imp();
+
+        let metadata = match eo.get().abs_path.metadata() {
+            Ok(m) => m,
+            Err(e) => {
+                error!("{e}");
+                return show_warning(format!("Failed to load file metadata: {e}"));
+            }
+        };
+
+        let owner = get_user_by_uid(metadata.uid());
+        let owner_name = owner
+            .as_ref()
+            .map_or(Cow::Borrowed("unknown user"), |u| u.name().to_string_lossy());
+
+        imp.perm_owner.set_text(&format!("User ({owner_name})"));
+
+        let group = get_group_by_gid(metadata.gid());
+        let group_name = group
+            .as_ref()
+            .map_or(Cow::Borrowed("unknown group"), |g| g.name().to_string_lossy());
+
+        imp.perm_group.set_text(&format!("Group ({group_name})"));
+
+        // This will clobber updates if the user edits permissions with some other method while the
+        // dialog is open. This is fine for my personal use.
+        let path = &eo.get().abs_path;
+        let mode = Rc::new(Cell::new(metadata.permissions().mode()));
+
+        Self::mode_checkbox(&imp.u_r, path, 0o400, &mode);
+        Self::mode_checkbox(&imp.u_w, path, 0o200, &mode);
+        Self::mode_checkbox(&imp.u_x, path, 0o100, &mode);
+
+        Self::mode_checkbox(&imp.g_r, path, 0o040, &mode);
+        Self::mode_checkbox(&imp.g_w, path, 0o020, &mode);
+        Self::mode_checkbox(&imp.g_x, path, 0o010, &mode);
+
+        Self::mode_checkbox(&imp.a_r, path, 0o004, &mode);
+        Self::mode_checkbox(&imp.a_w, path, 0o002, &mode);
+        Self::mode_checkbox(&imp.a_x, path, 0o001, &mode);
+    }
+
+    fn mode_checkbox(check: &gtk::CheckButton, path: &Arc<Path>, mask: u32, mode: &Rc<Cell<u32>>) {
+        let path = path.clone();
+        let mode = mode.clone();
+
+        if mode.get() & mask != 0 {
+            check.set_active(true);
+        }
+
+        check.connect_toggled(move |b| {
+            let old_m = mode.get();
+            mode.set(if b.is_active() { old_m | mask } else { old_m & !mask });
+
+            error!("TODO - old: {old_m:o} new {:o}", mode.get());
+        });
+    }
 }
 
 mod imp {
@@ -266,6 +343,8 @@ mod imp {
 
         #[template_child]
         pub icon: TemplateChild<gtk::Image>,
+        #[template_child]
+        pub link_badge: TemplateChild<gtk::Image>,
 
         #[template_child]
         pub name_label: TemplateChild<gtk::Label>,
@@ -303,6 +382,34 @@ mod imp {
         pub mtime_text: TemplateChild<gtk::Label>,
 
         // Permissions page
+        #[template_child]
+        pub permissions_page: TemplateChild<gtk::NotebookPage>,
+
+        #[template_child]
+        pub perm_owner: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub perm_group: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub u_r: TemplateChild<gtk::CheckButton>,
+        #[template_child]
+        pub u_w: TemplateChild<gtk::CheckButton>,
+        #[template_child]
+        pub u_x: TemplateChild<gtk::CheckButton>,
+
+        #[template_child]
+        pub g_r: TemplateChild<gtk::CheckButton>,
+        #[template_child]
+        pub g_w: TemplateChild<gtk::CheckButton>,
+        #[template_child]
+        pub g_x: TemplateChild<gtk::CheckButton>,
+
+        #[template_child]
+        pub a_r: TemplateChild<gtk::CheckButton>,
+        #[template_child]
+        pub a_w: TemplateChild<gtk::CheckButton>,
+        #[template_child]
+        pub a_x: TemplateChild<gtk::CheckButton>,
 
         // Image/Video/Music page
         #[template_child]
