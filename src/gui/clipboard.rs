@@ -236,6 +236,10 @@ mod imp {
     // TODO -- application/vnd.portal.filetransfer, if it ever comes up
     const UTF8: &str = "text/plain;charset=utf-8";
     const PLAIN: &str = "text/plain";
+    const UTF8_STRING: &str = "UTF8_STRING";
+    const COMPOUND_TEXT: &str = "COMPOUND_TEXT";
+    const TEXT: &str = "TEXT";
+    const STRING: &str = "STRING";
 
     #[derive(Default)]
     pub struct ClipboardProvider {
@@ -263,6 +267,10 @@ mod imp {
                 .add_mime_type(URIS)
                 .add_mime_type(UTF8)
                 .add_mime_type(PLAIN)
+                .add_mime_type(UTF8_STRING)
+                .add_mime_type(COMPOUND_TEXT)
+                .add_mime_type(TEXT)
+                .add_mime_type(STRING)
                 .build()
         }
 
@@ -287,7 +295,9 @@ mod imp {
                         Self::write_uris(&stream, priority, &entries).await
                     }
                     URIS => Self::write_uris(&stream, priority, &entries).await,
-                    UTF8 => Self::write_paths(&stream, priority, &entries).await,
+                    UTF8 | UTF8_STRING | COMPOUND_TEXT | TEXT | STRING => {
+                        Self::write_paths(&stream, priority, &entries).await
+                    }
                     PLAIN => Self::write_ascii_paths(&stream, priority, &entries).await,
                     _ => {
                         Err(glib::Error::new(gio::IOErrorEnum::InvalidData, "Unhandled mime type"))

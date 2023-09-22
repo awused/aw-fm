@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cell::Cell;
+use std::fs::Permissions;
 use std::os::unix::prelude::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::rc::Rc;
@@ -15,7 +16,7 @@ use num_format::{Locale, ToFormattedString};
 use users::{get_group_by_gid, get_user_by_uid};
 
 use crate::com::{ChildInfo, EntryObject};
-use crate::gui::{show_warning, Gui};
+use crate::gui::{show_error, show_warning, Gui};
 
 glib::wrapper! {
     pub struct PropDialog(ObjectSubclass<imp::PropDialog>)
@@ -322,7 +323,11 @@ impl PropDialog {
             let old_m = mode.get();
             mode.set(if b.is_active() { old_m | mask } else { old_m & !mask });
 
-            error!("TODO - old: {old_m:o} new {:o}", mode.get());
+            info!("Changing permissions for {path:?} from {old_m:o} to {:o}", mode.get());
+
+            if let Err(e) = std::fs::set_permissions(&path, Permissions::from_mode(mode.get())) {
+                show_error(format!("Error setting permissions: {e}"));
+            }
         });
     }
 }

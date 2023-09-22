@@ -629,9 +629,9 @@ impl GuiMenu {
         menu.set_valign(gtk::Align::Start);
         menu.set_parent(&gui.window);
 
-        let g = gui.clone();
         // When this dies, return focus to where it was before.
-        if let Some(fc) = g.window.focus_widget() {
+        if let Some(fc) = gui.window.focus_widget() {
+            let g = gui.clone();
             menu.connect_closed(move |_| {
                 // Hack around GTK PopoverMenus taking focus to the grave with them.
                 g.window.set_focus(Some(&fc));
