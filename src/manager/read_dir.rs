@@ -21,14 +21,15 @@ use rayon::prelude::{ParallelBridge, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tokio::select;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::spawn_local;
 use tokio::time::{sleep, sleep_until, Instant};
 
 use super::Manager;
 use crate::com::{
-    ChildInfo, DirSnapshot, Entry, GuiAction, SearchSnapshot, SnapshotKind, SortSettings, Update,
+    ChildInfo, DirSnapshot, Entry, GuiAction, SearchSnapshot, SearchUpdate, SnapshotKind,
+    SortSettings, Update,
 };
 use crate::config::CONFIG;
 use crate::{closing, handle_panic};
@@ -178,6 +179,7 @@ fn recurse_dir_sync(
     root: Arc<Path>,
     cancel: Arc<AtomicBool>,
     sender: UnboundedSender<ReadResult>,
+    gui_sender: glib::Sender<GuiAction>,
 ) -> oneshot::Receiver<()> {
     let (send_done, recv_done) = oneshot::channel();
 
@@ -199,6 +201,9 @@ fn recurse_dir_sync(
             .git_exclude(!show_all)
             .parents(!show_all)
             .build_parallel();
+
+        // Must defer
+        let (dir_send, mut dir_read) = unbounded_channel();
 
         walker.run(|| {
             let visitor = |res: Result<ignore::DirEntry, ignore::Error>| {
@@ -239,8 +244,7 @@ fn recurse_dir_sync(
                 };
 
                 if needs_full_count {
-                    warn!("Got suspicious directory count in a search tab, but ignoring");
-                    // search_dir_count(entry.abs_path.clone(), gui_sender.clone(), cancel.clone());
+                    dir_send.send(entry.abs_path.clone()).unwrap();
                 }
 
                 if sender.send(ReadResult::Entry(entry)).is_err() && !closing::closed() {
@@ -252,6 +256,12 @@ fn recurse_dir_sync(
 
             Box::new(visitor)
         });
+
+        if !cancel.load(Relaxed) && !closing::closed() {
+            while let Ok(dir) = dir_read.try_recv() {
+                search_dir_count(dir, gui_sender.clone(), cancel.clone());
+            }
+        }
 
         let _ignored = send_done.send(());
     });
@@ -295,7 +305,7 @@ async fn recurse_dir(
     let start = Instant::now();
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
 
-    let h = recurse_dir_sync(path.clone(), cancel.clone(), sender);
+    let h = recurse_dir_sync(path.clone(), cancel.clone(), sender, gui_sender.clone());
 
     consume_entries(path.clone(), cancel, gui_sender, receiver, search_snap).await;
 
@@ -624,16 +634,19 @@ pub fn flat_dir_count(path: Arc<Path>, gui_sender: glib::Sender<GuiAction>) {
     });
 }
 
-// For now, don't count items in search directories. It would mean allowing search updates to
-// mutate Entries.
-
-// fn search_dir_count(
-//     path: Arc<Path>,
-//     gui_sender: glib::Sender<GuiAction>,
-//     search_id: Arc<AtomicBool>,
-// ) { count_dir_contents(path, move |entry| { let update = SearchUpdate { search_id, update:
-//   Update::Entry(entry.into()), }; drop(gui_sender.send(GuiAction::SearchUpdate(update))) });
-// }
+fn search_dir_count(
+    path: Arc<Path>,
+    gui_sender: glib::Sender<GuiAction>,
+    search_id: Arc<AtomicBool>,
+) {
+    count_dir_contents(path, move |entry| {
+        let update = SearchUpdate {
+            search_id,
+            update: Update::Entry(entry.into()),
+        };
+        drop(gui_sender.send(GuiAction::SearchUpdate(update)))
+    });
+}
 
 
 fn count_dir_contents(path: Arc<Path>, send_update: impl FnOnce(Entry) + Send + 'static) {
