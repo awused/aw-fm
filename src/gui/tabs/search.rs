@@ -149,7 +149,9 @@ impl Search {
 
         match update {
             PartiallyAppliedUpdate::Delete(old) => {
-                if let Some(pos) = self.contents.total_position_by_sorted(&old.get()) {
+                let entry = old.get();
+                if let Some(pos) = self.contents.total_position_by_sorted(&entry) {
+                    drop(entry);
                     self.contents.remove(pos);
                 }
             }
