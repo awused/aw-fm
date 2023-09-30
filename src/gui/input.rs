@@ -468,6 +468,10 @@ impl Gui {
                 drop(tabs);
                 return self.cancel_operations();
             }
+            "Undo" => {
+                drop(tabs);
+                return self.undo_operation();
+            }
 
             "Home" => {
                 return tabs.active_navigate(&home_dir().unwrap_or_default());

@@ -1373,6 +1373,7 @@ impl Tab {
 
         // Apply mutations to any matching search tabs, even to the left.
         let mutate = search_mutate.unwrap_or(partial);
+        // TODO -- does it make sense to apply deletions here too?
         if !matches!(mutate, PartiallyAppliedUpdate::Mutate(..)) {
             return;
         }
@@ -1516,7 +1517,13 @@ impl Tab {
         }
 
         let tab_dir = &**self.dir.path();
-        match &op.kind {
+        let mut kind = &op.kind;
+        // For now, this is fine. Will need to change the logic if trash operations can be undone.
+        while let Kind::Undo { prev, .. } = kind {
+            kind = &prev.kind;
+        }
+
+        match kind {
             Kind::Move(d) | Kind::Copy(d) => {
                 if tab_dir == &**d {
                     true
@@ -1540,7 +1547,7 @@ impl Tab {
                     false
                 }
             }
-            Kind::Undo { .. } => todo!(),
+            Kind::Undo { .. } => unreachable!(),
             Kind::Trash(_) | Kind::Delete(_) => {
                 info!("Not scrolling to completed deletion or trash operation.");
                 false
@@ -1554,8 +1561,9 @@ impl Tab {
             .iter()
             .filter_map(|out| match out {
                 Outcome::Move { dest, .. }
-                | Outcome::Create(dest)
+                | Outcome::Copy(dest)
                 | Outcome::CopyOverwrite(dest)
+                | Outcome::NewFile(dest)
                 | Outcome::CreateDestDir(dest)
                 | Outcome::MergeDestDir(dest) => {
                     if Some(tab_dir) == dest.parent() {

@@ -180,8 +180,9 @@ impl Progress {
     pub fn push_outcome(&mut self, action: Outcome) {
         match &action {
             Outcome::Move { .. }
-            | Outcome::Create(_)
+            | Outcome::Copy(_)
             | Outcome::CopyOverwrite(_)
+            | Outcome::NewFile(_)
             | Outcome::Trash
             | Outcome::CreateDestDir(_)
             | Outcome::MergeDestDir(_) // does this really count?
@@ -342,6 +343,20 @@ impl Progress {
         };
 
         c.dst = parent.join(name);
+    }
+
+    pub fn has_any_undoable(&self) -> bool {
+        self.log.iter().any(Outcome::undoable)
+    }
+
+    pub fn pop_next_undoable(&mut self) -> Option<Outcome> {
+        while let Some(next) = self.log.pop() {
+            if next.undoable() {
+                return Some(next);
+            }
+        }
+
+        None
     }
 }
 

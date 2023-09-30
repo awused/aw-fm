@@ -1,4 +1,5 @@
 use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::VecDeque;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
@@ -107,6 +108,7 @@ struct Gui {
     shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, String>>,
 
     ongoing_operations: RefCell<Vec<Rc<Operation>>>,
+    finished_operations: RefCell<VecDeque<Rc<Operation>>>,
 
     manager_sender: UnboundedSender<ManagerAction>,
 
@@ -219,6 +221,7 @@ impl Gui {
             shortcuts: Self::parse_shortcuts(),
 
             ongoing_operations: RefCell::default(),
+            finished_operations: RefCell::default(),
 
             manager_sender,
 
@@ -334,7 +337,7 @@ impl Gui {
                 self.tabs.borrow_mut().directory_failure(path);
             }
             DirectoryError(_, error) | EntryReadError(_, _, error) | ConveyError(error) => {
-                self.error(&error);
+                self.error(error);
             }
             Action(action) => self.run_command(&action),
             Quit => {
@@ -359,7 +362,7 @@ impl Gui {
     }
 
     // Shows a warning that times out and doesn't need to be dismissed.
-    fn warning(self: &Rc<Self>, msg: &str) {
+    fn warning(self: &Rc<Self>, msg: impl AsRef<str>) {
         let toast = &self.window.imp().toast;
         let last_warning = self.warning_timeout.take();
 
@@ -373,7 +376,7 @@ impl Gui {
             last_warning.remove();
         }
 
-        toast.set_text(msg);
+        toast.set_text(msg.as_ref());
         toast.set_visible(true);
 
         let g = self.clone();
@@ -385,12 +388,12 @@ impl Gui {
         self.warning_timeout.set(Some(timeout));
     }
 
-    fn error(&self, msg: &str) {
+    fn error(&self, msg: impl AsRef<str>) {
         if let Some(warning) = self.warning_timeout.take() {
             warning.remove();
         }
 
-        self.window.imp().toast.set_text(msg);
+        self.window.imp().toast.set_text(msg.as_ref());
         self.window.imp().toast.set_visible(true);
     }
 }

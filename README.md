@@ -177,8 +177,17 @@ specify them.
   * Example: `Script /path/to/sample-script.sh` if the script prints "Quit" the
     program will exit.
 * `Cancel`
-  * Cancels all ongoing operations (copies, moves, deletions).
-  * Any operations that have already been completed are not reversed.
+  * Cancels all ongoing operations (copies, moves, deletions, etc).
+  * Any changes that have already been made or are in flight are not reversed.
+  * If multiple operations are ongoing their ordering for `Undo` is not defined.
+* `Undo`
+  * Undoes the last completed file operation (copy, move, deletion, rename, etc).
+  * Undoing is best effort but pessimistic to avoid destroying data.
+  * Copies are deleted and moves are reversed. A move will not be undone if a new
+    file was created with the original path, but copies that overwrote existing
+    files _will_ still be deleted.
+  * Not all operations or actions can be undone.
+    Deletion is not undoable and trashing is currently not undoable.
 
 ### External Executable Environment
 

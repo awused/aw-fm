@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -40,6 +40,9 @@ struct Manager {
     watcher: RecommendedWatcher,
 
     open_searches: Vec<(Arc<AtomicBool>, notify::RecommendedWatcher)>,
+
+    slow_searches_sender: UnboundedSender<(Arc<AtomicBool>, notify::RecommendedWatcher)>,
+    slow_searches_receiver: UnboundedReceiver<(Arc<AtomicBool>, notify::RecommendedWatcher)>,
 
     notify_sender: UnboundedSender<(notify::Result<Event>, Option<RecurseId>)>,
     notify_receiver: UnboundedReceiver<(notify::Result<Event>, Option<RecurseId>)>,
@@ -86,6 +89,8 @@ impl Manager {
         })
         .unwrap();
 
+        let (slow_searches_sender, slow_searches_receiver) = tokio::sync::mpsc::unbounded_channel();
+
         Self {
             gui_sender,
 
@@ -94,6 +99,8 @@ impl Manager {
 
             watcher,
             open_searches: Vec::new(),
+            slow_searches_sender,
+            slow_searches_receiver,
 
             notify_sender,
             notify_receiver,
@@ -115,12 +122,19 @@ impl Manager {
                     self.handle_action(ma).await;
                 }
                 ev = self.notify_receiver.recv() => {
-                    let Some((ev, id)) = ev else {
-                        error!("Received nothing from notify watcher. This should never happen");
-                        closing::close();
-                        break 'main;
-                    };
+                    // Manager is holding both ends
+                    let (ev, id) = ev.unwrap();
                     self.handle_event(ev, id);
+                }
+                slow = self.slow_searches_receiver.recv() => {
+                    // Manager is holding both ends
+                    let (cancel, watcher) = slow.unwrap();
+                    if cancel.load(Ordering::Relaxed) {
+                        info!("Got slow search watcher for cancelled search");
+                        continue;
+                    }
+
+                    self.open_searches.push((cancel, watcher));
                 }
                 _ = async { sleep_until(self.next_tick.unwrap()).await },
                         if self.next_tick.is_some() => {

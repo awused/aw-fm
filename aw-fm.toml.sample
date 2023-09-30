@@ -86,6 +86,9 @@ shortcuts = [
   {key = "Delete", action = "Trash"},
   {key = "Delete", modifiers = "Shift", action = "Delete"},
 
+  {key = "Escape", action = "Cancel"},
+  {key = "Z", modifiers = "Control", action = "Undo"},
+
   # Relative paths are not allowed.
   # Change these to correct paths if you actually use them.
   # {key= "F6", action = "Execute /path/to/examples/dump-env.sh"},

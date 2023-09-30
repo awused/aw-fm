@@ -22,6 +22,9 @@ use crate::gui::{show_error, show_warning, tabs_run};
 
 mod ask;
 mod progress;
+mod undo;
+
+const OPERATIONS_HISTORY: usize = 10;
 
 thread_local! {
     static COPY_REGEX: Lazy<Regex> =
@@ -65,9 +68,11 @@ pub enum Outcome {
     // Includes overwrites, undo -> move back if no conflict
     Move { source: Arc<Path>, dest: PathBuf },
     // Does not include overwrite copies, undo -> delete with no confirmation
-    Create(PathBuf),
-    // Only overwrites from copy, undo -> delete with confirmation
+    Copy(PathBuf),
+    // Only overwrites from copy, undo -> delete with confirmation??
     CopyOverwrite(PathBuf),
+    // Undo -> delete if still 0 sized
+    NewFile(PathBuf),
     // FileInfo needs to be restored after we populate the contents, which is awkward.
     // Could unconditionally store FileInfo to restore it, probably not worth it.
     RemoveSourceDir(Arc<Path>, Option<FileInfo>),
@@ -76,9 +81,26 @@ pub enum Outcome {
     MergeDestDir(PathBuf),
     Skip,
     Delete,
+    // Not undoable, while the directory could be recreated that's not terrible useful.
     DeleteDir,
     // Not undoable without dumb hacks: https://gitlab.gnome.org/GNOME/glib/-/issues/845
     Trash,
+}
+
+impl Outcome {
+    const fn undoable(&self) -> bool {
+        match self {
+            Self::Move { .. }
+            | Self::Copy(_)
+            | Self::CopyOverwrite(_)
+            | Self::NewFile(_)
+            | Self::RemoveSourceDir(..)
+            | Self::CreateDestDir(_) => true,
+            Self::MergeDestDir(_) | Self::Skip | Self::Delete | Self::DeleteDir | Self::Trash => {
+                false
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -94,8 +116,7 @@ pub enum Kind {
     // Probably won't support this, but keep the skeleton intact.
     #[allow(unused)]
     Undo {
-        prev: Box<Self>,
-        prev_progress: Box<RefCell<Progress>>,
+        prev: Rc<Operation>,
         // These should be processed FILO, just like outcomes from progress.log
         pending_dir_info: RefCell<Vec<(Arc<Path>, FileInfo)>>,
         // TODO
@@ -127,11 +148,15 @@ impl Kind {
 
     // Some of these should never be displayed unless something is seriously wrong
     fn dir(&self) -> &Path {
+        let mut s = self;
+        while let Self::Undo { prev, .. } = s {
+            s = &prev.kind;
+        }
+
         match self {
             Self::Move(d) | Self::Copy(d) | Self::Trash(d) | Self::Delete(d) => d,
             Self::Rename(p) | Self::MakeDir(p) | Self::MakeFile(p) => p,
-            // Should only ever go one level deep
-            Self::Undo { prev, .. } => prev.dir(),
+            Self::Undo { .. } => unreachable!(),
         }
     }
 
@@ -328,7 +353,7 @@ impl Operation {
             Kind::Rename(p) => self.process_rename(p),
             Kind::MakeDir(p) => self.process_make_dir(p),
             Kind::MakeFile(p) => self.process_make_file(p),
-            Kind::Undo { .. } => todo!(),
+            Kind::Undo { prev, pending_dir_info } => self.process_next_undo(prev, pending_dir_info),
             Kind::Trash(_) => self.process_next_trash(),
             Kind::Delete(_) => self.process_next_delete(),
         };
@@ -547,7 +572,7 @@ impl Operation {
                     if overwrite {
                         s.progress.borrow_mut().push_outcome(Outcome::CopyOverwrite(dst));
                     } else {
-                        s.progress.borrow_mut().push_outcome(Outcome::Create(dst));
+                        s.progress.borrow_mut().push_outcome(Outcome::Copy(dst));
                     }
                 }
 
@@ -908,7 +933,9 @@ impl Operation {
         match std::fs::File::create(new_path) {
             Ok(_) => {
                 trace!("Created file {new_path:?}");
-                self.progress.borrow_mut().push_outcome(Outcome::Create(new_path.to_path_buf()));
+                self.progress
+                    .borrow_mut()
+                    .push_outcome(Outcome::NewFile(new_path.to_path_buf()));
             }
             Err(e) => {
                 show_warning(format!("Failed to create {new_path:?}: {e}"));
@@ -940,7 +967,39 @@ impl Gui {
         let Some(index) = ops.iter().position(|o| Rc::ptr_eq(o, finished)) else {
             return;
         };
-        ops.swap_remove(index);
+        let finished = ops.swap_remove(index);
+
+        if matches!(finished.kind, Kind::Undo { .. }) {
+            error!("TODO -- Redo log")
+        } else {
+            let mut finished_operations = self.finished_operations.borrow_mut();
+            if finished_operations.len() >= OPERATIONS_HISTORY {
+                finished_operations.pop_front();
+            }
+            finished_operations.push_back(finished);
+        }
+    }
+
+    pub(super) fn undo_operation(self: &Rc<Self>) {
+        let Some(op) = self.finished_operations.borrow_mut().pop_back() else {
+            return info!("Undo called with no completed operations");
+        };
+
+        if !op.progress.borrow().has_any_undoable() {
+            info!("Last operation {:?} had nothing to undo", op.kind);
+            self.warning(format!("Nothing to undo with last operation {:?}", op.kind));
+            // TODO -- redo
+            return;
+        }
+
+        let tab = op.tab;
+        let kind = Kind::Undo {
+            prev: op,
+            pending_dir_info: RefCell::default(),
+        };
+
+        let op = Operation::new(tab, kind, VecDeque::new()).unwrap();
+        self.ongoing_operations.borrow_mut().push(op);
     }
 
     pub(super) fn start_operation(

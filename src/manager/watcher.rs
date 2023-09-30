@@ -6,8 +6,9 @@ use gtk::glib;
 use notify::event::{ModifyKind, RenameMode};
 use notify::RecursiveMode::NonRecursive;
 use notify::{Event, Watcher};
-use tokio::task::spawn_blocking;
-use tokio::time::{timeout, Duration, Instant};
+use tokio::select;
+use tokio::task::{spawn_blocking, spawn_local};
+use tokio::time::{Duration, Instant};
 
 use super::read_dir::flat_dir_count;
 use super::{Manager, RecurseId};
@@ -371,36 +372,64 @@ impl Manager {
         // This can be glacially slow on, say, networked fuse drives.
         // We want it, but we don't want to wait forever for it
         let p = path.clone();
-        let watcher = timeout(
-            Duration::from_secs(5),
-            spawn_blocking(move || {
-                let res = watcher.watch(&p, notify::RecursiveMode::Recursive);
-                (watcher, res)
-            }),
-        )
-        .await;
+        let mut watch_fut = spawn_blocking(move || {
+            let res = watcher.watch(&p, notify::RecursiveMode::Recursive);
+            (watcher, res)
+        });
 
-        if watcher.is_err() {
-            let msg = format!("Search watcher in {path:?} timed out, updates will not be received");
-            error!("{msg}");
-            self.send(GuiAction::DirectoryError(path, msg));
-            return;
-        }
+        let watcher = select! {
+            watcher = &mut watch_fut => watcher,
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                let msg = format!(
+                    "Search watcher in {path:?} took a long time to initialize. \
+                    Updates may be missed");
+                error!("{msg}");
+                let _ignored = self.gui_sender.send(GuiAction::DirectoryError(path.clone(), msg));
 
-        if let Ok(Err(e)) = watcher {
+                let gui_sender = self.gui_sender.clone();
+                let sender = self.slow_searches_sender.clone();
+                spawn_local(async move {
+                    let slow = watch_fut.await;
+
+                    let (watcher, res) = match slow {
+                        Ok((watcher, res)) => {
+                            (watcher, res)
+                        },
+                        Err(e) => {
+                            let msg = format!("Search watcher error: {e}");
+                            error!("{msg}");
+                            let _ignored = gui_sender.send(GuiAction::DirectoryError(path, msg));
+                            return;
+                        },
+                    };
+
+                    if let Err(e) = res {
+                        let msg = format!("Search watcher error: {e}");
+                        error!("{msg}");
+                        let _ignored = gui_sender.send(GuiAction::DirectoryError(path, msg));
+                        return;
+                    }
+
+                    let _ignored = sender.send((cancel, watcher));
+                });
+                return;
+            }
+        };
+
+        if let Err(e) = watcher {
             let msg = format!("Search watcher error: {e}");
             error!("{msg}");
             self.send(GuiAction::DirectoryError(path, msg));
             return;
         }
 
-        if let Ok(Ok((_watcher_, Err(e)))) = watcher {
+        if let Ok((_watcher, Err(e))) = watcher {
             let msg = format!("Search watcher error: {e}");
             error!("{msg}");
             self.send(GuiAction::DirectoryError(path, msg));
             return;
         }
 
-        self.open_searches.push((cancel, watcher.unwrap().unwrap().0));
+        self.open_searches.push((cancel, watcher.unwrap().0));
     }
 }
