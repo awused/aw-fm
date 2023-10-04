@@ -153,7 +153,7 @@ impl Kind {
             s = &prev.kind;
         }
 
-        match self {
+        match s {
             Self::Move(d) | Self::Copy(d) | Self::Trash(d) | Self::Delete(d) => d,
             Self::Rename(p) | Self::MakeDir(p) | Self::MakeFile(p) => p,
             Self::Undo { .. } => unreachable!(),
@@ -405,6 +405,7 @@ impl Operation {
             break (src, dst);
         };
 
+        // Symlinks get treated as files in prepare_copymove, so don't handle them here.
         if src.is_dir() && !src.is_symlink() && !dst.exists() {
             // Attempt a rename with no fallbacks.
             // This will be fast enough to just try synchronously.

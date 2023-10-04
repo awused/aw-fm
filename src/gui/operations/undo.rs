@@ -3,11 +3,12 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gtk::gio::FileInfo;
+use gtk::gio::{Cancellable, File, FileInfo, FileQueryInfoFlags};
+use gtk::prelude::FileExt;
 
 use super::{Operation, Status};
 use crate::gui::operations::{Outcome, ReadyCopyMove};
-use crate::gui::show_warning;
+use crate::gui::show_error;
 
 impl Operation {
     pub(super) fn process_next_undo(
@@ -16,9 +17,15 @@ impl Operation {
         pending_dirs: &RefCell<Vec<(Arc<Path>, FileInfo)>>,
     ) -> Status {
         let Some(next) = prev.progress.borrow_mut().pop_next_undoable() else {
-            if let Some(_dir_info) = pending_dirs.borrow_mut().pop() {
-                show_warning("Not implemented");
-                return Status::AsyncScheduled;
+            if let Some((dir, info)) = pending_dirs.borrow_mut().pop() {
+                if let Err(e) = File::for_path(&dir).set_attributes_from_info(
+                    &info,
+                    FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+                    Cancellable::NONE,
+                ) {
+                    error!("Couldn't set saved attributes on {dir:?}: {e}");
+                }
+                return Status::CallAgain;
             }
             return Status::Done;
         };
@@ -33,6 +40,8 @@ impl Operation {
                     overwrite: false,
                 };
 
+                // This allows for fallbacks for move, but will try a rename first, so we don't
+                // explicitly need to handle optimistic renames.
                 self.do_move(ready);
                 Status::AsyncScheduled
             }
@@ -55,12 +64,34 @@ impl Operation {
                 self.do_delete(path.into(), false);
                 Status::AsyncScheduled
             }
-            Outcome::RemoveSourceDir(_path, _file_info) => {
-                // Should only push file_info onto pending if we actually recreate it
-                show_warning("Not implemented");
-                Status::Done
+            Outcome::RemoveSourceDir(path, file_info) => {
+                if path.exists() {
+                    info!("Not recreating {path:?} since it already exists");
+                    return Status::CallAgain;
+                }
+
+                match std::fs::create_dir(&path) {
+                    Ok(_) => {
+                        trace!("Recreated directory {path:?}");
+
+                        self.progress
+                            .borrow_mut()
+                            .push_outcome(Outcome::CreateDestDir(path.to_path_buf()));
+
+                        if let Some(info) = file_info {
+                            pending_dirs.borrow_mut().push((path, info));
+                        }
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to recreate directory {path:?}: {e}");
+                        show_error(msg);
+                    }
+                }
+
+                Status::CallAgain
             }
             Outcome::CreateDestDir(path) => {
+                // TODO -- save file_info?
                 // This will only delete empty directories
                 self.do_delete(path.into(), true);
                 Status::AsyncScheduled
