@@ -200,9 +200,8 @@ impl AskDialog {
         }
 
         if can_sync_thumbnail {
-            let tex = gui_run(|g| {
-                g.thumbnailer.sync_thumbnail(&entry.abs_path, &entry.mime, entry.mtime)
-            });
+            let tex =
+                gui_run(|g| g.thumbnailer.sync_thumbnail(&entry.abs_path, entry.mime, entry.mtime));
 
             if let Some(tex) = tex {
                 return image.set_from_paintable(Some(&tex));

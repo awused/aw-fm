@@ -894,13 +894,13 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
         let paintable = WidgetPaintable::new(Some(&pw));
 
         ds.set_icon(Some(&paintable), pw.width() / 2, pw.height() / 2);
-        DRAGGING_TAB.with(|dt| dt.set(Some(tab)));
+        DRAGGING_TAB.set(Some(tab));
         Some(provider.into())
     });
 
     drag_source.connect_drag_end(|_ds, _drag, _n| {
         trace!("Clearing drag source");
-        DRAGGING_TAB.with(Cell::take);
+        DRAGGING_TAB.take();
     });
     drag_source.set_propagation_phase(gtk::PropagationPhase::Capture);
 

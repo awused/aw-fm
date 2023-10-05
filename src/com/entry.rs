@@ -87,7 +87,7 @@ impl FileTime {
 pub enum EntryKind {
     File { size: u64, executable: bool },
     Directory { contents: Option<u64> },
-    Uninitialized, // Broken {}
+    Uninitialized,
 }
 
 
@@ -313,7 +313,7 @@ impl Entry {
             abs_path: self.abs_path.clone(),
             name: self.name.clone(),
             mtime: self.mtime,
-            mime: self.mime.clone(),
+            mime: self.mime,
             symlink: self.symlink.clone(),
             icon: self.icon.clone(),
         }
@@ -403,14 +403,13 @@ mod internal {
             // Could check the load factor and shrink the map.
             // dispose can, technically, be called multiple times, so unsafe to assert here.
             // We also purge contents during refresh.
-            ALL_ENTRY_OBJECTS.with(|m| {
+            ALL_ENTRY_OBJECTS.with_borrow_mut(|m| {
                 // Remove only if the key is the same Arc<path>
-                let mut mb = m.borrow_mut();
-                let Some((k, _)) = mb.get_key_value(path) else {
+                let Some((k, _)) = m.get_key_value(path) else {
                     return;
                 };
                 if Arc::ptr_eq(k, path) {
-                    mb.remove(path);
+                    m.remove(path);
                 } else {
                     trace!("Not removing newer EntryObject for {path:?} after purge");
                 }
@@ -627,7 +626,7 @@ impl EntryObject {
     // If any tabs still have live references to entry objects in this map we can end up with
     // duplicate enties or stale values.
     pub unsafe fn purge() {
-        ALL_ENTRY_OBJECTS.with(RefCell::take);
+        ALL_ENTRY_OBJECTS.take();
     }
 
     fn create(entry: Entry, from_event: bool) -> Self {
@@ -641,8 +640,8 @@ impl EntryObject {
     pub fn new(entry: Entry, from_event: bool) -> Self {
         let obj = Self::create(entry, from_event);
 
-        ALL_ENTRY_OBJECTS.with(|m| {
-            let old = m.borrow_mut().insert(obj.get().abs_path.clone(), obj.downgrade());
+        ALL_ENTRY_OBJECTS.with_borrow_mut(|m| {
+            let old = m.insert(obj.get().abs_path.clone(), obj.downgrade());
             assert!(old.is_none());
         });
 
@@ -653,10 +652,8 @@ impl EntryObject {
     //
     // This cannot cause updates to existing non-search lists.
     pub fn create_or_update(entry: Entry, from_event: bool) -> (Self, Option<Entry>) {
-        ALL_ENTRY_OBJECTS.with(|m| {
-            let mut map = m.borrow_mut();
-
-            match map.entry(entry.abs_path.clone()) {
+        ALL_ENTRY_OBJECTS.with_borrow_mut(|m| {
+            match m.entry(entry.abs_path.clone()) {
                 // We update it here if it's different to avoid the case where this is a stale
                 // entry from a search tab keeping a stale reference up to date, or a user is
                 // refreshing a remote directory with a search open.
@@ -683,7 +680,7 @@ impl EntryObject {
     }
 
     pub fn lookup(path: &Path) -> Option<Self> {
-        ALL_ENTRY_OBJECTS.with(|m| m.borrow().get(path).and_then(WeakRef::upgrade))
+        ALL_ENTRY_OBJECTS.with_borrow(|m| m.get(path).and_then(WeakRef::upgrade))
     }
 
     // Returns the old value only if an update happened.
@@ -747,12 +744,10 @@ impl EntryObject {
     }
 
     pub fn icon(&self) -> Icon {
-        ICON_MAP.with(|im| {
-            let mut map = im.borrow_mut();
-
+        ICON_MAP.with_borrow_mut(|im| {
             let key = self.get().icon.as_ptr();
 
-            match map.entry(key) {
+            match im.entry(key) {
                 btree_map::Entry::Occupied(o) => o.get().clone(),
                 btree_map::Entry::Vacant(v) => {
                     let icon = Icon::deserialize(&self.get().icon).unwrap();

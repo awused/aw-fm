@@ -183,7 +183,7 @@ impl PropDialog {
             imp.name_label.set_text("");
             imp.name_text.set_text(&format!("{} files", files.len()));
 
-            let mimetype = files[0].get().mime.clone();
+            let mimetype = files[0].get().mime;
             if files.iter().any(|f| f.get().mime != mimetype) {
                 imp.type_box.set_visible(false);
                 self.default_image();

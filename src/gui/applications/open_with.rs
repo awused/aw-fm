@@ -171,7 +171,7 @@ impl OpenWith {
                 show_error(format!("Error setting default application for {}: {e}", mimetypes[0]));
             }
 
-            DEFAULT_CACHE.with(|c| c.borrow_mut().remove(&mimetypes[0]));
+            DEFAULT_CACHE.with_borrow_mut(|c| c.remove(&mimetypes[0]));
         }
 
         let context = display.app_launch_context();

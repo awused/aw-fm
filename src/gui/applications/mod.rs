@@ -26,9 +26,7 @@ thread_local! {
 }
 
 fn cached_lookup(mime: &'static str) -> Option<AppInfo> {
-    DEFAULT_CACHE.with(|c| {
-        let mut m = c.borrow_mut();
-
+    DEFAULT_CACHE.with_borrow_mut(|m| {
         if let Some(ai) = m.get(mime) {
             return ai.clone();
         }

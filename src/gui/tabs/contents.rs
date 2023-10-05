@@ -104,9 +104,9 @@ impl Contents {
             let mut entries = snap.entries;
             // This is extremely fast if sort settings haven't changed.
             entries.sort_by(|a, b| a.get().cmp(&b.get(), self.sort));
-            self.list.extend(entries.into_iter());
+            self.list.extend(entries);
         } else {
-            self.list.extend(snap.entries.into_iter());
+            self.list.extend(snap.entries);
             self.list.sort(self.sort.comparator());
         }
 

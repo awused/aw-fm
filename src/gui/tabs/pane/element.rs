@@ -124,7 +124,7 @@ impl PaneElement {
 
         let drop_target = DropTargetAsync::new(None, DragAction::all());
         drop_target.connect_accept(move |_dta, dr| {
-            if DRAGGING_TAB.with(|dt| dt.get() == Some(tab)) {
+            if DRAGGING_TAB.get() == Some(tab) {
                 info!("Ignoring drag into same tab");
                 return false;
             }
@@ -135,7 +135,7 @@ impl PaneElement {
 
             let accepts_paste = tabs_run(|tlist| {
                 let tab = tlist.find(tab).unwrap();
-                if let Some(dragging_tab) = DRAGGING_TAB.with(Cell::get) {
+                if let Some(dragging_tab) = DRAGGING_TAB.get() {
                     if let Some(dragging) = tlist.find(dragging_tab) {
                         if dragging.matches_arc(&tab.dir()) {
                             info!("Ignoring drag into same directory");
