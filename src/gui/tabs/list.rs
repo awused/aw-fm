@@ -249,7 +249,7 @@ impl TabsList {
         }
     }
 
-    // Search data cannot cause updates to other tabs, but it can fail to EntryObjects
+    // Search data cannot cause updates to other tabs, but it can fail to update EntryObjects
     // with the newest versions.
     // To prevent races, flat tab snapshots always take priority.
     pub fn search_update(&mut self, update: SearchUpdate) {

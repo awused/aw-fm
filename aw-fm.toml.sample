@@ -182,6 +182,12 @@ file_collisions = "ask"
 # Defaults to ~/.config/aw-fm/actions/, or ${XDG_CONFIG_HOME}/aw-fm/actions/
 actions_directory = ""
 
+# Normalize file names for seek/search
+# Whether or not to apply unicode normalization (form NFKC) to file names for searching/seeking.
+# Setting it to true means that "𝙁𝘼𝙐𝙉𝘼" can by found by typing "fauna".
+#
+# Does not affect sorting.
+normalize_names = true
 
 # ------------------------------------------------------------------------------------------------
 # More advanced configuration options below. They probably do not need to be changed.

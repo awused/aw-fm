@@ -307,7 +307,7 @@ impl Pane {
             }
 
             let eo = obj.downcast_ref::<EntryObject>().unwrap();
-            eo.get().name.lowercase().contains(&*q)
+            eo.get().name.normalized().contains(&*q)
         });
 
         self.connections = vec![SignalHolder::new(&*imp.text_entry, signal)];

@@ -114,7 +114,6 @@ pub enum Kind {
 
     // In theory, at least, it should be possible to redo an undo.
     // Probably won't support this, but keep the skeleton intact.
-    #[allow(unused)]
     Undo {
         prev: Rc<Operation>,
         // These should be processed FILO, just like outcomes from progress.log

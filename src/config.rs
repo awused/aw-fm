@@ -115,6 +115,9 @@ pub struct Config {
     #[serde(default, deserialize_with = "empty_path_is_none")]
     pub actions_directory: Option<Arc<PathBuf>>,
 
+    #[serde(default)]
+    pub normalize_names: bool,
+
     #[serde(default, deserialize_with = "empty_path_is_none")]
     pub database: Option<PathBuf>,
 

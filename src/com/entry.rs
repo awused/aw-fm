@@ -763,7 +763,7 @@ impl EntryObject {
     }
 
     pub fn matches_seek(&self, lowercase: &str) -> bool {
-        self.get().name.lowercase().contains(lowercase)
+        self.get().name.normalized().contains(lowercase)
     }
 }
 

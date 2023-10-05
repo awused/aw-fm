@@ -1,14 +1,20 @@
 use core::fmt;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::ffi::{OsStr, OsString};
 use std::ops::Deref;
 
+use once_cell::unsync::Lazy;
 use ouroboros::self_referencing;
 use regex::Regex;
+use unicode_normalization::{is_nfkc_quick, IsNormalized, UnicodeNormalization};
 use Segment::*;
+
+use crate::config::CONFIG;
 
 thread_local! {
     static SEGMENT_RE: Regex = Regex::new(r"([^\d.]*)((\d+(\.\d+)?)|\.)").unwrap();
+    static NORMALIZE: Lazy<bool> = Lazy::new(|| CONFIG.normalize_names);
 }
 
 #[derive(PartialEq, Debug)]
@@ -38,26 +44,29 @@ impl Eq for Segment<'_> {}
 
 #[self_referencing]
 pub struct ParsedString {
-    original: OsString,
-    lowercase: String,
+    original: Box<OsStr>,
+    lowercase: Box<str>,
     #[borrows(lowercase)]
     #[covariant]
     segs: Vec<Segment<'this>>,
+    #[borrows(lowercase)]
+    #[covariant]
+    normalized: Cow<str, 'this>,
 }
 
 #[must_use]
 pub fn key(s: &OsStr) -> ParsedString {
-    let original = s.to_owned();
-    let lowercase = original.to_string_lossy().to_lowercase();
+    let original = s.to_owned().into_boxed_os_str();
+    let lowercase = original.to_string_lossy().to_lowercase().into_boxed_str();
 
     ParsedString::from_strings(original, lowercase)
 }
 
 impl From<OsString> for ParsedString {
     fn from(original: OsString) -> Self {
-        let lowercase = original.to_string_lossy().to_lowercase();
+        let lowercase = original.to_string_lossy().to_lowercase().into_boxed_str();
 
-        Self::from_strings(original, lowercase)
+        Self::from_strings(original.into_boxed_os_str(), lowercase)
     }
 }
 
@@ -93,6 +102,7 @@ impl fmt::Debug for ParsedString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ParsedString")
             .field("original", &self.borrow_original())
+            .field("normalized", &self.borrow_normalized())
             .field("segments", &self.borrow_segs())
             .finish()
     }
@@ -117,23 +127,24 @@ impl Deref for ParsedString {
 impl ParsedString {
     pub fn empty() -> Self {
         ParsedStringBuilder {
-            original: OsString::new(),
-            lowercase: String::new(),
+            original: Box::default(),
+            lowercase: Box::default(),
             segs_builder: |_s| Vec::new(),
+            normalized_builder: |_s| Cow::default(),
         }
         .build()
     }
 
-    pub fn lowercase(&self) -> &str {
-        self.borrow_lowercase()
+    pub fn normalized(&self) -> &str {
+        self.borrow_normalized()
     }
 
     #[must_use]
     pub fn into_original(self) -> OsString {
-        self.into_heads().original
+        self.into_heads().original.into_os_string()
     }
 
-    fn from_strings(original: OsString, lowercase: String) -> Self {
+    fn from_strings(original: Box<OsStr>, lowercase: Box<str>) -> Self {
         ParsedStringBuilder {
             original,
             lowercase,
@@ -164,6 +175,20 @@ impl ParsedString {
                 let last = &s[i..];
                 segs.push(Last(last));
                 segs
+            },
+            normalized_builder: |s| {
+                if !NORMALIZE.with(|n| **n) || is_nfkc_quick(s.chars()) == IsNormalized::Yes {
+                    return Cow::Borrowed(s);
+                }
+
+
+                let normalized = s.nfkc().flat_map(char::to_lowercase).collect::<Cow<str>>();
+
+                if *normalized == **s {
+                    return Cow::Borrowed(s);
+                }
+
+                normalized
             },
         }
         .build()
