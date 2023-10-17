@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::fmt::Write;
 use std::ops::Deref;
 

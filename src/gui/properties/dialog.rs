@@ -1,17 +1,23 @@
 use std::borrow::Cow;
 use std::cell::Cell;
-use std::fs::Permissions;
+use std::error::Error;
+use std::fs::{File, Permissions};
 use std::os::unix::prelude::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use gtk::gio::Icon;
 use gtk::glib::{self, Object};
 use gtk::prelude::{CheckButtonExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{ButtonExt, GtkWindowExt, WidgetExt};
+use image::codecs::gif::GifDecoder;
+use image::codecs::png::PngDecoder;
+use image::codecs::webp::WebPDecoder;
+use image::{AnimationDecoder, ImageDecoder};
 use num_format::{Locale, ToFormattedString};
 use users::{get_group_by_gid, get_user_by_uid};
 
@@ -48,7 +54,7 @@ impl PropDialog {
         s.setup_basic_metadata(gui, &files, &dirs);
 
         if files.len() == 1 && dirs.is_empty() {
-            // s.setup_media(&files[0]);
+            s.watch_for_media(&files[0]);
         } else {
             imp.notebook.remove_page(imp.media_page.position().try_into().ok());
         }
@@ -151,6 +157,7 @@ impl PropDialog {
 
             if let Some(link) = &files[0].get().symlink {
                 imp.link_badge.set_visible(true);
+                imp.media_link_badge.set_visible(true);
                 imp.link_box.set_visible(true);
                 imp.link_text.set_text(&link.to_string_lossy());
 
@@ -216,7 +223,9 @@ impl PropDialog {
 
     fn set_image(&self, g: &Gui, eo: &EntryObject) {
         if let Some(tex) = eo.imp().thumbnail() {
-            return self.imp().icon.set_from_paintable(Some(&tex));
+            self.imp().media_icon.set_from_paintable(Some(&tex));
+            self.imp().icon.set_from_paintable(Some(&tex));
+            return;
         }
 
         if eo.imp().can_sync_thumbnail() {
@@ -224,14 +233,19 @@ impl PropDialog {
             let tex = g.thumbnailer.sync_thumbnail(&e.abs_path, e.mime, e.mtime);
 
             if let Some(tex) = tex {
-                return self.imp().icon.set_from_paintable(Some(&tex));
+                self.imp().media_icon.set_from_paintable(Some(&tex));
+                self.imp().icon.set_from_paintable(Some(&tex));
+                return;
             }
         }
 
-        self.imp().icon.set_from_gicon(&Icon::deserialize(&eo.get().icon).unwrap());
+        let icon = &Icon::deserialize(&eo.get().icon).unwrap();
+        self.imp().media_icon.set_from_gicon(icon);
+        self.imp().icon.set_from_gicon(icon);
     }
 
     fn default_image(&self) {
+        // Media page won't be visible if this is called
         self.imp().icon.set_from_icon_name(Some("text-x-generic"));
     }
 
@@ -330,6 +344,132 @@ impl PropDialog {
             }
         });
     }
+
+    fn watch_for_media(&self, eo: &EntryObject) {
+        let mime = eo.get().mime;
+
+        if !mime.contains("image") && !mime.contains("video") && !mime.contains("audio") {
+            return self
+                .imp()
+                .notebook
+                .remove_page(self.imp().media_page.position().try_into().ok());
+        }
+
+        self.imp().media_spinner.start();
+
+        let path = eo.get().abs_path.clone();
+
+        // This can be expensive, so only do it when the media tab is first viewed.
+        // In exchange, it's fine to just block the main thread.
+        let weak = self.downgrade();
+        self.imp().notebook.connect_switch_page(move |_notebook, _page, index| {
+            let Some(s) = weak.upgrade() else { return };
+
+            if s.imp().media_initialized.get() {
+                return;
+            }
+            s.imp().media_initialized.set(true);
+
+            if s.imp().media_page.position() != index as i32 {
+                return;
+            }
+
+            if mime.contains("image") {
+                s.show_image_data(&path, mime);
+            }
+        });
+    }
+
+    fn show_image_data(&self, path: &Arc<Path>, mime: &'static str) {
+        let path = path.clone();
+        let fut = gtk::gio::spawn_blocking(move || match Self::read_image_data(&path, mime) {
+            Ok(r) => Ok(r),
+            Err(e) => Err(format!("Failed to read file data: {e}")),
+        });
+
+        let weak = self.downgrade();
+        gtk::glib::MainContext::default().spawn_local(async move {
+            let r = fut.await;
+
+            let Some(s) = weak.upgrade() else { return };
+
+            s.imp().media_spinner.stop();
+            s.imp().media_details.set_visible(true);
+
+            let ((x, y), dur) = match r {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => return show_warning(e),
+                Err(e) => return show_warning(format!("Failed to read file data: {e:?}")),
+            };
+
+            s.imp().resolution_text.set_text(&format!("{x}x{y}"));
+
+            match dur {
+                Some(d) => s.imp().duration_text.set_text(&format!("{d:?}")),
+                None => s.imp().duration_box.set_visible(false),
+            }
+        });
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn read_image_data(
+        path: &Path,
+        mime: &str,
+    ) -> Result<((u32, u32), Option<Duration>), Box<dyn Error>> {
+        if mime == "image/gif" || mime == "image/png" || mime == "image/webp" {
+            let contents = File::open(path)?;
+
+            // These will create empty iterators if the image isn't animated, which is fine.
+            let (dimensions, frames) = if mime == "image/gif" {
+                let dec = GifDecoder::new(contents)?;
+                let dimensions = dec.dimensions();
+
+                (dimensions, dec.into_frames())
+            } else if mime == "image/png" {
+                let dec = PngDecoder::new(contents)?;
+                let dimensions = dec.dimensions();
+
+                (dimensions, dec.apng().into_frames())
+            } else if mime == "image/webp" {
+                let dec = WebPDecoder::new(contents)?;
+                let dimensions = dec.dimensions();
+
+                (dimensions, dec.into_frames())
+            } else {
+                unreachable!()
+            };
+
+            let mut valid = true;
+            let mut count = 0;
+
+            let dur: Duration = frames
+                .take_while(|r| {
+                    if let Err(e) = r {
+                        error!("Failed to read frames of animated image: {e}");
+                        valid = false;
+                        return false;
+                    }
+                    count += 1;
+                    true
+                })
+                .map(|f| {
+                    let d: Duration = f.unwrap().delay().into();
+                    if d.is_zero() {
+                        return Duration::from_millis(100);
+                    }
+                    d
+                })
+                .sum();
+
+            if count <= 1 || !valid {
+                Ok((dimensions, None))
+            } else {
+                Ok((dimensions, Some(dur)))
+            }
+        } else {
+            Ok((image::image_dimensions(path)?, None))
+        }
+    }
 }
 
 mod imp {
@@ -419,9 +559,28 @@ mod imp {
         // Image/Video/Music page
         #[template_child]
         pub media_page: TemplateChild<gtk::NotebookPage>,
-
         #[template_child]
         pub media_label: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub media_icon: TemplateChild<gtk::Image>,
+        #[template_child]
+        pub media_link_badge: TemplateChild<gtk::Image>,
+
+        #[template_child]
+        pub media_details: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub media_spinner: TemplateChild<gtk::Spinner>,
+
+        #[template_child]
+        pub resolution_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub resolution_text: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub duration_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub duration_text: TemplateChild<gtk::Label>,
 
         // Format
         // Container
@@ -442,6 +601,8 @@ mod imp {
 
         pub child_files: Cell<usize>,
         pub child_dirs: Cell<usize>,
+
+        pub media_initialized: Cell<bool>,
     }
 
     #[glib::object_subclass]

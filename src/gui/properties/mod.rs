@@ -18,16 +18,7 @@ impl Gui {
     ) {
         let cancel: Arc<AtomicBool> = Arc::default();
 
-        let mut files = Vec::new();
-        let mut dirs = Vec::new();
-
-        for eo in selected {
-            if eo.get().dir() {
-                dirs.push(eo);
-            } else {
-                files.push(eo);
-            }
-        }
+        let (dirs, files): (Vec<_>, _) = selected.partition(|eo| eo.get().dir());
 
         info!(
             "Opening properties dialog for {} files and {} directories",
