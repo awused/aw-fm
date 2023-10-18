@@ -1,7 +1,6 @@
 use std::borrow::Cow;
-use std::cell::Cell;
-use std::error::Error;
-use std::fs::{File, Permissions};
+use std::cell::{Cell, OnceCell};
+use std::fs::Permissions;
 use std::os::unix::prelude::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::rc::Rc;
@@ -9,15 +8,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use gstreamer::{Caps, ClockTime};
+use gstreamer_pbutils::prelude::DiscovererStreamInfoExt;
+use gstreamer_pbutils::{Discoverer, DiscovererInfo};
 use gtk::gio::Icon;
 use gtk::glib::{self, Object};
-use gtk::prelude::{CheckButtonExt, ObjectExt};
+use gtk::prelude::{CheckButtonExt, FileExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{ButtonExt, GtkWindowExt, WidgetExt};
-use image::codecs::gif::GifDecoder;
-use image::codecs::png::PngDecoder;
-use image::codecs::webp::WebPDecoder;
-use image::{AnimationDecoder, ImageDecoder};
 use num_format::{Locale, ToFormattedString};
 use users::{get_group_by_gid, get_user_by_uid};
 
@@ -29,6 +27,9 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Window;
 }
 
+thread_local! {
+    static GSTREAMER_INIT: OnceCell<()> = OnceCell::new();
+}
 
 impl PropDialog {
     pub(super) fn show(
@@ -89,6 +90,14 @@ impl PropDialog {
         s.set_modal(true);
         s.set_visible(true);
         s.update_text();
+
+
+        s.connect_destroy(|s| {
+            if let Some((d, sig)) = s.imp().discoverer.take() {
+                d.disconnect(sig);
+                d.stop();
+            }
+        });
 
         s
     }
@@ -365,110 +374,121 @@ impl PropDialog {
         self.imp().notebook.connect_switch_page(move |_notebook, _page, index| {
             let Some(s) = weak.upgrade() else { return };
 
-            if s.imp().media_initialized.get() {
+            if s.imp().media_page.position() != index as i32 || s.imp().media_initialized.get() {
                 return;
             }
+
+            GSTREAMER_INIT.with(|cell| {
+                cell.get_or_init(|| gstreamer::init().unwrap());
+            });
+
             s.imp().media_initialized.set(true);
+            debug!("Fetching media info for {path:?}");
 
-            if s.imp().media_page.position() != index as i32 {
-                return;
-            }
+            let discoverer = match Discoverer::new(ClockTime::from_seconds(60)) {
+                Ok(d) => d,
+                Err(e) => return show_error(format!("Failed to gather media info {e}")),
+            };
 
-            if mime.contains("image") {
-                s.show_image_data(&path, mime);
-            }
+            let weak = s.downgrade();
+            // connect_discovered requires Send + Sync, so use connect_local instead
+            let signal = discoverer.connect_local("discovered", false, move |args| {
+                let error = args[2].get::<Option<&glib::error::Error>>().unwrap();
+                let info = args[1].get::<&DiscovererInfo>().unwrap();
+
+                let s = weak.upgrade()?;
+
+                if let Some(e) = error {
+                    show_warning(format!("Failed to get full media info: {e}"));
+                    // Can still have partial data, fill out what we can
+                }
+
+                s.setup_media(info);
+
+                s.imp().media_spinner.stop();
+                s.imp().media_spinner.set_visible(false);
+                s.imp().media_details.set_visible(true);
+
+
+                None
+            });
+
+            discoverer.start();
+
+            discoverer.discover_uri_async(&gtk::gio::File::for_path(&path).uri()).unwrap();
+            s.imp().discoverer.set(Some((discoverer, signal)));
         });
     }
 
-    fn show_image_data(&self, path: &Arc<Path>, mime: &'static str) {
-        let path = path.clone();
-        let fut = gtk::gio::spawn_blocking(move || match Self::read_image_data(&path, mime) {
-            Ok(r) => Ok(r),
-            Err(e) => Err(format!("Failed to read file data: {e}")),
-        });
+    fn setup_media(&self, info: &DiscovererInfo) {
+        let imp = self.imp();
 
-        let weak = self.downgrade();
-        gtk::glib::MainContext::default().spawn_local(async move {
-            let r = fut.await;
 
-            let Some(s) = weak.upgrade() else { return };
-
-            s.imp().media_spinner.stop();
-            s.imp().media_details.set_visible(true);
-
-            let ((x, y), dur) = match r {
-                Ok(Ok(r)) => r,
-                Ok(Err(e)) => return show_warning(e),
-                Err(e) => return show_warning(format!("Failed to read file data: {e:?}")),
-            };
-
-            s.imp().resolution_text.set_text(&format!("{x}x{y}"));
-
-            match dur {
-                Some(d) => s.imp().duration_text.set_text(&format!("{d:?}")),
-                None => s.imp().duration_box.set_visible(false),
+        match info.duration() {
+            Some(d) if !d.is_zero() => {
+                let d: Duration = d.into();
+                imp.duration_text.set_text(&format!("{d:?}"));
             }
-        });
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn read_image_data(
-        path: &Path,
-        mime: &str,
-    ) -> Result<((u32, u32), Option<Duration>), Box<dyn Error>> {
-        if mime == "image/gif" || mime == "image/png" || mime == "image/webp" {
-            let contents = File::open(path)?;
-
-            // These will create empty iterators if the image isn't animated, which is fine.
-            let (dimensions, frames) = if mime == "image/gif" {
-                let dec = GifDecoder::new(contents)?;
-                let dimensions = dec.dimensions();
-
-                (dimensions, dec.into_frames())
-            } else if mime == "image/png" {
-                let dec = PngDecoder::new(contents)?;
-                let dimensions = dec.dimensions();
-
-                (dimensions, dec.apng().into_frames())
-            } else if mime == "image/webp" {
-                let dec = WebPDecoder::new(contents)?;
-                let dimensions = dec.dimensions();
-
-                (dimensions, dec.into_frames())
-            } else {
-                unreachable!()
-            };
-
-            let mut valid = true;
-            let mut count = 0;
-
-            let dur: Duration = frames
-                .take_while(|r| {
-                    if let Err(e) = r {
-                        error!("Failed to read frames of animated image: {e}");
-                        valid = false;
-                        return false;
-                    }
-                    count += 1;
-                    true
-                })
-                .map(|f| {
-                    let d: Duration = f.unwrap().delay().into();
-                    if d.is_zero() {
-                        return Duration::from_millis(100);
-                    }
-                    d
-                })
-                .sum();
-
-            if count <= 1 || !valid {
-                Ok((dimensions, None))
-            } else {
-                Ok((dimensions, Some(dur)))
-            }
-        } else {
-            Ok((image::image_dimensions(path)?, None))
+            Some(_) | None => imp.duration_box.set_visible(false),
         }
+
+        let audio = info.audio_streams().into_iter().next();
+        let videos = info.video_streams();
+
+        // Filter out any thumbnails
+        if let Some(v) = videos.iter().find(|v| !v.is_image()).or_else(|| videos.first()) {
+            // "video-codec" tag is often more readable
+            if let Some(codec) = v.tags().and_then(|t| {
+                t.iter_generic()
+                    .find(|(tag, _vals)| *tag == "video-codec")
+                    .and_then(|(_t, mut vals)| vals.next())
+                    .and_then(|val| val.get::<&str>().ok())
+                    .map(str::to_string)
+            }) {
+                imp.codec_text.set_text(&codec);
+            } else if let Some(caps) = v.caps() {
+                imp.codec_text.set_text(&cap_str(caps));
+            } else {
+                imp.codec_box.set_visible(false);
+            }
+
+
+            imp.resolution_text.set_text(&format!("{} x {}", v.width(), v.height()));
+
+            // TODO
+            // v.framerate();
+        } else {
+            imp.codec_box.set_visible(false);
+            imp.resolution_box.set_visible(false);
+        }
+
+        if let Some(a) = audio {
+            if let Some(codec) = a.tags().and_then(|t| {
+                t.iter_generic()
+                    .find(|(tag, _vals)| *tag == "audio-codec")
+                    .and_then(|(_t, mut vals)| vals.next())
+                    .and_then(|val| val.get::<&str>().ok())
+                    .map(str::to_string)
+            }) {
+                imp.audio_codec_text.set_text(&codec);
+            } else if let Some(caps) = a.caps() {
+                imp.audio_codec_text.set_text(&cap_str(caps));
+            } else {
+                imp.audio_codec_box.set_visible(false);
+            }
+
+            // TODO -- Artist, Album, Album Artist, ??year??, bitrate??
+        } else {
+            imp.audio_codec_box.set_visible(false);
+        }
+    }
+}
+
+fn cap_str(caps: Caps) -> glib::GString {
+    if caps.is_fixed() {
+        gstreamer_pbutils::pb_utils_get_codec_description(&caps)
+    } else {
+        glib::GString::from(caps.to_string())
     }
 }
 
@@ -477,6 +497,8 @@ mod imp {
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
+    use gstreamer::glib::SignalHandlerId;
+    use gstreamer_pbutils::Discoverer;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
 
@@ -573,6 +595,11 @@ mod imp {
         pub media_spinner: TemplateChild<gtk::Spinner>,
 
         #[template_child]
+        pub codec_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub codec_text: TemplateChild<gtk::Label>,
+
+        #[template_child]
         pub resolution_box: TemplateChild<gtk::Box>,
         #[template_child]
         pub resolution_text: TemplateChild<gtk::Label>,
@@ -582,16 +609,14 @@ mod imp {
         #[template_child]
         pub duration_text: TemplateChild<gtk::Label>,
 
-        // Format
-        // Container
-        //
-        // Images: Resolution, ??colorspace??, ??mode??, animation duration/frame count
-        //
-        // Video: Resolution, duration, codecs, ?bitrates?
+        #[template_child]
+        pub audio_codec_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub audio_codec_text: TemplateChild<gtk::Label>,
+
         // Duration
         // Codec?
         // Colorspace?
-        // Artist, Album, Album Artist, ??year??, bitrate
         #[template_child]
         pub close: TemplateChild<gtk::Button>,
 
@@ -603,6 +628,8 @@ mod imp {
         pub child_dirs: Cell<usize>,
 
         pub media_initialized: Cell<bool>,
+
+        pub discoverer: Cell<Option<(Discoverer, SignalHandlerId)>>,
     }
 
     #[glib::object_subclass]
