@@ -209,7 +209,7 @@ impl Entry {
         let kind = if file_type == G_FILE_TYPE_DIRECTORY as u32 {
             let mountpoint = info.boolean(FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT);
 
-            if (size % 512 == 0 && size <= 8192) || (mountpoint && size <= 2) {
+            if allocated_size == 0 || size == allocated_size || (mountpoint && size <= 2) {
                 info!(
                     "Got suspicious directory size {size} for {abs_path:?}, counting files \
                      directly"

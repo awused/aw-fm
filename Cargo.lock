@@ -164,7 +164,6 @@ dependencies = [
  "futures-util",
  "gnome-desktop",
  "gstreamer",
- "gstreamer-app",
  "gstreamer-audio",
  "gstreamer-pbutils",
  "gstreamer-video",
@@ -176,7 +175,6 @@ dependencies = [
  "metadeps",
  "notify",
  "num-format",
- "num_cpus",
  "once_cell",
  "ouroboros",
  "path-clean",
@@ -597,12 +595,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "futures-sink"
-version = "0.3.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f43be4fe21a13b9781a69afa4985b0f6ee0e1afab2c6f454a8cf30e2b2237b6e"
-
-[[package]]
 name = "futures-task"
 version = "0.3.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -926,34 +918,6 @@ dependencies = [
  "pretty-hex",
  "smallvec",
  "thiserror",
-]
-
-[[package]]
-name = "gstreamer-app"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "343376fe0a5b39e7e46fb0fed6a1ead4206ea34584c153130d0f20e51a480b80"
-dependencies = [
- "futures-core",
- "futures-sink",
- "glib",
- "gstreamer",
- "gstreamer-app-sys",
- "gstreamer-base",
- "libc",
-]
-
-[[package]]
-name = "gstreamer-app-sys"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aea07f07a3f17278e6998390ecaea127e476f0af0360c2d83d96e6d3a97fb75e"
-dependencies = [
- "glib-sys",
- "gstreamer-base-sys",
- "gstreamer-sys",
- "libc",
- "system-deps",
 ]
 
 [[package]]
@@ -1452,16 +1416,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39e3200413f237f41ab11ad6d161bc7239c84dcb631773ccd7de3dfe4b5c267c"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "num_cpus"
-version = "1.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4161fcb6d602d4d2081af7c3a45852d875a03dd337a6bfdd6e06407b61342a43"
-dependencies = [
- "hermit-abi",
- "libc",
 ]
 
 [[package]]

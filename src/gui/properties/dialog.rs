@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use gstreamer::{Caps, ClockTime};
 use gstreamer_pbutils::prelude::DiscovererStreamInfoExt;
-use gstreamer_pbutils::{Discoverer, DiscovererInfo};
+use gstreamer_pbutils::{Discoverer, DiscovererInfo, DiscovererStreamInfo};
 use gtk::gio::Icon;
 use gtk::glib::{self, Object};
-use gtk::prelude::{CheckButtonExt, FileExt, ObjectExt};
+use gtk::prelude::{CheckButtonExt, FileExt, IsA, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{ButtonExt, GtkWindowExt, WidgetExt};
 use num_format::{Locale, ToFormattedString};
@@ -427,7 +427,7 @@ impl PropDialog {
         match info.duration() {
             Some(d) if !d.is_zero() => {
                 let d: Duration = d.into();
-                imp.duration_text.set_text(&format!("{d:?}"));
+                imp.duration_text.set_text(&format!("{d:.3?}"));
             }
             Some(_) | None => imp.duration_box.set_visible(false),
         }
@@ -438,13 +438,7 @@ impl PropDialog {
         // Filter out any thumbnails
         if let Some(v) = videos.iter().find(|v| !v.is_image()).or_else(|| videos.first()) {
             // "video-codec" tag is often more readable
-            if let Some(codec) = v.tags().and_then(|t| {
-                t.iter_generic()
-                    .find(|(tag, _vals)| *tag == "video-codec")
-                    .and_then(|(_t, mut vals)| vals.next())
-                    .and_then(|val| val.get::<&str>().ok())
-                    .map(str::to_string)
-            }) {
+            if let Some(codec) = get_tag(v, "video-codec") {
                 imp.codec_text.set_text(&codec);
             } else if let Some(caps) = v.caps() {
                 imp.codec_text.set_text(&cap_str(caps));
@@ -455,31 +449,59 @@ impl PropDialog {
 
             imp.resolution_text.set_text(&format!("{} x {}", v.width(), v.height()));
 
-            // TODO
-            // v.framerate();
+            let fr = v.framerate();
+            if fr.numer().is_positive() && fr.denom().is_positive() {
+                let fr = fr.numer() as f64 / fr.denom() as f64;
+                if fr.fract() == 0.0 {
+                    imp.framerate_text.set_text(&format!("{fr}fps"));
+                } else {
+                    imp.framerate_text.set_text(&format!("{fr:.3}fps"));
+                }
+            } else {
+                imp.framerate_box.set_visible(false);
+            }
         } else {
             imp.codec_box.set_visible(false);
             imp.resolution_box.set_visible(false);
+            imp.framerate_box.set_visible(false);
         }
 
         if let Some(a) = audio {
-            if let Some(codec) = a.tags().and_then(|t| {
-                t.iter_generic()
-                    .find(|(tag, _vals)| *tag == "audio-codec")
-                    .and_then(|(_t, mut vals)| vals.next())
-                    .and_then(|val| val.get::<&str>().ok())
-                    .map(str::to_string)
-            }) {
-                imp.audio_codec_text.set_text(&codec);
+            if let Some(codec) = get_tag(&a, "audio-codec") {
+                // Steal the main codec box if there's no video
+                if videos.is_empty() {
+                    imp.codec_box.set_visible(true);
+                    imp.audio_codec_box.set_visible(false);
+                    imp.codec_text.set_text(&codec);
+                } else {
+                    imp.audio_codec_text.set_text(&codec);
+                }
             } else if let Some(caps) = a.caps() {
-                imp.audio_codec_text.set_text(&cap_str(caps));
+                if videos.is_empty() {
+                    imp.codec_box.set_visible(true);
+                    imp.audio_codec_box.set_visible(false);
+                    imp.codec_text.set_text(&cap_str(caps));
+                } else {
+                    imp.audio_codec_text.set_text(&cap_str(caps));
+                }
             } else {
                 imp.audio_codec_box.set_visible(false);
             }
 
-            // TODO -- Artist, Album, Album Artist, ??year??, bitrate??
+            if videos.is_empty() {
+                set_text_for_tag(&a, "title", &imp.track_title_text, &imp.track_title_box);
+                set_text_for_tag(&a, "artist", &imp.artist_text, &imp.artist_box);
+                set_text_for_tag(&a, "album", &imp.album_text, &imp.album_box);
+            } else {
+                imp.track_title_box.set_visible(false);
+                imp.artist_box.set_visible(false);
+                imp.album_box.set_visible(false);
+            }
         } else {
             imp.audio_codec_box.set_visible(false);
+            imp.track_title_box.set_visible(false);
+            imp.artist_box.set_visible(false);
+            imp.album_box.set_visible(false);
         }
     }
 }
@@ -489,6 +511,27 @@ fn cap_str(caps: Caps) -> glib::GString {
         gstreamer_pbutils::pb_utils_get_codec_description(&caps)
     } else {
         glib::GString::from(caps.to_string())
+    }
+}
+
+fn get_tag(info: &impl IsA<DiscovererStreamInfo>, tag: &str) -> Option<String> {
+    let tlist = info.tags()?;
+
+    let val = tlist.iter_tag_generic(tag).next()?;
+
+    val.get::<&str>().ok().map(str::to_string)
+}
+
+fn set_text_for_tag(
+    info: &impl IsA<DiscovererStreamInfo>,
+    tag: &str,
+    label: &gtk::Label,
+    gbox: &gtk::Box,
+) {
+    if let Some(text) = get_tag(info, tag) {
+        label.set_text(&text);
+    } else {
+        gbox.set_visible(false);
     }
 }
 
@@ -594,10 +637,41 @@ mod imp {
         #[template_child]
         pub media_spinner: TemplateChild<gtk::Spinner>,
 
+        // Image:
+        //
+        // Resolution
+        // Format
+        //
+        // Audio:
+        //
+        // Title
+        // Artist
+        // Album
+        // Duration
+        // Format
+        //
+        //
+        // Video:
+        //
+        // Resolution
+        // Framerate
+        // Duration
+        // Format
+        // Audio Format
         #[template_child]
-        pub codec_box: TemplateChild<gtk::Box>,
+        pub track_title_box: TemplateChild<gtk::Box>,
         #[template_child]
-        pub codec_text: TemplateChild<gtk::Label>,
+        pub track_title_text: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub artist_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub artist_text: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub album_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub album_text: TemplateChild<gtk::Label>,
 
         #[template_child]
         pub resolution_box: TemplateChild<gtk::Box>,
@@ -605,18 +679,25 @@ mod imp {
         pub resolution_text: TemplateChild<gtk::Label>,
 
         #[template_child]
+        pub framerate_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub framerate_text: TemplateChild<gtk::Label>,
+
+        #[template_child]
         pub duration_box: TemplateChild<gtk::Box>,
         #[template_child]
         pub duration_text: TemplateChild<gtk::Label>,
+
+        #[template_child]
+        pub codec_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub codec_text: TemplateChild<gtk::Label>,
 
         #[template_child]
         pub audio_codec_box: TemplateChild<gtk::Box>,
         #[template_child]
         pub audio_codec_text: TemplateChild<gtk::Label>,
 
-        // Duration
-        // Codec?
-        // Colorspace?
         #[template_child]
         pub close: TemplateChild<gtk::Button>,
 
