@@ -256,7 +256,7 @@ struct SearchId(Arc<AtomicBool>);
 
 impl Drop for SearchId {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Relaxed);
+        self.0.store(true, Ordering::Relaxed);
         gui_run(|g| g.send_manager(ManagerAction::EndSearch(self.0.clone())))
     }
 }
