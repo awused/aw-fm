@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -31,6 +32,7 @@ use crate::gui::clipboard::{ClipboardOp, URIS};
 use crate::gui::tabs::list::TabPosition;
 use crate::gui::tabs::NavTarget;
 use crate::gui::{gui_run, tabs_run};
+use crate::natsort::normalize_lowercase;
 
 mod details;
 mod element;
@@ -261,7 +263,11 @@ impl Pane {
             original.replace(text.to_string());
 
             let mut query = query_rc.borrow_mut();
-            let new = text.to_lowercase();
+            let lower = text.to_lowercase();
+            let new = match normalize_lowercase(&lower) {
+                Cow::Borrowed(_) => lower,
+                Cow::Owned(s) => s,
+            };
 
             if new == *query || (query.len() < MIN_SEARCH && new.len() < MIN_SEARCH) {
                 return;
@@ -772,7 +778,7 @@ fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<
             return;
         }
 
-        trace!("Mousebutton {} in pane {:?}", c.current_button(), tab);
+        trace!("Mousebutton {} in pane {tab:?}", c.current_button());
 
         tabs_run(|tlist| {
             let t = tlist.find(tab).unwrap();

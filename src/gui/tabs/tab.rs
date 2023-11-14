@@ -849,6 +849,7 @@ impl Tab {
     fn seek_inner(&mut self, fragment: &str, range: impl Iterator<Item = u32>) {
         // Smart case seeking?
         // Prefix instead?
+        // This probably doesn't need to be normalized, but it might be helpful
         let fragment = fragment.to_lowercase();
         let contents = self.visible_contents();
 

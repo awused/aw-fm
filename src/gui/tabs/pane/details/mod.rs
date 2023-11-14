@@ -136,7 +136,7 @@ impl DetailsView {
             return None;
         }
 
-        // This is seems like it'll be fragile.
+        // This seems like it'll be fragile.
         let obj = self
             .column_view
             .first_child()

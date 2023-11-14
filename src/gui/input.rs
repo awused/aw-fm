@@ -369,7 +369,7 @@ impl Gui {
         // Do not trim the end of cmd because files and directories can end in spaces
         let cmd = cmd.trim_start();
 
-        debug!("Running command {}", cmd);
+        debug!("Running command {cmd}");
 
         // This may not be worth the headache, but it saves a fair bit of boilerplate
         let mut tabs = self.tabs.borrow_mut();

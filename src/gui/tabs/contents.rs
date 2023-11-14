@@ -332,6 +332,7 @@ impl Contents {
     }
 
     pub fn mark_stale(&mut self, sort: SortSettings) {
+        // TODO -- remove the requirement that self.sort == sort
         assert_eq!(self.sort, sort);
         debug!("Marking {self:?} as stale");
         self.stale = true;

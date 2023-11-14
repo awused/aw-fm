@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
@@ -13,6 +14,7 @@ use crate::com::{
     SearchUpdate, SortSettings, Update,
 };
 use crate::gui::gui_run;
+use crate::natsort::normalize_lowercase;
 
 // Search is handled as, effectively, an overlay on top of a flat tab.
 //
@@ -32,11 +34,9 @@ pub(super) struct Search {
     // This contains everything in tab.contents plus items from subdirectories.
     contents: Contents,
     original: Rc<RefCell<String>>,
-    // Searching is case insensitive (for now at least).
-    // TODO -- smart case searching
-    lowercase: Rc<RefCell<String>>,
+    // Searching is case insensitive (for now at least, may do smart case later).
+    normalized: Rc<RefCell<String>>,
     pub filter: CustomFilter,
-    // This is used to store a view state until search is done loading.
 }
 
 impl Search {
@@ -68,22 +68,30 @@ impl Search {
     }
 
     pub fn query(&self) -> (Rc<RefCell<String>>, Rc<RefCell<String>>) {
-        (self.original.clone(), self.lowercase.clone())
+        (self.original.clone(), self.normalized.clone())
     }
 
     pub fn new(path: Arc<Path>, flat_contents: &Contents, query: String) -> Self {
         let state = State::Unloaded;
         let (contents, filter) = Contents::search_from(flat_contents);
 
-        let lowercase = Rc::new(RefCell::new(query.to_lowercase()));
+
+        let lowercase = query.to_lowercase();
+        let normalized = match normalize_lowercase(&lowercase) {
+            Cow::Borrowed(_) => lowercase,
+            Cow::Owned(s) => s,
+        };
+        let normalized = Rc::new(RefCell::new(normalized));
+
         let original = Rc::new(RefCell::new(query));
+
 
         Self {
             path,
             state,
             contents,
             original,
-            lowercase,
+            normalized,
             filter,
         }
     }
@@ -93,14 +101,14 @@ impl Search {
         let (contents, filter) = Contents::search_from(new_contents);
 
         let original = Rc::new(RefCell::new(self.original.borrow().clone()));
-        let lowercase = Rc::new(RefCell::new(self.lowercase.borrow().clone()));
+        let normalized = Rc::new(RefCell::new(self.normalized.borrow().clone()));
 
         Self {
             path: self.path.clone(),
             state,
             contents,
             original,
-            lowercase,
+            normalized,
             filter,
         }
     }
