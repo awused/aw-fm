@@ -247,7 +247,10 @@ fn recurse_dir_sync(
                     dir_send.send(entry.abs_path.clone()).unwrap();
                 }
 
-                if sender.send(ReadResult::Entry(entry)).is_err() && !closing::closed() {
+                if sender.send(ReadResult::Entry(entry)).is_err()
+                    && !closing::closed()
+                    && !cancel.load(Relaxed)
+                {
                     error!("Channel unexpectedly closed while recursively reading {root:?}");
                     closing::close();
                 }
@@ -282,16 +285,15 @@ async fn read_dir(
 
     let h = read_dir_sync(path.clone(), cancel.clone(), sender, gui_sender.clone());
 
-    consume_entries(path.clone(), cancel, gui_sender, receiver, flat_snap(sort)).await;
+    consume_entries(path.clone(), cancel.clone(), gui_sender, receiver, flat_snap(sort)).await;
 
     // Technically this blocks, but it's more a formality by this point. Still want to wait so we
     // can be sure it has been cleaned up.
     let finished = h.await.is_ok();
     debug!(
-        "Done reading directory {:?} in {:?}. finished: {}",
-        path,
+        "Done reading directory {path:?} in {:?}. finished: {finished}, cancelled: {}",
         start.elapsed(),
-        finished
+        cancel.load(Relaxed)
     );
 }
 
@@ -307,14 +309,13 @@ async fn recurse_dir(
 
     let h = recurse_dir_sync(path.clone(), cancel.clone(), sender, gui_sender.clone());
 
-    consume_entries(path.clone(), cancel, gui_sender, receiver, search_snap).await;
+    consume_entries(path.clone(), cancel.clone(), gui_sender, receiver, search_snap).await;
 
     let finished = h.await.is_ok();
     debug!(
-        "Done recursively walking {:?} in {:?}. finished: {}",
-        path,
+        "Done recursively walking {path:?} in {:?}. finished: {finished}, cancelled: {}",
         start.elapsed(),
-        finished
+        cancel.load(Relaxed)
     );
 }
 
