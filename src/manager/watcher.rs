@@ -65,9 +65,8 @@ impl Manager {
                 self.gui_sender.send(GuiAction::DirectoryOpenError(path.clone(), e.to_string()))
             {
                 if !closing::closed() {
-                    error!("Gui channel unexpectedly closed: {e}");
+                    closing::fatal(format!("Gui channel unexpectedly closed: {e}"));
                 }
-                closing::close();
             }
             false
         } else {
@@ -113,16 +112,14 @@ impl Manager {
             let s_up = SearchUpdate { search_id, update };
 
             sender.send(GuiAction::SearchUpdate(s_up)).unwrap_or_else(|e| {
-                error!("{e}");
-                closing::close()
+                closing::fatal(e.to_string());
             })
         }
 
         if sources.flat {
             let p = entry.abs_path.clone();
             sender.send(GuiAction::Update(Update::Entry(entry))).unwrap_or_else(|e| {
-                error!("{e}");
-                closing::close()
+                closing::fatal(e.to_string());
             });
 
             if needs_full_count {
@@ -353,9 +350,8 @@ impl Manager {
 
             if let Err(e) = sender.send((res, Some(id.clone()))) {
                 if !closing::closed() {
-                    error!("Error sending from notify watcher: {e}");
+                    closing::fatal(format!("Error sending from notify watcher: {e}"));
                 }
-                closing::close();
             }
         });
 

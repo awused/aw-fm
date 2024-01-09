@@ -1,8 +1,10 @@
+use std::env::temp_dir;
+use std::io::Write;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{process, thread};
 
 use async_channel::{bounded, Receiver, Sender};
 use gtk::glib;
@@ -34,11 +36,10 @@ impl Drop for CloseOnDrop {
     fn drop(&mut self) {
         if !closed() {
             // This means something panicked and at least one thread did not shut down cleanly.
-            error!(
+            fatal(format!(
                 "CloseOnDrop for {} was dropped without closing::close() being called.",
                 thread::current().name().unwrap_or("unnamed")
-            );
-            close()
+            ));
         }
     }
 }
@@ -52,7 +53,7 @@ pub async fn closed_fut() {
     let _ignored = CLOSER.1.recv().await;
 }
 
-pub fn close() {
+pub fn close() -> bool {
     if !CLOSED.swap(true, Ordering::Relaxed) {
         let mut o = CLOSER.0.lock().expect("CLOSER lock poisoned");
         if o.is_some() {
@@ -64,6 +65,27 @@ pub fn close() {
             drop(gc.send(GuiAction::Quit));
         }
         drop(o);
+        true
+    } else {
+        false
+    }
+}
+
+// Logs the error and closes the application.
+// Saves the first fatal error to a crash log file in the system default temp directory.
+pub fn fatal(msg: impl AsRef<str>) {
+    let msg = msg.as_ref();
+
+    error!("{msg}");
+
+    if close() {
+        let path = temp_dir().join(format!("aw-fm_crash_{}", process::id()));
+        let Ok(mut file) = std::fs::File::options().write(true).create_new(true).open(&path) else {
+            error!("Couldn't open {path:?} for logging fatal error");
+            return;
+        };
+
+        drop(file.write_all(msg.as_bytes()));
     }
 }
 
@@ -93,8 +115,7 @@ pub fn init(gui_sender: glib::Sender<GuiAction>) {
         let mut it = match SignalsInfo::<SignalOnly>::new(sigs) {
             Ok(i) => i,
             Err(e) => {
-                error!("Error registering signal handlers: {e:?}");
-                close();
+                fatal(format!("Error registering signal handlers: {e:?}"));
                 return;
             }
         };

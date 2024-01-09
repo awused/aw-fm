@@ -164,8 +164,7 @@ fn read_dir_sync(
                     && !closing::closed()
                     && !cancel.load(Relaxed)
                 {
-                    error!("Channel unexpectedly closed while reading directory");
-                    closing::close();
+                    closing::fatal(format!("Channel unexpectedly closed while reading {path:?}"));
                 }
             });
 
@@ -251,8 +250,9 @@ fn recurse_dir_sync(
                     && !closing::closed()
                     && !cancel.load(Relaxed)
                 {
-                    error!("Channel unexpectedly closed while recursively reading {root:?}");
-                    closing::close();
+                    closing::fatal(format!(
+                        "Channel unexpectedly closed while recursively reading {root:?}"
+                    ));
                 }
                 WalkState::Continue
             };

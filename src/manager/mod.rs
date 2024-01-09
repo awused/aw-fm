@@ -82,9 +82,8 @@ impl Manager {
         let watcher = notify::recommended_watcher(move |res| {
             if let Err(e) = sender.send((res, None)) {
                 if !closing::closed() {
-                    error!("Error sending from notify watcher: {e}");
+                    closing::fatal(format!("Error sending from notify watcher: {e}"));
                 }
-                closing::close();
             }
         })
         .unwrap();
@@ -115,8 +114,7 @@ impl Manager {
                 _ = closing::closed_fut() => break 'main,
                 mtg = receiver.recv() => {
                     let Some(ma) = mtg else {
-                        error!("Received nothing from gui thread. This should never happen");
-                        closing::close();
+                        closing::fatal("Received nothing from gui thread. This should never happen");
                         break 'main;
                     };
                     self.handle_action(ma).await;
@@ -194,8 +192,7 @@ impl Manager {
 
     fn send(&self, action: GuiAction) {
         if let Err(e) = self.gui_sender.send(action) {
-            error!("Sending to gui thread unexpectedly failed, {:?}", e);
-            closing::close();
+            closing::fatal(format!("Sending to gui thread unexpectedly failed, {e:?}"));
         }
     }
 }
