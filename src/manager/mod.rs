@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -54,8 +55,12 @@ pub fn run(
 ) -> JoinHandle<()> {
     spawn_thread("manager", move || {
         let _cod = closing::CloseOnDrop::default();
-        let m = Manager::new(gui_sender);
-        run_local(m.run(manager_receiver));
+        if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
+            let m = Manager::new(gui_sender);
+            run_local(m.run(manager_receiver));
+        })) {
+            closing::fatal(format!("Manager thread panicked unexpectedly: {e:?}"));
+        }
         trace!("Exited IO manager thread");
     })
 }

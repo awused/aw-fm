@@ -34,8 +34,8 @@ pub struct CloseOnDrop {
 
 impl Drop for CloseOnDrop {
     fn drop(&mut self) {
-        if !closed() {
-            // This means something panicked and at least one thread did not shut down cleanly.
+        if !closed() && !std::thread::panicking() {
+            // This means something else panicked and at least one thread did not shut down cleanly.
             fatal(format!(
                 "CloseOnDrop for {} was dropped without closing::close() being called.",
                 thread::current().name().unwrap_or("unnamed")

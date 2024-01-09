@@ -63,7 +63,7 @@ fn main() {
         // This will only happen on programmer error, but we want to make sure the manager thread
         // has time to exit and clean up temporary files.
         // The only things we do after this are cleanup.
-        closing::fatal(format!("gui::run panicked unexpectedly: {e:?}"));
+        closing::fatal(format!("GUI thread panicked unexpectedly: {e:?}"));
     }
 
     // These should never panic on their own, but they may if they're interacting with the gui
@@ -71,6 +71,6 @@ fn main() {
     if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
         drop(man_handle.join());
     })) {
-        closing::fatal(format!("Joining manager thread panicked unexpectedly: {e:?}"));
+        closing::fatal(format!("Manager thread panicked unexpectedly: {e:?}"));
     }
 }
