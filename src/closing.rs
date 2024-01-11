@@ -1,6 +1,7 @@
 use std::env::temp_dir;
 use std::io::Write;
 use std::marker::PhantomData;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -104,28 +105,32 @@ pub fn init(gui_sender: glib::Sender<GuiAction>) {
 
         let _cod = CloseOnDrop::default();
 
-        for sig in TERM_SIGNALS {
-            // When terminated by a second term signal, exit with exit code 1.
-            signal_hook::flag::register_conditional_shutdown(*sig, 1, CLOSED.clone())
-                .expect("Error registering signal handlers.");
-        }
-
-        let mut sigs: Vec<c_int> = Vec::new();
-        sigs.extend(TERM_SIGNALS);
-        let mut it = match SignalsInfo::<SignalOnly>::new(sigs) {
-            Ok(i) => i,
-            Err(e) => {
-                fatal(format!("Error registering signal handlers: {e:?}"));
-                return;
+        if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
+            for sig in TERM_SIGNALS {
+                // When terminated by a second term signal, exit with exit code 1.
+                signal_hook::flag::register_conditional_shutdown(*sig, 1, CLOSED.clone())
+                    .expect("Error registering signal handlers.");
             }
-        };
 
-        if let Some(s) = it.into_iter().next() {
-            info!("Received signal {s}, shutting down");
-            close();
-            it.handle().close();
-            info!("closed {}", it.is_closed());
-        }
+            let mut sigs: Vec<c_int> = Vec::new();
+            sigs.extend(TERM_SIGNALS);
+            let mut it = match SignalsInfo::<SignalOnly>::new(sigs) {
+                Ok(i) => i,
+                Err(e) => {
+                    fatal(format!("Error registering signal handlers: {e:?}"));
+                    return;
+                }
+            };
+
+            if let Some(s) = it.into_iter().next() {
+                info!("Received signal {s}, shutting down");
+                close();
+                it.handle().close();
+                info!("closed {}", it.is_closed());
+            }
+        })) {
+            fatal(format!("Signal thread panicked unexpectedly: {e:?}"));
+        };
     });
 
     #[cfg(windows)]
