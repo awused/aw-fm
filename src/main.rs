@@ -12,7 +12,7 @@ use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::thread::{self, JoinHandle};
 
-use gtk::{glib, Settings};
+use gtk::Settings;
 
 mod elapsedlogger;
 
@@ -50,7 +50,7 @@ fn main() {
 
     let (manager_sender, manager_receiver) = tokio::sync::mpsc::unbounded_channel();
     // PRIORITY_LOW prioritize GTK redrawing events.
-    let (gui_sender, gui_receiver) = glib::MainContext::channel(glib::Priority::HIGH_IDLE);
+    let (gui_sender, gui_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     closing::init(gui_sender.clone());
 

@@ -13,7 +13,7 @@ use gtk::gio::{
     self, Cancellable, FileQueryInfoFlags, FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE,
     FILE_ATTRIBUTE_STANDARD_SIZE, FILE_ATTRIBUTE_STANDARD_TYPE,
 };
-use gtk::glib::{self, GStr};
+use gtk::glib::GStr;
 use gtk::prelude::FileExt;
 use ignore::{WalkBuilder, WalkState};
 use once_cell::sync::Lazy;
@@ -117,7 +117,7 @@ fn read_dir_sync(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
     sender: UnboundedSender<ReadResult>,
-    gui_sender: glib::Sender<GuiAction>,
+    gui_sender: UnboundedSender<GuiAction>,
 ) -> oneshot::Receiver<()> {
     let (send_done, recv_done) = oneshot::channel();
 
@@ -178,7 +178,7 @@ fn recurse_dir_sync(
     root: Arc<Path>,
     cancel: Arc<AtomicBool>,
     sender: UnboundedSender<ReadResult>,
-    gui_sender: glib::Sender<GuiAction>,
+    gui_sender: UnboundedSender<GuiAction>,
 ) -> oneshot::Receiver<()> {
     let (send_done, recv_done) = oneshot::channel();
 
@@ -276,7 +276,7 @@ async fn read_dir(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
     sort: SortSettings,
-    gui_sender: glib::Sender<GuiAction>,
+    gui_sender: UnboundedSender<GuiAction>,
 ) {
     debug!("Starting to read directory {path:?}");
 
@@ -300,7 +300,7 @@ async fn read_dir(
 async fn recurse_dir(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
-    gui_sender: glib::Sender<GuiAction>,
+    gui_sender: UnboundedSender<GuiAction>,
 ) {
     debug!("Starting to recursively walk {path:?}");
 
@@ -351,7 +351,7 @@ fn search_snap(
 async fn consume_entries(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
-    gui_sender: glib::Sender<GuiAction>,
+    gui_sender: UnboundedSender<GuiAction>,
     mut receiver: UnboundedReceiver<ReadResult>,
     snap: impl SnapFn,
 ) {
@@ -439,7 +439,7 @@ async fn read_slow_dir(
     path: Arc<Path>,
     cancel: Arc<AtomicBool>,
     mut receiver: UnboundedReceiver<ReadResult>,
-    sender: glib::Sender<GuiAction>,
+    sender: UnboundedSender<GuiAction>,
     snap: impl SnapFn,
 ) {
     #[derive(Eq, PartialEq)]
@@ -629,7 +629,7 @@ async fn read_slow_dir(
     }
 }
 
-pub fn flat_dir_count(path: Arc<Path>, gui_sender: glib::Sender<GuiAction>) {
+pub fn flat_dir_count(path: Arc<Path>, gui_sender: UnboundedSender<GuiAction>) {
     count_dir_contents(path, move |entry| {
         drop(gui_sender.send(GuiAction::Update(Update::Entry(entry.into()))))
     });
@@ -637,7 +637,7 @@ pub fn flat_dir_count(path: Arc<Path>, gui_sender: glib::Sender<GuiAction>) {
 
 fn search_dir_count(
     path: Arc<Path>,
-    gui_sender: glib::Sender<GuiAction>,
+    gui_sender: UnboundedSender<GuiAction>,
     search_id: Arc<AtomicBool>,
 ) {
     count_dir_contents(path, move |entry| {
@@ -674,7 +674,7 @@ fn count_dir_contents(path: Arc<Path>, send_update: impl FnOnce(Entry) + Send + 
 struct ChildAccumulator {
     info: ChildInfo,
     cancel: Arc<AtomicBool>,
-    sender: glib::Sender<GuiAction>,
+    sender: UnboundedSender<GuiAction>,
     unsent: usize,
 }
 
@@ -709,7 +709,7 @@ static CHILD_ATTRIBUTES: Lazy<String> = Lazy::new(|| {
 fn recurse_children(
     dirs: Vec<Arc<Path>>,
     cancel: Arc<AtomicBool>,
-    sender: glib::Sender<GuiAction>,
+    sender: UnboundedSender<GuiAction>,
 ) {
     debug!("Recursively measuring children of {} directories", dirs.len());
     let start = Instant::now();

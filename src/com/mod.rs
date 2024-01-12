@@ -9,8 +9,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use derive_more::{Deref, DerefMut, From};
-use gtk::glib::{Object, Sender, SignalHandlerId};
+use gtk::glib::{Object, SignalHandlerId};
 use gtk::prelude::{IsA, ObjectExt};
+use tokio::sync::oneshot;
 
 pub use self::entry::*;
 pub use self::settings::*;
@@ -71,7 +72,7 @@ pub enum ManagerAction {
 
     GetChildren(Vec<Arc<Path>>, Arc<AtomicBool>),
 
-    Flush(Vec<PathBuf>, Sender<()>),
+    Flush(Vec<PathBuf>, oneshot::Sender<()>),
 }
 
 

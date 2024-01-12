@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gtk::glib;
 use tokio::process::Command;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::{pin, select};
 
 use super::Manager;
@@ -68,7 +68,7 @@ fn prep_command(
     }
 }
 
-async fn run_with_output(mut cmd: Command, gui_chan: glib::Sender<GuiAction>) {
+async fn run_with_output(mut cmd: Command, gui_chan: UnboundedSender<GuiAction>) {
     let fut = cmd.output();
 
     pin!(fut);
@@ -112,7 +112,7 @@ async fn run_with_output(mut cmd: Command, gui_chan: glib::Sender<GuiAction>) {
     }
 }
 
-async fn run(mut cmd: Command, gui_chan: glib::Sender<GuiAction>, convey_errors: bool) {
+async fn run(mut cmd: Command, gui_chan: UnboundedSender<GuiAction>, convey_errors: bool) {
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         // Always convey this error

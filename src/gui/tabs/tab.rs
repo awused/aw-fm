@@ -14,6 +14,7 @@ use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{SelectionModelExt, WidgetExt};
 use gtk::{glib, AlertDialog, MultiSelection, Orientation, PopoverMenu, Widget};
+use tokio::sync::oneshot;
 use TabPane as TP;
 
 use self::flat_dir::FlatDir;
@@ -1612,10 +1613,15 @@ impl Tab {
 
         // Lower than the normal priority for the main channel.
         // This guarantees that the flushed events are processed first.
-        let (s, r) = glib::MainContext::channel(glib::Priority::DEFAULT_IDLE);
+        let (s, r) = oneshot::channel();
 
+        let ctx = glib::MainContext::ref_thread_default();
         let op = op.clone();
-        r.attach(None, move |_| {
+        ctx.spawn_local_with_priority(glib::Priority::DEFAULT_IDLE, async move {
+            if r.await.is_err() {
+                return;
+            };
+
             tabs_run(|tlist| {
                 let Some(tab) = tlist.find_mut(op.tab) else {
                     return;
@@ -1629,7 +1635,6 @@ impl Tab {
                 let new_paths = tab.paths_for_op(&outcomes);
                 tab.scroll_to_completed_inner(new_paths);
             });
-            glib::ControlFlow::Break
         });
 
         gui_run(|g| g.send_manager(ManagerAction::Flush(unmatched_paths, s)));

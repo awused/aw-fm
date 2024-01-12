@@ -2,11 +2,11 @@ use std::collections::btree_map;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gtk::glib;
 use notify::event::{ModifyKind, RenameMode};
 use notify::RecursiveMode::NonRecursive;
 use notify::{Event, Watcher};
 use tokio::select;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::{spawn_blocking, spawn_local};
 use tokio::time::{Duration, Instant};
 
@@ -93,7 +93,11 @@ impl Manager {
         }
     }
 
-    pub(super) fn send_update(sender: &glib::Sender<GuiAction>, path: Arc<Path>, sources: Sources) {
+    pub(super) fn send_update(
+        sender: &UnboundedSender<GuiAction>,
+        path: Arc<Path>,
+        sources: Sources,
+    ) {
         // It's probably true that sources.flat means any search updates are wasted.
         // But the flat tab could have been closed.
 

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use gtk::glib;
 use notify::{Event, RecommendedWatcher};
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -31,7 +30,7 @@ type RecurseId = Arc<AtomicBool>;
 // to the gui without blocking it.
 #[derive(Debug)]
 struct Manager {
-    gui_sender: glib::Sender<GuiAction>,
+    gui_sender: UnboundedSender<GuiAction>,
 
     // If there are pending mutations, we wait to clear and process them.
     // If the boolean is true, there was a second event we debounced.
@@ -51,7 +50,7 @@ struct Manager {
 
 pub fn run(
     manager_receiver: UnboundedReceiver<ManagerAction>,
-    gui_sender: glib::Sender<GuiAction>,
+    gui_sender: UnboundedSender<GuiAction>,
 ) -> JoinHandle<()> {
     spawn_thread("manager", move || {
         let _cod = closing::CloseOnDrop::default();
@@ -80,7 +79,7 @@ async fn run_local(f: impl Future<Output = ()>) {
 }
 
 impl Manager {
-    fn new(gui_sender: glib::Sender<GuiAction>) -> Self {
+    fn new(gui_sender: UnboundedSender<GuiAction>) -> Self {
         let (notify_sender, notify_receiver) = tokio::sync::mpsc::unbounded_channel();
 
         let sender = notify_sender.clone();

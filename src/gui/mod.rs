@@ -12,7 +12,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gdk, gio, glib, Bitset, MultiSelection};
 use path_clean::PathClean;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use self::main_window::MainWindow;
 use self::operations::Operation;
@@ -118,7 +118,7 @@ struct Gui {
 
 pub fn run(
     manager_sender: UnboundedSender<ManagerAction>,
-    gui_receiver: glib::Receiver<GuiAction>,
+    gui_receiver: UnboundedReceiver<GuiAction>,
 ) {
     let flags = if CONFIG.unique {
         gio::ApplicationFlags::HANDLES_COMMAND_LINE
@@ -181,7 +181,7 @@ impl Gui {
     pub fn new(
         application: &gtk::Application,
         manager_sender: UnboundedSender<ManagerAction>,
-        gui_receiver: glib::Receiver<GuiAction>,
+        mut gui_receiver: UnboundedReceiver<GuiAction>,
     ) -> Rc<Self> {
         let window = MainWindow::new(application);
 
@@ -248,8 +248,13 @@ impl Gui {
         // If there is a legitimate use for activating twice, send on the other channel.
         // There are also cyclical references that are annoying to clean up so this Gui object will
         // live forever, but that's fine since the application will exit when the Gui exits.
+        let ctx = glib::MainContext::ref_thread_default();
         let g = rc.clone();
-        gui_receiver.attach(None, move |gu| g.handle_update(gu));
+        ctx.spawn_local_with_priority(glib::Priority::HIGH_IDLE, async move {
+            while let Some(gu) = gui_receiver.recv().await {
+                g.handle_update(gu);
+            }
+        });
 
         rc.setup();
 
