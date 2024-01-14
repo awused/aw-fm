@@ -731,7 +731,10 @@ impl Tab {
         self.save_settings();
     }
 
-    pub fn update_display_mode(&mut self, mode: DisplayMode) {
+    // TODO [broken columview]
+    pub fn update_display_mode(&mut self, _mode: DisplayMode) {
+        // GTK 4.12 ColumnView is just broken
+        let mode = DisplayMode::Icons;
         self.settings.display_mode = mode;
         self.update_settings();
     }
@@ -1326,6 +1329,8 @@ impl Tab {
                 PartiallyAppliedUpdate::Insert(new)
             }
             (Update::Removed(path), Some(i), Some(obj)) => {
+                // TODO -- fix focus if this item has keyboard focus for this window but isn't
+                // actively focused (delete confirmation dialog).
                 self.contents.remove(i);
                 trace!("Removed {:?} from event", path);
                 PartiallyAppliedUpdate::Delete(obj)

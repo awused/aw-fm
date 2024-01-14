@@ -4,13 +4,13 @@ use std::rc::Rc;
 use gtk::glib::Object;
 use gtk::prelude::*;
 use gtk::{
-    glib, ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, MultiSelection,
+    ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, ListScrollFlags, MultiSelection,
     ScrolledWindow, SignalListItemFactory, Widget,
 };
 
 use self::icon_cell::IconCell;
 use self::string_cell::{EntryString, StringCell};
-use super::{get_last_visible_child, setup_item_controllers, setup_view_controllers, Bound};
+use super::{get_first_visible_child, setup_item_controllers, setup_view_controllers, Bound};
 use crate::com::{DirSettings, EntryObject, SignalHolder, SortDir, SortMode, SortSettings};
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, tabs_run};
@@ -113,24 +113,16 @@ impl DetailsView {
     }
 
     pub(super) fn scroll_to(&self, pos: u32) {
-        // TODO [gtk4.12] use ColumnView.scroll_to
         let model = self.column_view.model().unwrap();
-        if model.n_items() == 0 {
+        if model.n_items() <= pos {
             return;
         }
 
-        let w = self.column_view.first_child().and_then(|c| c.next_sibling());
-        if let Some(w) = w {
-            glib::idle_add_local_once(move || {
-                drop(w.activate_action("list.scroll-to-item", Some(&pos.to_variant())));
-            });
-        } else {
-            error!("Couldn't find ListView to scroll in details view");
-        }
+        self.column_view.scroll_to(pos, None, ListScrollFlags::empty(), None);
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
-    pub(super) fn get_last_visible(&self) -> Option<EntryObject> {
+    pub(super) fn get_first_visible(&self) -> Option<EntryObject> {
         let model = self.column_view.model().unwrap();
         if model.n_items() == 0 {
             return None;
@@ -142,7 +134,7 @@ impl DetailsView {
             .first_child()
             .and_then(|c| c.next_sibling())
             .as_ref()
-            .and_then(get_last_visible_child)
+            .and_then(get_first_visible_child)
             .and_then(|c| c.first_child())
             .and_then(|c| c.first_child())
             .and_downcast::<IconCell>()
@@ -283,11 +275,14 @@ fn setup_string_binds(factory: &SignalListItemFactory, tab: TabId, deny: Rc<Cell
 
         if !child.has_controllers() {
             let parent = child.parent().unwrap();
+
             setup_item_controllers(
                 tab,
                 &parent,
                 child.downgrade(),
-                parent.parent().unwrap().downgrade(),
+                // TODO https://github.com/gtk-rs/gtk4-rs/issues/1560
+                // parent.parent().unwrap().downgrade(),
+                parent.downgrade(),
                 deny.clone(),
             );
             child.set_controllers();

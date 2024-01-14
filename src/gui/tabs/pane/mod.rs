@@ -87,20 +87,20 @@ impl View {
     }
 }
 
-fn get_last_visible_child(parent: &Widget) -> Option<Widget> {
-    let parent_allocation = parent.allocation();
-
-    let mut child = parent.last_child()?;
+fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
+    let mut child = parent.first_child()?;
     loop {
         if child.is_visible() && child.is_mapped() {
-            let allocation = child.allocation();
-            // Get the last fully visible item so at least it stays stable.
-            if allocation.y() + allocation.height() <= parent_allocation.height() {
+            let Some(bounds) = child.compute_bounds(parent) else {
+                continue;
+            };
+            // Get the first fully visible item.
+            if bounds.y() >= 0.0 {
                 break Some(child);
             }
         }
 
-        child = child.prev_sibling()?;
+        child = child.next_sibling()?;
     }
 }
 
@@ -516,8 +516,8 @@ impl Pane {
     pub fn get_state(&self, list: &Contents) -> PaneState {
         let scroll_pos = if self.element.imp().scroller.vadjustment().value() > 0.0 {
             let eo = match &self.view {
-                View::Icons(ic) => ic.get_last_visible(),
-                View::Columns(cv) => cv.get_last_visible(),
+                View::Icons(ic) => ic.get_first_visible(),
+                View::Columns(cv) => cv.get_first_visible(),
             };
 
             eo.map(|child| super::ScrollPosition {

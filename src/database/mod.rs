@@ -184,7 +184,7 @@ impl Con {
     fn get(&self, path: &Path) -> DirSettings {
         let con = &self.0;
 
-        let settings = con
+        let mut settings = con
             .query_row(
                 "SELECT display_mode, sort_mode, sort_direction FROM dir_settings WHERE path = ?",
                 [path.as_os_str().as_bytes()],
@@ -206,6 +206,9 @@ impl Con {
                 }
                 DirSettings::default()
             });
+
+        // TODO [broken columview]
+        settings.display_mode = DisplayMode::Icons;
 
         settings
     }
