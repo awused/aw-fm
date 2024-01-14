@@ -40,7 +40,7 @@ impl PropDialog {
         files: Vec<EntryObject>,
         dirs: Vec<EntryObject>,
     ) -> Self {
-        info!("Showing conflict resolution dialog for {} files", files.len());
+        info!("Showing Properties dialog for {} files", files.len());
 
         let s: Self = Object::new();
         let imp = s.imp();
@@ -87,7 +87,7 @@ impl PropDialog {
         });
 
         s.set_transient_for(Some(&gui.window));
-        s.set_modal(true);
+        s.set_modal(false);
         s.set_visible(true);
         s.update_text();
 
