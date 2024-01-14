@@ -3,11 +3,11 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{glib, GestureClick, GridView, ListScrollFlags, MultiSelection, ScrolledWindow};
+use gtk::{GestureClick, GridView, ListScrollFlags, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
 use super::{get_first_visible_child, setup_item_controllers, setup_view_controllers, Bound};
-use crate::com::{EntryObject, SignalHolder};
+use crate::com::EntryObject;
 use crate::gui::applications;
 use crate::gui::tabs::id::TabId;
 
@@ -16,8 +16,6 @@ mod icon_tile;
 #[derive(Debug)]
 pub(super) struct IconView {
     grid: GridView,
-
-    _workaround_rubber: SignalHolder<MultiSelection>,
 }
 
 impl IconView {
@@ -99,19 +97,7 @@ impl IconView {
 
         scroller.set_child(Some(&grid));
 
-
-        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
-        grid.set_enable_rubberband(selection.n_items() != 0);
-        let g = grid.clone();
-        let signal = selection.connect_items_changed(move |sel, _, _, _| {
-            g.set_enable_rubberband(sel.n_items() != 0);
-        });
-        let workaround_rubberband = SignalHolder::new(selection, signal);
-
-        Self {
-            grid,
-            _workaround_rubber: workaround_rubberband,
-        }
+        Self { grid }
     }
 
     pub(super) fn scroll_to(&self, pos: u32) {
@@ -139,24 +125,40 @@ impl IconView {
 
     pub(super) fn change_model(&mut self, selection: &MultiSelection) {
         self.grid.set_model(Some(selection));
-
-        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
-        self.grid.set_enable_rubberband(selection.n_items() != 0);
-        let g = self.grid.clone();
-        let signal = selection.connect_items_changed(move |sel, _, _, _| {
-            g.set_enable_rubberband(sel.n_items() != 0);
-        });
-        self._workaround_rubber = SignalHolder::new(selection, signal);
     }
 
     pub(super) fn grab_focus(&self) {
         self.grid.grab_focus();
     }
 
-    pub(super) fn workaround_enable_rubberband(&self) {
-        if self.grid.model().unwrap().n_items() != 0 {
-            self.grid.set_enable_rubberband(true);
+    pub(super) fn fix_focus_before_delete(&self, eo: &EntryObject) {
+        let Some(child) = self.grid.focus_child() else {
+            return;
+        };
+
+        if !child.has_focus() {
+            return;
         }
+
+        let matches = child
+            .first_child()
+            .and_downcast::<IconTile>()
+            .and_then(|c| c.bound_object())
+            .map(|c| *c.get() == *eo.get())
+            .unwrap_or_default();
+
+        if !matches {
+            return;
+        }
+
+        if let Some(next) = child.next_sibling().or_else(|| child.prev_sibling()) {
+            warn!("Workaround - Fixing broken focus on deletion in grid view");
+            next.grab_focus();
+        }
+    }
+
+    pub(super) fn workaround_enable_rubberband(&self) {
+        self.grid.set_enable_rubberband(true);
     }
 
     pub(super) fn workaround_disable_rubberband(&self) {

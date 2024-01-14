@@ -82,7 +82,7 @@ mod imp {
     use std::cell::{Cell, RefCell};
 
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate, Widget};
+    use gtk::{glib, CompositeTemplate};
 
     use super::EntryString;
     use crate::com::{Entry, EntryObject, SignalHolder};

@@ -572,13 +572,6 @@ impl Tab {
     }
 
     fn apply_snapshot_inner(&mut self, snap: EntryObjectSnapshot) {
-        if self.settings.display_mode == DisplayMode::Icons
-            && self.pane.workaround_scroller().vscrollbar_policy() != gtk::PolicyType::Never
-        {
-            warn!("Locking scrolling to work around gtk crash");
-            self.pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Never);
-        }
-
         if let Some(search) = &mut self.search {
             search.apply_flat_snapshot(snap.clone());
         }
@@ -679,6 +672,14 @@ impl Tab {
     }
 
     pub fn apply_search_update(&mut self, update: SearchUpdate, allow_mutation: bool) {
+        if self.visible() {
+            if let Update::Removed(path) = &update.update {
+                if let Some(eo) = EntryObject::lookup(path) {
+                    self.pane.workaround_focus_before_delete(&eo);
+                }
+            }
+        }
+
         self.search.as_mut().unwrap().apply_search_update(update, allow_mutation);
     }
 
@@ -1127,7 +1128,7 @@ impl Tab {
             return;
         }
 
-        let TP::Pending(pane, state) = &mut self.pane else {
+        let TP::Pending(_pane, state) = &mut self.pane else {
             debug!(
                 "Ignoring apply_pane_state on tab {:?} without pending state and ready pane {:?}",
                 self.id,
@@ -1137,9 +1138,6 @@ impl Tab {
         };
 
         info!("Applying {:?} to tab {:?}", state, self.id);
-
-        // Unconditionally unset it in case mode was swapped.
-        pane.workaround_scroller().set_vscrollbar_policy(gtk::PolicyType::Automatic);
 
         let state = self.pane.must_resolve_pending();
         let pane = self.pane.get_visible_mut().unwrap();
@@ -1329,8 +1327,9 @@ impl Tab {
                 PartiallyAppliedUpdate::Insert(new)
             }
             (Update::Removed(path), Some(i), Some(obj)) => {
-                // TODO -- fix focus if this item has keyboard focus for this window but isn't
-                // actively focused (delete confirmation dialog).
+                if self.pane.visible() {
+                    self.pane.workaround_focus_before_delete(&obj);
+                }
                 self.contents.remove(i);
                 trace!("Removed {:?} from event", path);
                 PartiallyAppliedUpdate::Delete(obj)
@@ -1372,6 +1371,12 @@ impl Tab {
 
         // None of the tabs in `left` are an exact match.
         for t in self.matching_mut(right) {
+            if t.visible() {
+                if let PartiallyAppliedUpdate::Delete(eo) = &partial {
+                    t.pane.workaround_focus_before_delete(eo);
+                }
+            }
+
             t.contents.finish_update(&partial);
             if let Some(search) = &mut t.search {
                 search.finish_flat_update(&partial)
@@ -1381,6 +1386,7 @@ impl Tab {
         // Apply mutations to any matching search tabs, even to the left.
         let mutate = search_mutate.unwrap_or(partial);
         // TODO -- does it make sense to apply deletions here too?
+        // If so, need to also fix focus
         if !matches!(mutate, PartiallyAppliedUpdate::Mutate(..)) {
             return;
         }

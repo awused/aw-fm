@@ -11,7 +11,7 @@ use gtk::{
 use self::icon_cell::IconCell;
 use self::string_cell::{EntryString, StringCell};
 use super::{get_first_visible_child, setup_item_controllers, setup_view_controllers, Bound};
-use crate::com::{DirSettings, EntryObject, SignalHolder, SortDir, SortMode, SortSettings};
+use crate::com::{DirSettings, EntryObject, SortDir, SortMode, SortSettings};
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, tabs_run};
 
@@ -27,11 +27,10 @@ const DATE_MODIFIED: &str = "Date Modified";
 pub(super) struct DetailsView {
     column_view: ColumnView,
     current_sort: Rc<Cell<SortSettings>>,
-
-    _workaround_rubber: SignalHolder<MultiSelection>,
 }
 
 // TODO [gtk4.12] use ColumnViewRow
+// Or don't, it's broken garbage
 
 impl DetailsView {
     pub(super) fn new(
@@ -86,20 +85,7 @@ impl DetailsView {
 
         scroller.set_child(Some(&column_view));
 
-        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
-        column_view.set_enable_rubberband(selection.n_items() != 0);
-        let cv = column_view.clone();
-        let signal = selection.connect_items_changed(move |sel, _, _, _| {
-            cv.set_enable_rubberband(sel.n_items() != 0);
-        });
-        let workaround_rubberband = SignalHolder::new(selection, signal);
-
-        Self {
-            column_view,
-            current_sort,
-
-            _workaround_rubber: workaround_rubberband,
-        }
+        Self { column_view, current_sort }
     }
 
     pub(super) fn update_sort(&self, sort: SortSettings) {
@@ -149,14 +135,6 @@ impl DetailsView {
 
     pub(super) fn change_model(&mut self, selection: &MultiSelection) {
         self.column_view.set_model(Some(selection));
-
-        // https://gitlab.gnome.org/GNOME/gtk/-/issues/5970
-        self.column_view.set_enable_rubberband(selection.n_items() != 0);
-        let g = self.column_view.clone();
-        let signal = selection.connect_items_changed(move |sel, _, _, _| {
-            g.set_enable_rubberband(sel.n_items() != 0);
-        });
-        self._workaround_rubber = SignalHolder::new(selection, signal);
     }
 
     pub(super) fn grab_focus(&self) {
@@ -164,9 +142,7 @@ impl DetailsView {
     }
 
     pub(super) fn workaround_enable_rubberband(&self) {
-        if self.column_view.model().unwrap().n_items() != 0 {
-            self.column_view.set_enable_rubberband(true);
-        }
+        self.column_view.set_enable_rubberband(true);
     }
 
     pub(super) fn workaround_disable_rubberband(&self) {

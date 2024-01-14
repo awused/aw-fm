@@ -16,7 +16,7 @@ use gtk::traits::{
 };
 use gtk::{
     CustomFilter, DragSource, DropTargetAsync, EventControllerKey, FilterChange, FilterListModel,
-    GestureClick, MultiSelection, Orientation, ScrolledWindow, Widget, WidgetPaintable,
+    GestureClick, MultiSelection, Orientation, Widget, WidgetPaintable,
 };
 use once_cell::unsync::Lazy;
 
@@ -554,11 +554,6 @@ impl Pane {
         }
     }
 
-    // Most view state code should be moved here.
-    pub fn workaround_scroller(&self) -> &ScrolledWindow {
-        &self.element.imp().scroller
-    }
-
     pub fn split(&self, orient: Orientation, forced: bool) -> Option<gtk::Paned> {
         let mapped = self.element.is_mapped();
 
@@ -707,6 +702,13 @@ impl Pane {
         }
 
         save_tree(parent, ids)
+    }
+
+    pub fn workaround_focus_before_delete(&self, eo: &EntryObject) {
+        match &self.view {
+            View::Icons(grid) => grid.fix_focus_before_delete(eo),
+            View::Columns(_) => error!("TODO -- handle broken focus on delete in column view"),
+        }
     }
 }
 
