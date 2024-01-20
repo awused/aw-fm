@@ -191,9 +191,9 @@ impl Gui {
             window.remove_css_class("background");
             window.imp().overlay.add_css_class("main-nobg");
 
-            provider.load_from_data(&format!("{style}\n window.main {{ background: {bg}; }}"));
+            provider.load_from_string(&format!("{style}\n window.main {{ background: {bg}; }}"));
         } else {
-            provider.load_from_data(style);
+            provider.load_from_string(style);
         }
 
         // We give the CssProvider to the default screen so the CSS rules we added

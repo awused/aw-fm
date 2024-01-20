@@ -98,13 +98,13 @@ impl DetailsView {
         set_sort(&self.column_view, sort);
     }
 
-    pub(super) fn scroll_to(&self, pos: u32) {
+    pub(super) fn scroll_to(&self, pos: u32, flags: ListScrollFlags) {
         let model = self.column_view.model().unwrap();
         if model.n_items() <= pos {
             return;
         }
 
-        self.column_view.scroll_to(pos, None, ListScrollFlags::empty(), None);
+        self.column_view.scroll_to(pos, None, flags, None);
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688

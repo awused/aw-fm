@@ -107,9 +107,9 @@ impl PaneElement {
         forward_back_mouse.set_button(0);
         forward_back_mouse.connect_pressed(move |c, _n, x, y| {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-            let alloc = c.widget().allocation();
-            if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
-                error!("Workaround -- ignoring junk mouse event in {tab:?}");
+            let w = c.widget();
+            if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
+                warn!("Workaround -- ignoring junk mouse event in {tab:?}");
                 return;
             }
 

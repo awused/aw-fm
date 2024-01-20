@@ -42,13 +42,9 @@ impl IconView {
             let d = deny.clone();
             deny_bg_click.connect_pressed(move |c, _n, x, y| {
                 // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-                let alloc = c.widget().allocation();
-                if !(x > 0.0
-                    && (x as i32) < alloc.width()
-                    && y > 0.0
-                    && (y as i32) < alloc.height())
-                {
-                    error!("Workaround -- ignoring junk mouse event in {tab:?} on item tile",);
+                let w = c.widget();
+                if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
+                    warn!("Workaround -- ignoring junk mouse event in {tab:?} on item tile",);
                     return;
                 }
 
@@ -100,13 +96,12 @@ impl IconView {
         Self { grid }
     }
 
-    pub(super) fn scroll_to(&self, pos: u32) {
+    pub(super) fn scroll_to(&self, pos: u32, flags: ListScrollFlags) {
         let model = self.grid.model().unwrap();
         if model.n_items() <= pos {
             return;
         }
 
-        let flags = ListScrollFlags::empty();
         self.grid.scroll_to(pos, flags, None);
     }
 

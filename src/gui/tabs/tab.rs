@@ -732,10 +732,7 @@ impl Tab {
         self.save_settings();
     }
 
-    // TODO [broken columview]
-    pub fn update_display_mode(&mut self, _mode: DisplayMode) {
-        // GTK 4.12 ColumnView is just broken
-        let mode = DisplayMode::Icons;
+    pub fn update_display_mode(&mut self, mode: DisplayMode) {
         self.settings.display_mode = mode;
         self.update_settings();
     }
@@ -867,29 +864,32 @@ impl Tab {
             // TODO [gtk4.12]-- explicitly focus, which doesn't work yet.
             debug!("Seeking to {:?}", &*eo.get().name);
 
-            contents.selection.select_item(i, true);
+            if self.loaded() && self.visible() {
+                self.pane.get_visible().unwrap().seek_to(i);
+            } else {
+                contents.selection.select_item(i, true);
 
-            let mut state = self.pane.clone_state(contents);
-            state.scroll_pos = Some(ScrollPosition {
-                path: eo.get().abs_path.clone(),
-                index: i,
-            });
-            self.pane.overwrite_state(state);
+                let mut state = self.pane.clone_state(contents);
+                state.scroll_pos = Some(ScrollPosition {
+                    path: eo.get().abs_path.clone(),
+                    index: i,
+                });
+                self.pane.overwrite_state(state);
 
-            self.apply_pane_state();
+                self.apply_pane_state();
+            }
+
             return;
         }
     }
 
     pub fn seek(&mut self, fragment: &str) {
-        let contents =
-            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+        let contents = self.visible_contents();
         self.seek_inner(fragment, 0..contents.selection.n_items());
     }
 
     pub fn seek_next(&mut self, fragment: &str) {
-        let contents =
-            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+        let contents = self.visible_contents();
 
         // No real fallback if there's no selection
         let sel = contents.selection.selection();
@@ -901,8 +901,7 @@ impl Tab {
     }
 
     pub fn seek_prev(&mut self, fragment: &str) {
-        let contents =
-            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+        let contents = self.visible_contents();
 
         // No real fallback if there's no selection
         let sel = contents.selection.selection();

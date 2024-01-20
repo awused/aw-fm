@@ -33,8 +33,8 @@ impl TabElement {
         mouse.set_button(0);
         mouse.connect_pressed(move |c, n, x, y| {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-            let alloc = c.widget().allocation();
-            if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
+            let w = c.widget();
+            if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
                 warn!("Workaround -- ignoring junk mouse event on {tab:?} element",);
                 return;
             }
@@ -87,7 +87,7 @@ impl TabElement {
             }
 
             // 2.5-3.0 feels more like half the target than 2.0 does
-            if y > dt.widget().allocated_height() as f64 / 2.5 {
+            if y > dt.widget().height() as f64 / 2.5 {
                 debug!("Reordering {source:?} after {tab:?}");
                 tabs_run(|t| t.reorder(source, tab, true));
             } else {

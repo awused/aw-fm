@@ -28,8 +28,6 @@ use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use env_logger::fmt::Color;
-use log::Level;
 use once_cell::sync::Lazy;
 
 static START: Lazy<Instant> = Lazy::new(Instant::now);
@@ -45,24 +43,23 @@ pub fn init_logging() {
             let target = shrink_target(target);
             let max_width = max_target_width(target);
 
-            let mut style = f.style();
-            let level = match record.level() {
-                Level::Trace => style.set_color(Color::Magenta).value("TRACE"),
-                Level::Debug => style.set_color(Color::Blue).value("DEBUG"),
-                Level::Info => style.set_color(Color::Green).value("INFO "),
-                Level::Warn => style.set_color(Color::Yellow).value("WARN "),
-                Level::Error => style.set_color(Color::Red).value("ERROR"),
-            };
-
-            let mut style = f.style();
-            let target = style.set_bold(true).value(Padded { value: target, width: max_width });
+            let style = f.default_level_style(record.level()).bold();
 
             let now = Instant::now();
             let dur = now.duration_since(*START);
             let seconds = dur.as_secs();
             let ms = dur.as_millis() % 1000;
 
-            writeln!(f, " {:04}.{:03} {} {} > {}", seconds, ms, level, target, record.args(),)
+            let style_render = style.render();
+            let style_reset = style.render_reset();
+            let level = record.level();
+            let args = record.args();
+
+            writeln!(
+                f,
+                " {seconds:04}.{ms:03} {style_render}{level:5}{style_reset} {target:max_width$} > \
+                 {args}",
+            )
         })
         .init();
 }
@@ -79,7 +76,7 @@ impl<T: fmt::Display> fmt::Display for Padded<T> {
 }
 
 static MAX_MODULE_WIDTH: AtomicUsize = AtomicUsize::new(0);
-const MAX_WIDTH: usize = 10;
+const MAX_WIDTH: usize = 20;
 
 // Strips all but the last two modules.
 fn shrink_target(target: &str) -> &str {

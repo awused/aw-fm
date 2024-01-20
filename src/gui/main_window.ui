@@ -5,9 +5,15 @@
     <property name="title">aw-fm</property>
     <property name="default-width">800</property>
     <property name="default-height">600</property>
+    <!-- Makes the popover menu warnings shut up -->
+    <property name="layout-manager">
+      <object class="GtkBinLayout"/>
+    </property>
+
     <style>
       <class name="main"/>
     </style>
+
 
     <child>
       <object class="GtkOverlay" id="overlay">

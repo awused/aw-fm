@@ -184,33 +184,27 @@ impl Con {
     fn get(&self, path: &Path) -> DirSettings {
         let con = &self.0;
 
-        let mut settings = con
-            .query_row(
-                "SELECT display_mode, sort_mode, sort_direction FROM dir_settings WHERE path = ?",
-                [path.as_os_str().as_bytes()],
-                |row| {
-                    Ok(DirSettings {
-                        display_mode: row.get(0)?,
-                        sort: SortSettings {
-                            mode: row.get(1)?,
-                            direction: row.get(2)?,
-                        },
-                    })
-                },
-            )
-            .unwrap_or_else(|e| {
-                if e == rusqlite::Error::QueryReturnedNoRows {
-                    trace!("No saved settings for {path:?}");
-                } else {
-                    error!("Error reading saved settings for {path:?}: {e}");
-                }
-                DirSettings::default()
-            });
-
-        // TODO [broken columview]
-        settings.display_mode = DisplayMode::Icons;
-
-        settings
+        con.query_row(
+            "SELECT display_mode, sort_mode, sort_direction FROM dir_settings WHERE path = ?",
+            [path.as_os_str().as_bytes()],
+            |row| {
+                Ok(DirSettings {
+                    display_mode: row.get(0)?,
+                    sort: SortSettings {
+                        mode: row.get(1)?,
+                        direction: row.get(2)?,
+                    },
+                })
+            },
+        )
+        .unwrap_or_else(|e| {
+            if e == rusqlite::Error::QueryReturnedNoRows {
+                trace!("No saved settings for {path:?}");
+            } else {
+                error!("Error reading saved settings for {path:?}: {e}");
+            }
+            DirSettings::default()
+        })
     }
 
     fn store(&self, path: &Path, settings: DirSettings) {

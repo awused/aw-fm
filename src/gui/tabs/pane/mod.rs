@@ -8,6 +8,7 @@ use ahash::AHashMap;
 use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
 use gtk::gio::Icon;
 use gtk::glib::{self, Propagation, WeakRef};
+use gtk::graphene::Point;
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt, OrientableExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{
@@ -16,7 +17,7 @@ use gtk::traits::{
 };
 use gtk::{
     CustomFilter, DragSource, DropTargetAsync, EventControllerKey, FilterChange, FilterListModel,
-    GestureClick, MultiSelection, Orientation, Widget, WidgetPaintable,
+    GestureClick, ListScrollFlags, MultiSelection, Orientation, Widget, WidgetPaintable,
 };
 use once_cell::unsync::Lazy;
 
@@ -183,8 +184,8 @@ impl Pane {
 
         click.connect_pressed(move |c, _n, x, y| {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-            let alloc = c.widget().allocation();
-            if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
+            let w = c.widget();
+            if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
                 warn!("Workaround -- ignoring junk mouse event in {tab:?}");
                 return;
             }
@@ -549,8 +550,16 @@ impl Pane {
             .unwrap_or(0);
 
         match &self.view {
-            View::Icons(icons) => icons.scroll_to(pos),
-            View::Columns(details) => details.scroll_to(pos),
+            View::Icons(icons) => icons.scroll_to(pos, ListScrollFlags::empty()),
+            View::Columns(details) => details.scroll_to(pos, ListScrollFlags::empty()),
+        }
+    }
+
+    pub fn seek_to(&self, pos: u32) {
+        let flags = ListScrollFlags::FOCUS | ListScrollFlags::SELECT;
+        match &self.view {
+            View::Icons(icons) => icons.scroll_to(pos, flags),
+            View::Columns(details) => details.scroll_to(pos, flags),
         }
     }
 
@@ -567,19 +576,13 @@ impl Pane {
         let paned = match orient {
             Orientation::Horizontal if self.element.width() > MIN_PANE_RES * 2 || forced => {
                 if mapped {
-                    println!("mapped");
                     paned.position(self.element.width() / 2)
                 } else {
                     paned
                 }
             }
             Orientation::Vertical if self.element.height() > MIN_PANE_RES * 2 || forced => {
-                if mapped {
-                    println!("mapped");
-                    paned.position(self.element.height() / 2)
-                } else {
-                    paned
-                }
+                if mapped { paned.position(self.element.height() / 2) } else { paned }
             }
             Orientation::Horizontal | Orientation::Vertical => return None,
             _ => unreachable!(),
@@ -763,16 +766,16 @@ fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<
 
     click.set_button(0);
     click.connect_pressed(move |c, n, x, y| {
+        let w = c.widget();
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-        let alloc = c.widget().allocation();
-        if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
+        if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
             warn!("Workaround -- ignoring junk mouse event in {tab:?}");
             return;
         }
 
         // This part is not a workaround.
         if c.button() <= 3 && n == 1 {
-            c.widget().grab_focus();
+            w.grab_focus();
         }
 
         if deny.get() {
@@ -796,10 +799,10 @@ fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<
             if c.current_event().unwrap().triggers_context_menu() {
                 let menu = tlist.find(tab).unwrap().context_menu();
 
-                let (x, y) =
-                    gui_run(|g| c.widget().translate_coordinates(&g.window, x, y)).unwrap();
+                let point = Point::new(x as f32, y as f32);
+                let point = gui_run(|g| w.compute_point(&g.window, &point)).unwrap();
 
-                let rect = Rectangle::new(x as i32, y as i32, 1, 1);
+                let rect = Rectangle::new(point.x() as i32, point.y() as i32, 1, 1);
                 menu.set_pointing_to(Some(&rect));
                 menu.popup();
             }
@@ -827,8 +830,8 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
         let eo = b.upgrade().unwrap().bound_object().unwrap();
 
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-        let alloc = c.widget().allocation();
-        if !(x > 0.0 && (x as i32) < alloc.width() && y > 0.0 && (y as i32) < alloc.height()) {
+        let w = c.widget();
+        if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
             warn!(
                 "Workaround -- ignoring junk mouse event in {tab:?} on item {:?} {x} {y}",
                 &*eo.get().name
@@ -858,9 +861,10 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
                 t.context_menu()
             });
 
-            let (x, y) = gui_run(|g| w.translate_coordinates(&g.window, x, y)).unwrap();
+            let point = Point::new(x as f32, y as f32);
+            let point = gui_run(|g| w.compute_point(&g.window, &point)).unwrap();
 
-            let rect = Rectangle::new(x as i32, y as i32, 1, 1);
+            let rect = Rectangle::new(point.x() as i32, point.y() as i32, 1, 1);
             menu.set_pointing_to(Some(&rect));
             menu.popup();
         }
