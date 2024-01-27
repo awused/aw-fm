@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailFactoryExt};
+use gstreamer::glib::{ControlFlow, Priority};
 use gtk::gdk::Texture;
 use gtk::gio::{Cancellable, File};
 use gtk::glib::{Quark, WeakRef};
@@ -109,31 +110,48 @@ impl Thumbnailer {
         });
     }
 
-    fn finish_thumbnail(factory: SendFactory, tex: Texture, path: Arc<Path>, mtime: FileTime) {
-        gtk::glib::idle_add_once(move || {
-            Self::done_with_ticket(factory);
+    fn finish_thumbnail(
+        factory: SendFactory,
+        tex: Texture,
+        path: Arc<Path>,
+        mtime: FileTime,
+        priority: ThumbPriority,
+    ) {
+        let priority = match priority {
+            ThumbPriority::Low | ThumbPriority::Medium => Priority::LOW,
+            ThumbPriority::High => Priority::HIGH_IDLE,
+        };
 
-            let Some(obj) = EntryObject::lookup(&path) else {
-                return;
-            };
+        let mut factory = Some(factory);
+        let mut tex = Some(tex);
+        gtk::glib::idle_add_full(priority, move || {
+            Self::done_with_ticket(factory.take().unwrap());
 
-            obj.imp().update_thumbnail(tex, mtime);
+            if let Some(obj) = EntryObject::lookup(&path) {
+                obj.imp().update_thumbnail(tex.take().unwrap(), mtime);
+            }
+
+            ControlFlow::Break
         });
     }
 
     fn fail_thumbnail(factory: SendFactory, path: Arc<Path>, mtime: FileTime) {
-        gtk::glib::idle_add_once(move || {
-            Self::done_with_ticket(factory);
+        let mut factory = Some(factory);
 
-            let Some(obj) = EntryObject::lookup(&path) else {
-                return;
-            };
+        // Must be HIGH_IDLE so that these never lose a race with finish_thumbnail calls.
+        // While that should be nearly impossible, failed thumbnails should be rare.
+        gtk::glib::idle_add_full(Priority::HIGH_IDLE, move || {
+            Self::done_with_ticket(factory.take().unwrap());
 
-            obj.imp().fail_thumbnail(mtime);
+            if let Some(obj) = EntryObject::lookup(&path) {
+                obj.imp().fail_thumbnail(mtime);
+            }
+
+            ControlFlow::Break
         });
     }
 
-    fn find_next(&self) -> Option<(EntryObject, bool, SendFactory)> {
+    fn find_next(&self) -> Option<(EntryObject, bool, ThumbPriority, SendFactory)> {
         let mut pending = self.pending.borrow_mut();
 
         if pending.factories.is_empty() {
@@ -144,7 +162,12 @@ impl Thumbnailer {
             if let Some(strong) = weak.upgrade() {
                 if strong.imp().mark_thumbnail_loading(ThumbPriority::High) {
                     pending.processed += 1;
-                    return Some((strong, from_event, pending.factories.pop().unwrap()));
+                    return Some((
+                        strong,
+                        from_event,
+                        ThumbPriority::High,
+                        pending.factories.pop().unwrap(),
+                    ));
                 }
             }
         }
@@ -157,7 +180,12 @@ impl Thumbnailer {
             if let Some(strong) = weak.upgrade() {
                 if strong.imp().mark_thumbnail_loading(ThumbPriority::Medium) {
                     pending.processed += 1;
-                    return Some((strong, from_event, pending.factories.pop().unwrap()));
+                    return Some((
+                        strong,
+                        from_event,
+                        ThumbPriority::Medium,
+                        pending.factories.pop().unwrap(),
+                    ));
                 }
             }
         }
@@ -166,7 +194,12 @@ impl Thumbnailer {
             if let Some(strong) = weak.upgrade() {
                 if strong.imp().mark_thumbnail_loading(ThumbPriority::Low) {
                     pending.processed += 1;
-                    return Some((strong, from_event, pending.factories.pop().unwrap()));
+                    return Some((
+                        strong,
+                        from_event,
+                        ThumbPriority::Low,
+                        pending.factories.pop().unwrap(),
+                    ));
                 }
             }
         }
@@ -194,7 +227,7 @@ impl Thumbnailer {
             return;
         }
 
-        let Some((obj, from_event, factory)) = self.find_next() else {
+        let Some((obj, from_event, priority, factory)) = self.find_next() else {
             return;
         };
 
@@ -225,7 +258,7 @@ impl Thumbnailer {
                         Ok(tex) => {
                             // This is just too spammy outside of debugging
                             // trace!("Loaded existing thumbnail for {uri:?}");
-                            return Self::finish_thumbnail(factory, tex, path, mtime);
+                            return Self::finish_thumbnail(factory, tex, path, mtime, priority);
                         }
                         Err(e) => {
                             error!("Failed to load existing thumbnail: {e:?}");
@@ -253,7 +286,7 @@ impl Thumbnailer {
                     //     start.elapsed(),
                     //     path.file_name().unwrap_or(path.as_os_str())
                     // );
-                    Self::finish_thumbnail(factory, tex, path, mtime);
+                    Self::finish_thumbnail(factory, tex, path, mtime, priority);
                 }
                 None => Self::fail_thumbnail(factory, path, mtime),
             }
