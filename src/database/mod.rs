@@ -27,16 +27,13 @@ pub enum SplitChild {
 }
 
 impl SplitChild {
-    pub fn first_child(mut self: &Self) -> u32 {
-        while let Self::Split(s) = self {
-            self = &s.start;
+    pub const fn first_child(mut self: &Self) -> u32 {
+        loop {
+            match self {
+                Self::Split(s) => self = &s.start,
+                Self::Tab(n) => return *n,
+            }
         }
-
-        let Self::Tab(n) = self else {
-            unreachable!();
-        };
-
-        *n
     }
 }
 
