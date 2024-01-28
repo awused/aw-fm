@@ -181,8 +181,10 @@ impl TabElement {
 }
 
 mod imp {
+    use std::cell::Cell;
+
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{glib, CompositeTemplate, ListItem};
     use once_cell::unsync::OnceCell;
 
     use crate::gui::tabs::id::TabId;
@@ -197,6 +199,8 @@ mod imp {
         pub(super) spinner: TemplateChild<gtk::Spinner>,
 
         pub tab: OnceCell<TabId>,
+        // TEMPORARY WORKAROUND for broken gtk binding
+        pub list_item: Cell<Option<ListItem>>,
     }
 
     #[glib::object_subclass]

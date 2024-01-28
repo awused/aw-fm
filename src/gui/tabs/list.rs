@@ -8,7 +8,7 @@ use std::sync::Arc;
 use ahash::{AHashMap, AHashSet};
 use dirs::home_dir;
 use gtk::gio::ListStore;
-use gtk::prelude::{Cast, CastNone, ListModelExt, ListModelExtManual};
+use gtk::prelude::{Cast, CastNone, ListModelExt, ListModelExtManual, WidgetExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::traits::{BoxExt, ListItemExt};
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
@@ -89,10 +89,41 @@ impl TabsList {
         factory.connect_bind(|_factory, obj| {
             let item = obj.downcast_ref::<gtk::ListItem>().unwrap();
             let tab = item.item().unwrap().downcast::<TabElement>().unwrap();
+            // println!("binding {:?}", tab.imp().tab.get().unwrap());
+
+            if let Some(old_item) = tab.imp().list_item.take() {
+                warn!(
+                    "Workaround: unbinding already bound tab {:?} before setting parent",
+                    tab.imp().tab.get().unwrap()
+                );
+                if let Some(old_tab) = old_item.item().and_downcast::<TabElement>() {
+                    if old_tab.imp().tab.get() == tab.imp().tab.get() {
+                        old_item.set_child(None::<&TabElement>);
+                    }
+                }
+                tab.unparent();
+            }
+
+            tab.imp().list_item.set(Some(item.clone()));
+
             item.set_child(Some(&tab));
         });
         factory.connect_unbind(|_factory, obj| {
             let item = obj.downcast_ref::<gtk::ListItem>().unwrap();
+
+            let tab = item.item().unwrap().downcast::<TabElement>().unwrap();
+            // println!("unbinding {:?}", tab.imp().tab.get().unwrap());
+            if let Some(new_item) = tab.imp().list_item.take() {
+                if &new_item != item {
+                    warn!(
+                        "Unbound tab {:?} from item it was no longer bound to",
+                        tab.imp().tab.get()
+                    );
+                    tab.imp().list_item.set(Some(new_item));
+                    return;
+                }
+            }
+
             item.set_child(None::<&TabElement>);
         });
 
