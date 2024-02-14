@@ -65,11 +65,14 @@ struct ScrollPosition {
 struct PaneState {
     // If the directory has updated we just don't care, it'll be wrong.
     pub scroll_pos: Option<ScrollPosition>,
+    // Only selects if scroll_pos is some and there's a match by path, not index
+    pub select: bool,
 }
 
 impl PaneState {
     fn for_jump(jump: Option<Arc<Path>>) -> Self {
         Self {
+            select: jump.is_some(),
             scroll_pos: jump.map(|path| ScrollPosition { path, index: 0 }),
         }
     }

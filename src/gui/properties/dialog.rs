@@ -63,7 +63,7 @@ impl PropDialog {
         if files.len() + dirs.len() > 1 {
             imp.notebook.remove_page(imp.permissions_page.position().try_into().ok());
         } else {
-            let entry = files.get(0).unwrap_or_else(|| &dirs[0]);
+            let entry = files.first().unwrap_or_else(|| &dirs[0]);
             s.setup_permissions(entry);
         }
 

@@ -529,29 +529,35 @@ impl Pane {
             None
         };
 
-
-        PaneState { scroll_pos }
+        // TODO -- if one item is selected, keep that selected?
+        PaneState { scroll_pos, select: false }
     }
 
     pub fn apply_state(&mut self, state: PaneState, list: &Contents) {
         self.deny_view_click.set(false);
 
-        let pos = state
+        let (pos, select) = state
             .scroll_pos
             .and_then(|sp| {
                 if let Some(eo) = EntryObject::lookup(&sp.path) {
                     let pos = list.filtered_position_by_sorted(&eo.get());
                     debug!("Scrolling to position from element {pos:?}");
-                    pos
+                    pos.map(|p| (p, state.select))
                 } else {
-                    Some(sp.index)
+                    Some((sp.index, false))
                 }
             })
-            .unwrap_or(0);
+            .unwrap_or((0, false));
+
+        let flags = if select {
+            ListScrollFlags::FOCUS | ListScrollFlags::SELECT
+        } else {
+            ListScrollFlags::empty()
+        };
 
         match &self.view {
-            View::Icons(icons) => icons.scroll_to(pos, ListScrollFlags::empty()),
-            View::Columns(details) => details.scroll_to(pos, ListScrollFlags::empty()),
+            View::Icons(icons) => icons.scroll_to(pos, flags),
+            View::Columns(details) => details.scroll_to(pos, flags),
         }
     }
 
