@@ -132,6 +132,8 @@ pub struct Config {
     pub max_thumbnailers: u8,
     #[serde(default)]
     pub background_thumbnailers: u8,
+    #[serde(default)]
+    pub force_small_thumbnails: bool,
 }
 
 // Serde seems broken with OsString for some reason

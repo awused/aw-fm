@@ -5,7 +5,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use ahash::AHashMap;
-use gtk::gdk::ModifierType;
+use gnome_desktop::DesktopThumbnailSize;
+use gtk::gdk::{ModifierType, Surface};
 use gtk::glib::{ControlFlow, SourceId, WeakRef};
 use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::*;
@@ -70,13 +71,13 @@ fn tabs_run<R, F: FnOnce(&mut TabsList) -> R>(f: F) -> R {
     })
 }
 
-#[derive(Debug, Copy, Clone, Default)]
-struct WindowState {
-    maximized: bool,
-    fullscreen: bool,
-    // This stores the size of the window when it isn't fullscreen or maximized.
-    memorized_size: (u32, u32),
-}
+// #[derive(Debug, Copy, Clone, Default)]
+// struct WindowState {
+//     maximized: bool,
+//     fullscreen: bool,
+//     // This stores the size of the window when it isn't fullscreen or maximized.
+//     memorized_size: (u32, u32),
+// }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThumbPriority {
@@ -91,11 +92,14 @@ pub fn queue_thumb(weak: WeakRef<EntryObject>, p: ThumbPriority, from_event: boo
     gui_run(|g| g.thumbnailer.queue(weak, p, from_event));
 }
 
+pub fn thumb_size() -> DesktopThumbnailSize {
+    gui_run(|g| g.thumbnailer.size.get())
+}
 
 #[derive(Debug)]
 struct Gui {
     window: MainWindow,
-    win_state: Cell<WindowState>,
+    // win_state: Cell<WindowState>,
     menu: OnceCell<menu::GuiMenu>,
 
     // Tabs can recursively look for each other.
@@ -209,7 +213,7 @@ impl Gui {
 
         let rc = Rc::new(Self {
             window,
-            win_state: Cell::default(),
+            // win_state: Cell::default(),
             menu: OnceCell::default(),
 
             tabs: tabs.into(),
@@ -290,37 +294,59 @@ impl Gui {
             glib::Propagation::Proceed
         });
 
-        let g = self.clone();
-        self.window.connect_maximized_notify(move |_w| {
-            g.window_state_changed();
-        });
-
-        let g = self.clone();
-        self.window.connect_fullscreened_notify(move |_w| {
-            g.window_state_changed();
-        });
-
+        // let g = self.clone();
+        // self.window.connect_maximized_notify(move |_w| {
+        //     g.window_state_changed();
+        // });
+        //
+        // let g = self.clone();
+        // self.window.connect_fullscreened_notify(move |_w| {
+        //     g.window_state_changed();
+        // });
 
         self.window.set_visible(true);
-    }
 
-    fn window_state_changed(self: &Rc<Self>) {
-        let mut s = self.win_state.get();
+        if !CONFIG.force_small_thumbnails {
+            let g = self.clone();
+            let check_dpi = move |surface: &Surface| {
+                let scale = surface.scale();
+                let size = if scale <= 1.0
+                    && g.thumbnailer.size.get() != DesktopThumbnailSize::Normal
+                {
+                    info!("Returned to regular DPI, using normal thumbnails");
+                    DesktopThumbnailSize::Normal
+                } else if scale > 1.0 && g.thumbnailer.size.get() != DesktopThumbnailSize::Large {
+                    info!("Detected high DPI, using large thumbnails");
+                    DesktopThumbnailSize::Large
+                } else {
+                    return;
+                };
+                g.thumbnailer.size.set(size);
+                error!("TODO -- invalidate old thumbnails");
+            };
 
-        let fullscreen = self.window.is_fullscreen();
-
-        let maximized = self.window.is_maximized();
-
-        // These callbacks run after the state has changed.
-        if !s.maximized && !s.fullscreen {
-            s.memorized_size =
-                (self.window.width().unsigned_abs(), self.window.height().unsigned_abs());
+            check_dpi(&self.window.native().unwrap().surface());
+            self.window.native().unwrap().surface().connect_scale_notify(check_dpi);
         }
-
-        s.maximized = maximized;
-        s.fullscreen = fullscreen;
-        self.win_state.set(s);
     }
+
+    // fn window_state_changed(self: &Rc<Self>) {
+    //     let mut s = self.win_state.get();
+    //
+    //     let fullscreen = self.window.is_fullscreen();
+    //
+    //     let maximized = self.window.is_maximized();
+    //
+    //     // These callbacks run after the state has changed.
+    //     if !s.maximized && !s.fullscreen {
+    //         s.memorized_size =
+    //             (self.window.width().unsigned_abs(), self.window.height().unsigned_abs());
+    //     }
+    //
+    //     s.maximized = maximized;
+    //     s.fullscreen = fullscreen;
+    //     self.win_state.set(s);
+    // }
 
     fn handle_update(self: &Rc<Self>, gu: GuiAction) -> ControlFlow {
         use crate::com::GuiAction::*;

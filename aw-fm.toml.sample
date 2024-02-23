@@ -239,6 +239,14 @@ max_thumbnailers = 6
 # No effect if larger than max_thumbnailers.
 background_thumbnailers = 1
 
+# Whether or not to force the use of normal 128px thumbnails even at high DPIs.
+#
+# When false, aw-fm will generate and use 256px thumbnails when the DPI scaling is above 1.
+# Setting this to true can save memory and storage space but at the cost of blurrier thumbnails.
+#
+# No effect if you do not have any high DPI monitors or don't otherwise trigger UI scaling.
+force_small_thumbnails = false
+
 
 # ------------------------------------------------------------------------------------------------
 

@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use ahash::AHashMap;
 use chrono::{Local, TimeZone};
+use gnome_desktop::DesktopThumbnailSize;
 use gtk::gdk::Texture;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
@@ -325,18 +326,18 @@ impl Entry {
 pub enum Thumbnail {
     Nothing,
     Unloaded,
-    Loading,
-    Loaded(Texture),
-    Outdated(Texture, bool),
+    Loading(DesktopThumbnailSize),
+    Loaded(Texture, DesktopThumbnailSize),
+    Outdated(Texture, Option<DesktopThumbnailSize>),
     Failed,
 }
 
 impl Thumbnail {
-    const fn needs_load(&self) -> bool {
+    fn needs_load(&self, size: DesktopThumbnailSize) -> bool {
         match self {
-            Self::Nothing | Self::Loaded(_) | Self::Failed | Self::Loading => false,
-            Self::Unloaded => true,
-            Self::Outdated(_, loading) => !*loading,
+            Self::Loading(sz) | Self::Loaded(_, sz) | Self::Outdated(_, Some(sz)) => *sz != size,
+            Self::Nothing | Self::Failed => false,
+            Self::Unloaded | Self::Outdated(_, None) => true,
         }
     }
 }
@@ -346,6 +347,7 @@ mod internal {
     use std::cell::{Ref, RefCell};
     use std::sync::Arc;
 
+    use gnome_desktop::DesktopThumbnailSize;
     use gtk::gdk::Texture;
     use gtk::glib;
     use gtk::glib::subclass::Signal;
@@ -355,6 +357,7 @@ mod internal {
 
     use super::{FileTime, ThumbPriority, Thumbnail, ALL_ENTRY_OBJECTS};
     use crate::com::EntryKind;
+    use crate::gui::thumb_size;
 
     // (bound, mapped)
     #[derive(Debug, Default, Clone)]
@@ -455,10 +458,10 @@ mod internal {
                     let new_thumb = match &inner.thumbnail {
                         Thumbnail::Nothing
                         | Thumbnail::Unloaded
-                        | Thumbnail::Loading
+                        | Thumbnail::Loading(_)
                         | Thumbnail::Failed => Thumbnail::Unloaded,
-                        Thumbnail::Loaded(old) | Thumbnail::Outdated(old, _) => {
-                            Thumbnail::Outdated(old.clone(), false)
+                        Thumbnail::Loaded(old, _) | Thumbnail::Outdated(old, _) => {
+                            Thumbnail::Outdated(old.clone(), None)
                         }
                     };
 
@@ -490,12 +493,12 @@ mod internal {
             Ref::map(b, |o| &o.as_ref().unwrap().entry)
         }
 
-        // Marks the thumbnail as loading if it matches the given priority.
-        pub fn mark_thumbnail_loading(&self, p: ThumbPriority) -> bool {
+        // Marks the thumbnail as loading if it matches the given priority and size.
+        pub fn mark_thumbnail_loading(&self, p: ThumbPriority, size: DesktopThumbnailSize) -> bool {
             let mut b = self.0.borrow_mut();
             let inner = &mut b.as_mut().unwrap();
 
-            if !inner.thumbnail.needs_load() {
+            if !inner.thumbnail.needs_load(size) {
                 return false;
             }
 
@@ -503,10 +506,12 @@ mod internal {
                 match &mut inner.thumbnail {
                     Thumbnail::Nothing
                     | Thumbnail::Unloaded
-                    | Thumbnail::Loading
-                    | Thumbnail::Loaded(_)
-                    | Thumbnail::Failed => inner.thumbnail = Thumbnail::Loading,
-                    Thumbnail::Outdated(_, loading) => *loading = true,
+                    | Thumbnail::Loading(..)
+                    | Thumbnail::Failed => inner.thumbnail = Thumbnail::Loading(size),
+                    Thumbnail::Loaded(tex, _) => {
+                        inner.thumbnail = Thumbnail::Outdated(tex.clone(), Some(size))
+                    }
+                    Thumbnail::Outdated(_, loading) => *loading = Some(size),
                 }
                 true
             } else {
@@ -525,13 +530,31 @@ mod internal {
             w.1 = w.1.checked_add_signed(mapped).unwrap();
 
             let new_p = w.priority();
-            if inner.thumbnail.needs_load() && new_p != old_p { Some(new_p) } else { None }
+            if new_p != old_p && inner.thumbnail.needs_load(thumb_size()) {
+                Some(new_p)
+            } else {
+                None
+            }
+        }
+
+        pub(super) fn needs_reload_for_size(
+            &self,
+            size: DesktopThumbnailSize,
+        ) -> Option<ThumbPriority> {
+            let b = self.0.borrow();
+            let inner = &b.as_ref().unwrap();
+
+            if inner.thumbnail.needs_load(size) {
+                Some(inner.widgets.priority())
+            } else {
+                None
+            }
         }
 
         // There is a minute risk of a race where we're loading a thumbnail for a file twice at
         // once and the first one finishes second. The risk is so low and the outcome so minor it
         // just isn't worth addressing.
-        pub fn update_thumbnail(&self, tex: Texture, mtime: FileTime) {
+        pub fn update_thumbnail(&self, tex: Texture, mtime: FileTime, size: DesktopThumbnailSize) {
             let mut b = self.0.borrow_mut();
             let inner = &mut b.as_mut().unwrap();
             let thumb = &mut inner.thumbnail;
@@ -543,12 +566,22 @@ mod internal {
             inner.updated = false;
 
             match thumb {
-                Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => {}
-                Thumbnail::Loading | Thumbnail::Loaded(_) | Thumbnail::Outdated(..) => {
-                    *thumb = Thumbnail::Loaded(tex);
+                Thumbnail::Loaded(_, sz) if *sz != size => {
+                    *thumb = Thumbnail::Loaded(tex, size);
                     drop(b);
                     self.obj().emit_by_name::<()>("update", &[]);
                 }
+                Thumbnail::Loading(sz) | Thumbnail::Outdated(_, Some(sz)) if *sz == size => {
+                    *thumb = Thumbnail::Loaded(tex, size);
+                    drop(b);
+                    self.obj().emit_by_name::<()>("update", &[]);
+                }
+                Thumbnail::Nothing
+                | Thumbnail::Unloaded
+                | Thumbnail::Failed
+                | Thumbnail::Loading(..)
+                | Thumbnail::Loaded(..)
+                | Thumbnail::Outdated(..) => {}
             }
         }
 
@@ -565,8 +598,8 @@ mod internal {
 
             match thumb {
                 Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => (),
-                Thumbnail::Loading => *thumb = Thumbnail::Failed,
-                Thumbnail::Outdated(..) | Thumbnail::Loaded(_) => {
+                Thumbnail::Loading(_) => *thumb = Thumbnail::Failed,
+                Thumbnail::Outdated(..) | Thumbnail::Loaded(..) => {
                     *thumb = Thumbnail::Failed;
                     info!(
                         "Marking previously valid thumbnail as failed for: {:?}",
@@ -582,7 +615,7 @@ mod internal {
         pub fn thumbnail(&self) -> Option<Texture> {
             let b = self.0.borrow();
             let thumb = &b.as_ref().unwrap().thumbnail;
-            if let Thumbnail::Loaded(tex) = thumb {
+            if let Thumbnail::Loaded(tex, _) = thumb {
                 Some(tex.clone())
             } else if let Thumbnail::Outdated(tex, _) = thumb {
                 Some(tex.clone())
@@ -592,10 +625,13 @@ mod internal {
         }
 
         // Returns true if it's appropriate to synchronously thumbnail this file.
+        // This does not consider thumbnail sizes right now as it's unlikely to matter.
+        // The only case when it would really matter is when we have a Loaded thumbnail of the
+        // wrong size.
         pub fn can_sync_thumbnail(&self) -> bool {
             match self.0.borrow().as_ref().unwrap().thumbnail {
-                Thumbnail::Nothing | Thumbnail::Loaded(_) | Thumbnail::Failed => false,
-                Thumbnail::Unloaded | Thumbnail::Loading => true,
+                Thumbnail::Nothing | Thumbnail::Loaded(..) | Thumbnail::Failed => false,
+                Thumbnail::Unloaded | Thumbnail::Loading(_) => true,
                 Thumbnail::Outdated(..) => {
                     // This is a really niche edge case, but really it should be handled.
                     true

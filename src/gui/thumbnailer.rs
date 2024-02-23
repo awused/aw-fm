@@ -1,9 +1,9 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
 
-use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailFactoryExt};
+use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailFactoryExt, DesktopThumbnailSize};
 use gstreamer::glib::{ControlFlow, Priority};
 use gtk::gdk::Texture;
 use gtk::gio::{Cancellable, File};
@@ -12,7 +12,7 @@ use gtk::prelude::FileExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
-use self::send::SendFactory;
+use self::send::{Factories, SendFactory};
 use super::{gui_run, ThumbPriority};
 use crate::com::{EntryObject, FileTime};
 use crate::config::CONFIG;
@@ -44,11 +44,14 @@ pub struct Thumbnailer {
     // Did test a fully glib-async version that uses GTasks under the hood, but the performance
     // wasn't any better and was sometimes much worse.
     pool: ThreadPool,
+    // The current thumbnail size, normally calculated from the scale of the main window's surface.
+    // It's fine if there's a properties window on a higher DPI monitor that is a bit blurry.
+    pub size: Cell<DesktopThumbnailSize>,
 
     high: u16,
     low: u16,
 
-    sync_factory: Option<DesktopThumbnailFactory>,
+    sync_factory: Option<Factories>,
 }
 
 impl Thumbnailer {
@@ -69,6 +72,8 @@ impl Thumbnailer {
         Self {
             pending: pending.into(),
             pool,
+            // TODO[thumbsize] read from surface size
+            size: Cell::new(DesktopThumbnailSize::Normal),
             high,
             low,
             sync_factory,
@@ -116,6 +121,7 @@ impl Thumbnailer {
         path: Arc<Path>,
         mtime: FileTime,
         priority: ThumbPriority,
+        size: DesktopThumbnailSize,
     ) {
         let priority = match priority {
             ThumbPriority::Low | ThumbPriority::Medium => Priority::LOW,
@@ -128,7 +134,7 @@ impl Thumbnailer {
             Self::done_with_ticket(factory.take().unwrap());
 
             if let Some(obj) = EntryObject::lookup(&path) {
-                obj.imp().update_thumbnail(tex.take().unwrap(), mtime);
+                obj.imp().update_thumbnail(tex.take().unwrap(), mtime, size);
             }
 
             ControlFlow::Break
@@ -151,21 +157,22 @@ impl Thumbnailer {
         });
     }
 
-    fn find_next(&self) -> Option<(EntryObject, bool, ThumbPriority, SendFactory)> {
+    fn find_next(&self) -> Option<(EntryObject, ThumbPriority, bool, SendFactory)> {
         let mut pending = self.pending.borrow_mut();
 
         if pending.factories.is_empty() {
             return None;
         }
+        let size = self.size.get();
 
         while let Some((weak, from_event)) = pending.high_priority.pop_front() {
             if let Some(strong) = weak.upgrade() {
-                if strong.imp().mark_thumbnail_loading(ThumbPriority::High) {
+                if strong.imp().mark_thumbnail_loading(ThumbPriority::High, size) {
                     pending.processed += 1;
                     return Some((
                         strong,
-                        from_event,
                         ThumbPriority::High,
+                        from_event,
                         pending.factories.pop().unwrap(),
                     ));
                 }
@@ -178,12 +185,12 @@ impl Thumbnailer {
 
         while let Some((weak, from_event)) = pending.med_priority.pop_front() {
             if let Some(strong) = weak.upgrade() {
-                if strong.imp().mark_thumbnail_loading(ThumbPriority::Medium) {
+                if strong.imp().mark_thumbnail_loading(ThumbPriority::Medium, size) {
                     pending.processed += 1;
                     return Some((
                         strong,
-                        from_event,
                         ThumbPriority::Medium,
+                        from_event,
                         pending.factories.pop().unwrap(),
                     ));
                 }
@@ -192,12 +199,12 @@ impl Thumbnailer {
 
         while let Some((weak, from_event)) = pending.low_priority.pop() {
             if let Some(strong) = weak.upgrade() {
-                if strong.imp().mark_thumbnail_loading(ThumbPriority::Low) {
+                if strong.imp().mark_thumbnail_loading(ThumbPriority::Low, size) {
                     pending.processed += 1;
                     return Some((
                         strong,
-                        from_event,
                         ThumbPriority::Low,
+                        from_event,
                         pending.factories.pop().unwrap(),
                     ));
                 }
@@ -227,7 +234,7 @@ impl Thumbnailer {
             return;
         }
 
-        let Some((obj, from_event, priority, factory)) = self.find_next() else {
+        let Some((obj, priority, from_event, factory)) = self.find_next() else {
             return;
         };
 
@@ -237,6 +244,7 @@ impl Thumbnailer {
         // It only cares about seconds
         let mtime = obj.get().mtime;
         let mime_type = entry.mime;
+        let size = self.size.get();
 
         // let start = Instant::now();
 
@@ -252,13 +260,15 @@ impl Thumbnailer {
             //
             // Also can't trust mtime to make sense according to wall time or UTC time.
             if !from_event {
-                if let Some(existing) = factory.lookup(&uri, mtime.sec) {
+                if let Some(existing) = factory.lookup(size, &uri, mtime.sec) {
                     let gfile = gtk::gio::File::for_path(existing);
                     match Texture::from_file(&gfile) {
                         Ok(tex) => {
                             // This is just too spammy outside of debugging
                             // trace!("Loaded existing thumbnail for {uri:?}");
-                            return Self::finish_thumbnail(factory, tex, path, mtime, priority);
+                            return Self::finish_thumbnail(
+                                factory, tex, path, mtime, priority, size,
+                            );
                         }
                         Err(e) => {
                             error!("Failed to load existing thumbnail: {e:?}");
@@ -269,16 +279,17 @@ impl Thumbnailer {
             }
             // aw-fm doesn't write failed thumbnails for operations from events,
             // so this is most likely legitimate.
-            if factory.has_failed(&uri, mtime.sec) {
+            if factory.has_failed(size, &uri, mtime.sec) {
                 return Self::fail_thumbnail(factory, path, mtime);
             }
 
-            if !factory.can_thumbnail(&uri, mime_type, mtime.sec) {
+            if !factory.can_thumbnail(size, &uri, mime_type, mtime.sec) {
                 // trace!("Marking thumbnail as failed, though it wasn't attempted.");
                 return Self::fail_thumbnail(factory, path, mtime);
             }
 
-            match factory.generate_and_save_thumbnail(&uri, mime_type, mtime.sec, from_event) {
+            match factory.generate_and_save_thumbnail(size, &uri, mime_type, mtime.sec, from_event)
+            {
                 Some(tex) => {
                     // Spammy
                     // trace!(
@@ -286,7 +297,7 @@ impl Thumbnailer {
                     //     start.elapsed(),
                     //     path.file_name().unwrap_or(path.as_os_str())
                     // );
-                    Self::finish_thumbnail(factory, tex, path, mtime, priority);
+                    Self::finish_thumbnail(factory, tex, path, mtime, priority, size);
                 }
                 None => Self::fail_thumbnail(factory, path, mtime),
             }
@@ -303,6 +314,8 @@ impl Thumbnailer {
         let Some(factory) = &self.sync_factory else {
             return None;
         };
+
+        let factory = factory.get(self.size.get());
 
         info!("Synchronously loading a thumbnail for {p:?}");
 
@@ -342,9 +355,23 @@ mod send {
     use gtk::gio::glib::GString;
     use gtk::glib::ffi::{g_thread_self, GThread};
 
+    #[derive(Debug, Clone)]
+    pub(super) struct Factories(DesktopThumbnailFactory, DesktopThumbnailFactory);
+
+    impl Factories {
+        pub(super) const fn get(&self, size: DesktopThumbnailSize) -> &DesktopThumbnailFactory {
+            match size {
+                DesktopThumbnailSize::Normal => &self.0,
+                DesktopThumbnailSize::Large
+                | DesktopThumbnailSize::Xlarge
+                | DesktopThumbnailSize::Xxlarge => &self.1,
+                _ => unreachable!(),
+            }
+        }
+    }
 
     #[derive(Debug)]
-    pub(super) struct SendFactory(DesktopThumbnailFactory, *mut GThread);
+    pub(super) struct SendFactory(Factories, *mut GThread);
 
     // SAFETY: DesktopThumbnailFactory is, itself, thread safe. The problem is non-atomic
     // refcounting. By using drop() we ensure that the object is dropped from the main thread.
@@ -377,9 +404,13 @@ mod send {
     }
 
     impl SendFactory {
-        pub fn make(n: u16) -> (Option<DesktopThumbnailFactory>, Vec<Self>) {
+        pub fn make(n: u16) -> (Option<Factories>, Vec<Self>) {
             if n > 0 {
-                let f = DesktopThumbnailFactory::new(DesktopThumbnailSize::Normal);
+                let f = Factories(
+                    DesktopThumbnailFactory::new(DesktopThumbnailSize::Normal),
+                    DesktopThumbnailFactory::new(DesktopThumbnailSize::Large),
+                );
+
                 let mut factories = Vec::with_capacity(n as usize);
 
                 let current_thread = unsafe { g_thread_self() };
@@ -394,16 +425,27 @@ mod send {
             }
         }
 
-        pub fn lookup(&self, uri: &str, mtime_sec: u64) -> Option<GString> {
-            self.0.lookup(uri, mtime_sec as i64)
+        pub fn lookup(
+            &self,
+            size: DesktopThumbnailSize,
+            uri: &str,
+            mtime_sec: u64,
+        ) -> Option<GString> {
+            self.0.get(size).lookup(uri, mtime_sec as i64)
         }
 
-        pub fn has_failed(&self, uri: &str, mtime_sec: u64) -> bool {
-            self.0.has_valid_failed_thumbnail(uri, mtime_sec as i64)
+        pub fn has_failed(&self, size: DesktopThumbnailSize, uri: &str, mtime_sec: u64) -> bool {
+            self.0.get(size).has_valid_failed_thumbnail(uri, mtime_sec as i64)
         }
 
-        pub fn can_thumbnail(&self, uri: &str, mime_type: &str, mtime_sec: u64) -> bool {
-            self.0.can_thumbnail(uri, mime_type, mtime_sec as i64)
+        pub fn can_thumbnail(
+            &self,
+            size: DesktopThumbnailSize,
+            uri: &str,
+            mime_type: &str,
+            mtime_sec: u64,
+        ) -> bool {
+            self.0.get(size).can_thumbnail(uri, mime_type, mtime_sec as i64)
         }
 
         // It would be faster for the UI to set the thumbnail first and then go to save it.
@@ -411,12 +453,19 @@ mod send {
         // fail to save a thumbnail after setting it, it's just not worth it.
         pub fn generate_and_save_thumbnail(
             &self,
+            size: DesktopThumbnailSize,
             uri: &str,
             mime_type: &str,
             mtime_sec: u64,
             from_event: bool,
         ) -> Option<Texture> {
-            super::generate_and_save_thumbnail(&self.0, uri, mime_type, mtime_sec, from_event)
+            super::generate_and_save_thumbnail(
+                &self.0.get(size),
+                uri,
+                mime_type,
+                mtime_sec,
+                from_event,
+            )
         }
     }
 }
