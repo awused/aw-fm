@@ -321,8 +321,9 @@ impl Gui {
                 } else {
                     return;
                 };
+
                 g.thumbnailer.size.set(size);
-                error!("TODO -- invalidate old thumbnails");
+                EntryObject::change_thumb_size(size);
             };
 
             check_dpi(&self.window.native().unwrap().surface());

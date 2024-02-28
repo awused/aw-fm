@@ -752,9 +752,8 @@ impl EntryObject {
         if let Some(p) = p {
             // Very spammy
             // trace!(
-            //     "Queuing thumbnail for {:?} {:?}: from_event {from_event}",
+            //     "Queuing thumbnail for {:?} {p:?}: from_event {from_event}",
             //     self.get().abs_path,
-            //     p
             // );
             queue_thumb(self.downgrade(), p, from_event)
         }
@@ -777,6 +776,21 @@ impl EntryObject {
             self.imp().change_widgets(0, if mapped { 1 } else { -1 }),
             self.imp().was_updated(),
         );
+    }
+
+    pub fn change_thumb_size(size: DesktopThumbnailSize) {
+        ALL_ENTRY_OBJECTS.with_borrow(|m| {
+            // WeakRef::upgrade should always succeed here
+            m.values().filter_map(WeakRef::upgrade).for_each(|eo| {
+                if eo.imp().needs_reload_for_size(size).is_some() {
+                    info!(
+                        "Invalidating thumbnail for {:?} after thumbnail size change",
+                        eo.get().abs_path
+                    );
+                }
+                eo.queue_thumb(eo.imp().needs_reload_for_size(size), eo.imp().was_updated());
+            })
+        });
     }
 
     pub fn icon(&self) -> Icon {

@@ -1169,7 +1169,7 @@ impl Tab {
     // We need to save the state before we start mucking around with visibility
     pub fn start_hide(&mut self) {
         if !self.visible() {
-            return error!("Pane {:?} already hidden", self.id);
+            return warn!("Pane {:?} already hidden", self.id);
         }
 
         self.set_inactive();

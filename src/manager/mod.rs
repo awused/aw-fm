@@ -110,7 +110,6 @@ impl Manager {
         }
     }
 
-    // async fn run(mut self, mut receiver: UnboundedReceiver<ManagerAction>) -> TempDir {
     async fn run(mut self, mut receiver: UnboundedReceiver<ManagerAction>) {
         'main: loop {
             select! {
@@ -146,9 +145,6 @@ impl Manager {
         }
 
         closing::close();
-        // if let Err(e) = timeout(Duration::from_secs(600), self.join()).await {
-        //     error!("Failed to exit cleanly in {e}, something is probably stuck.");
-        // }
     }
 
     async fn handle_action(&mut self, ma: ManagerAction) {
