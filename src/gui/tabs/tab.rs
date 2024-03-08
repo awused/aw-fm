@@ -1161,7 +1161,16 @@ impl Tab {
         self.element.set_pane_visible(true);
 
         self.load(left, right);
-        self.apply_pane_state();
+
+        let id = self.id();
+        glib::idle_add_local_once(move || {
+            // Workaround a GTK bug by slightly delaying the scroll_to call
+            tabs_run(|tlist| {
+                if let Some(tab) = tlist.find_mut(id) {
+                    tab.apply_pane_state()
+                }
+            })
+        });
     }
 
     // TODO -- switching away from a tab group is a two-step process
