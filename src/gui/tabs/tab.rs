@@ -12,7 +12,7 @@ use ahash::{AHashMap, AHashSet};
 use gtk::gio::Cancellable;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{glib, AlertDialog, MultiSelection, Orientation, PopoverMenu, Widget};
+use gtk::{glib, AlertDialog, Bitset, MultiSelection, Orientation, PopoverMenu, Widget};
 use tokio::sync::oneshot;
 use TabPane as TP;
 
@@ -1655,7 +1655,9 @@ impl Tab {
         // TODO [incremental] -- if incremental filtering, must disable it now.
         let mut scroll_target = None;
 
-        // The first one may not be the earliest by sort.
+        let select_set = Bitset::new_empty();
+
+        // The first completed operation may not be the earliest by sort.
         // TODO [efficiency] -- for small new_paths and large n_items, it'd be more efficient to do
         // EntryObject::lookup and find position by sorted.
         for i in 0..selection.n_items() {
@@ -1678,8 +1680,10 @@ impl Tab {
                 });
             }
 
-            selection.select_item(i, false);
+            select_set.add(i);
         }
+
+        selection.set_selection(&select_set, &select_set);
 
         let Some(pos) = scroll_target else {
             info!("Could not find first new item to scroll to, giving up, in {:?}", self.id);
