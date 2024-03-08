@@ -5,12 +5,8 @@ use ahash::AHashSet;
 use gtk::gdk::Display;
 use gtk::gio::{AppInfo, AppInfoCreateFlags, File, ListStore};
 use gtk::glib::{shell_parse_argv, shell_unquote};
-use gtk::prelude::{
-    AppInfoExt, Cast, CastNone, DisplayExt, EditableExt, GdkAppLaunchContextExt, ListModelExt,
-    ObjectExt,
-};
+use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{ButtonExt, CheckButtonExt, GtkWindowExt, ListItemExt, WidgetExt};
 use gtk::{glib, SingleSelection};
 
 use super::application::Application;

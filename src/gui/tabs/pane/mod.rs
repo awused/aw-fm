@@ -9,12 +9,8 @@ use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
 use gtk::gio::Icon;
 use gtk::glib::{self, Propagation, WeakRef};
 use gtk::graphene::Point;
-use gtk::prelude::{Cast, CastNone, IsA, ObjectExt, OrientableExt};
+use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{
-    AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, GestureExt,
-    GestureSingleExt, PopoverExt, WidgetExt,
-};
 use gtk::{
     CustomFilter, DragSource, DropTargetAsync, EventControllerKey, FilterChange, FilterListModel,
     GestureClick, ListScrollFlags, MultiSelection, Orientation, Widget, WidgetPaintable,

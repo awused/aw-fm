@@ -9,14 +9,10 @@ use std::time::Duration;
 use ahash::AHashMap;
 use dirs::home_dir;
 use gtk::gdk::{Key, ModifierType};
-use gtk::glib::clone::Downgrade;
 use gtk::glib::{self, Propagation};
 use gtk::pango::{EllipsizeMode, WrapMode};
-use gtk::prelude::{ButtonExt, Cast, IsA};
+use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{
-    BoxExt, EditableExt, EntryExt, EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt,
-};
 use gtk::{Orientation, Widget, Window};
 
 use super::properties::dialog::PropDialog;

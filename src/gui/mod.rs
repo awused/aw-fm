@@ -326,8 +326,12 @@ impl Gui {
                 EntryObject::change_thumb_size(size);
             };
 
-            check_dpi(&self.window.native().unwrap().surface());
-            self.window.native().unwrap().surface().connect_scale_notify(check_dpi);
+            if let Some(suf) = self.window.native().unwrap().surface() {
+                check_dpi(&suf);
+                suf.connect_scale_notify(check_dpi);
+            } else {
+                error!("Could not check DPI when window was set as visible");
+            }
         }
     }
 

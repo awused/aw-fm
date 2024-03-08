@@ -3,8 +3,7 @@ use std::time::Instant;
 
 use gtk::gio::{ListModel, ListStore};
 use gtk::glib::{self, ControlFlow, Object};
-use gtk::prelude::{Cast, IsA, ListModelExt, ListModelExtManual};
-use gtk::traits::SelectionModelExt;
+use gtk::prelude::*;
 use gtk::{CustomFilter, FilterListModel, MultiSelection};
 
 use super::PartiallyAppliedUpdate;

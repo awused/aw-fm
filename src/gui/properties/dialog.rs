@@ -13,9 +13,8 @@ use gstreamer_pbutils::prelude::DiscovererStreamInfoExt;
 use gstreamer_pbutils::{Discoverer, DiscovererInfo, DiscovererStreamInfo};
 use gtk::gio::Icon;
 use gtk::glib::{self, Object};
-use gtk::prelude::{CheckButtonExt, FileExt, IsA, ObjectExt};
+use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{ButtonExt, GtkWindowExt, WidgetExt};
 use num_format::{Locale, ToFormattedString};
 use users::{get_group_by_gid, get_user_by_uid};
 

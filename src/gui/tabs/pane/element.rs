@@ -3,11 +3,8 @@ use std::ops::Deref;
 
 use gtk::gdk::{DragAction, Key, ModifierType};
 use gtk::glib::Propagation;
-use gtk::prelude::{Cast, CastNone, ListModelExt, ObjectExt};
+use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{
-    EditableExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
-};
 use gtk::{glib, DropTargetAsync, EventControllerFocus, GestureClick, MultiSelection};
 use strum_macros::{AsRefStr, EnumString};
 use StackChild::*;
