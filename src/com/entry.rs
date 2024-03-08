@@ -566,23 +566,19 @@ mod internal {
             inner.updated = false;
 
             match thumb {
-                Thumbnail::Loaded(_, sz) if *sz != size => {
-                    *thumb = Thumbnail::Loaded(tex, size);
-                    drop(b);
-                    self.obj().emit_by_name::<()>("update", &[]);
-                }
-                Thumbnail::Loading(sz) | Thumbnail::Outdated(_, Some(sz)) if *sz == size => {
-                    *thumb = Thumbnail::Loaded(tex, size);
-                    drop(b);
-                    self.obj().emit_by_name::<()>("update", &[]);
-                }
+                Thumbnail::Loaded(_, sz) if *sz != size => {}
+                Thumbnail::Loading(sz) | Thumbnail::Outdated(_, Some(sz)) if *sz == size => {}
                 Thumbnail::Nothing
                 | Thumbnail::Unloaded
                 | Thumbnail::Failed
                 | Thumbnail::Loading(..)
                 | Thumbnail::Loaded(..)
-                | Thumbnail::Outdated(..) => {}
+                | Thumbnail::Outdated(..) => return,
             }
+
+            *thumb = Thumbnail::Loaded(tex, size);
+            drop(b);
+            self.obj().emit_by_name::<()>("update", &[]);
         }
 
         pub fn fail_thumbnail(&self, mtime: FileTime) {

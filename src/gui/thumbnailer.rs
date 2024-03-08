@@ -1,7 +1,8 @@
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{btree_map, BTreeMap, VecDeque};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailFactoryExt, DesktopThumbnailSize};
 use gstreamer::glib::{ControlFlow, Priority};
@@ -19,6 +20,8 @@ use crate::config::CONFIG;
 use crate::{closing, handle_panic};
 
 
+type Ongoing = (Arc<AtomicBool>, Arc<Mutex<()>>);
+
 #[derive(Debug, Default)]
 struct PendingThumbs {
     // Currently visible.
@@ -31,11 +34,11 @@ struct PendingThumbs {
     // It's marginally more efficient (2-3 seconds worth over 100k items) to not clone and drop
     // these, also avoids doing manual math on the tickets.
     factories: Vec<SendFactory>,
-    // TODO -- Save a map lookup?
-    // ongoing: Vec<(Arc<Path>, WeakRef<EntryObject>)>,
+    // This is responsible for cancelling saving thumbnails from earlier events.
+    // Also ensures we never try to write the same thumbnail twice at once.
+    ongoing: BTreeMap<Arc<Path>, Ongoing>,
     processed: usize,
 }
-
 
 #[derive(Debug)]
 pub struct Thumbnailer {
@@ -52,6 +55,60 @@ pub struct Thumbnailer {
     low: u16,
 
     sync_factory: Option<Factories>,
+}
+
+#[derive(Debug)]
+struct Job {
+    path: Arc<Path>,
+    priority: ThumbPriority,
+    from_event: bool,
+    mime: &'static str,
+    mtime: FileTime,
+    size: DesktopThumbnailSize,
+    factory: SendFactory,
+    // Ensure last-event-wins semantics without needing to take a lock in the main thread
+    cancel: Arc<AtomicBool>,
+    // We shouldn't have two jobs working on the same thumbnail at once
+    lock: Arc<Mutex<()>>,
+}
+
+
+impl PendingThumbs {
+    fn prep_job(
+        &mut self,
+        obj: EntryObject,
+        priority: ThumbPriority,
+        from_event: bool,
+        factory: SendFactory,
+        size: DesktopThumbnailSize,
+    ) -> Job {
+        let entry = obj.get();
+        let path = entry.abs_path.clone();
+        let mtime = entry.mtime;
+        let mime = entry.mime;
+
+        let (cancel, lock) = match self.ongoing.entry(path.clone()) {
+            btree_map::Entry::Vacant(v) => v.insert((Arc::default(), Arc::default())),
+            btree_map::Entry::Occupied(mut o) => {
+                let old = std::mem::take(&mut o.get_mut().0);
+                old.store(true, Ordering::Relaxed);
+                o.into_mut()
+            }
+        }
+        .clone();
+
+        Job {
+            path,
+            priority,
+            from_event,
+            mime,
+            mtime,
+            size,
+            factory,
+            cancel,
+            lock,
+        }
+    }
 }
 
 impl Thumbnailer {
@@ -107,57 +164,87 @@ impl Thumbnailer {
         self.process();
     }
 
-    fn done_with_ticket(factory: SendFactory) {
+    fn done_with_ticket(factory: SendFactory, path: Arc<Path>) {
         gui_run(|g| {
             let t = &g.thumbnailer;
-            t.pending.borrow_mut().factories.push(factory);
+            {
+                let mut pending = t.pending.borrow_mut();
+                pending.factories.push(factory);
+
+                // Remove the old value if this was the last event
+                if let btree_map::Entry::Occupied(o) = pending.ongoing.entry(path) {
+                    if Arc::strong_count(&o.get().1) == 1 {
+                        o.remove();
+                    } else {
+                        warn!(
+                            "Did not remove ongoing thumbnail tracker for {:?} as it is still in \
+                             use. This should be rare.",
+                            o.key()
+                        );
+                    }
+                }
+            }
+
             t.process();
         });
     }
 
-    fn finish_thumbnail(
-        factory: SendFactory,
-        tex: Texture,
-        path: Arc<Path>,
-        mtime: FileTime,
-        priority: ThumbPriority,
-        size: DesktopThumbnailSize,
-    ) {
-        let priority = match priority {
+    fn finish_thumbnail(job: Job, tex: Texture) {
+        let priority = match job.priority {
             ThumbPriority::Low | ThumbPriority::Medium => Priority::LOW,
             ThumbPriority::High => Priority::HIGH_IDLE,
         };
 
-        let mut factory = Some(factory);
+        let mut factory = Some(job.factory);
+        let mut path = Some(job.path);
         let mut tex = Some(tex);
-        gtk::glib::idle_add_full(priority, move || {
-            Self::done_with_ticket(factory.take().unwrap());
+        drop(job.lock);
 
+        gtk::glib::idle_add_full(priority, move || {
+            let path = path.take().unwrap();
             if let Some(obj) = EntryObject::lookup(&path) {
-                obj.imp().update_thumbnail(tex.take().unwrap(), mtime, size);
+                obj.imp().update_thumbnail(tex.take().unwrap(), job.mtime, job.size);
             }
+
+            Self::done_with_ticket(factory.take().unwrap(), path);
 
             ControlFlow::Break
         });
     }
 
-    fn fail_thumbnail(factory: SendFactory, path: Arc<Path>, mtime: FileTime) {
-        let mut factory = Some(factory);
+    fn fail_thumbnail(job: Job) {
+        let mut factory = Some(job.factory);
+        let mut path = Some(job.path);
+        drop(job.lock);
 
         // Must be HIGH_IDLE so that these never lose a race with finish_thumbnail calls.
         // While that should be nearly impossible, failed thumbnails should be rare.
         gtk::glib::idle_add_full(Priority::HIGH_IDLE, move || {
-            Self::done_with_ticket(factory.take().unwrap());
-
+            let path = path.take().unwrap();
             if let Some(obj) = EntryObject::lookup(&path) {
-                obj.imp().fail_thumbnail(mtime);
+                obj.imp().fail_thumbnail(job.mtime);
             }
+
+            Self::done_with_ticket(factory.take().unwrap(), path);
 
             ControlFlow::Break
         });
     }
 
-    fn find_next(&self) -> Option<(EntryObject, ThumbPriority, bool, SendFactory)> {
+    // Only happens when a later queued thumbnail has superseded this one
+    fn abandon_thumbnail(job: Job) {
+        let mut factory = Some(job.factory);
+        let mut path = Some(job.path);
+        drop(job.lock);
+
+        gtk::glib::idle_add_full(Priority::LOW, move || {
+            Self::done_with_ticket(factory.take().unwrap(), path.take().unwrap());
+
+            ControlFlow::Break
+        });
+    }
+
+    fn find_next(&self) -> Option<Job> {
         let mut pending = self.pending.borrow_mut();
 
         if pending.factories.is_empty() {
@@ -165,50 +252,42 @@ impl Thumbnailer {
         }
         let size = self.size.get();
 
-        while let Some((weak, from_event)) = pending.high_priority.pop_front() {
-            if let Some(strong) = weak.upgrade() {
-                if strong.imp().mark_thumbnail_loading(ThumbPriority::High, size) {
-                    pending.processed += 1;
-                    return Some((
-                        strong,
-                        ThumbPriority::High,
-                        from_event,
-                        pending.factories.pop().unwrap(),
-                    ));
+        let job = 'find_job: {
+            while let Some((weak, from_event)) = pending.high_priority.pop_front() {
+                if let Some(strong) = weak.upgrade() {
+                    if strong.imp().mark_thumbnail_loading(ThumbPriority::High, size) {
+                        break 'find_job Some((strong, ThumbPriority::High, from_event));
+                    }
                 }
             }
-        }
 
-        if self.high > self.low && self.high - pending.factories.len() as u16 > self.low {
-            return None;
-        }
+            if self.high > self.low && self.high - pending.factories.len() as u16 > self.low {
+                break 'find_job None;
+            }
 
-        while let Some((weak, from_event)) = pending.med_priority.pop_front() {
-            if let Some(strong) = weak.upgrade() {
-                if strong.imp().mark_thumbnail_loading(ThumbPriority::Medium, size) {
-                    pending.processed += 1;
-                    return Some((
-                        strong,
-                        ThumbPriority::Medium,
-                        from_event,
-                        pending.factories.pop().unwrap(),
-                    ));
+            while let Some((weak, from_event)) = pending.med_priority.pop_front() {
+                if let Some(strong) = weak.upgrade() {
+                    if strong.imp().mark_thumbnail_loading(ThumbPriority::Medium, size) {
+                        break 'find_job Some((strong, ThumbPriority::Medium, from_event));
+                    }
                 }
             }
-        }
 
-        while let Some((weak, from_event)) = pending.low_priority.pop() {
-            if let Some(strong) = weak.upgrade() {
-                if strong.imp().mark_thumbnail_loading(ThumbPriority::Low, size) {
-                    pending.processed += 1;
-                    return Some((
-                        strong,
-                        ThumbPriority::Low,
-                        from_event,
-                        pending.factories.pop().unwrap(),
-                    ));
+            while let Some((weak, from_event)) = pending.low_priority.pop() {
+                if let Some(strong) = weak.upgrade() {
+                    if strong.imp().mark_thumbnail_loading(ThumbPriority::Low, size) {
+                        break 'find_job Some((strong, ThumbPriority::Low, from_event));
+                    }
                 }
             }
+
+            None
+        };
+
+        if let Some((strong, priority, from_event)) = job {
+            pending.processed += 1;
+            let factory = pending.factories.pop().unwrap();
+            return Some(pending.prep_job(strong, priority, from_event, factory, size));
         }
 
         if pending.factories.len() < self.high as usize {
@@ -221,6 +300,7 @@ impl Thumbnailer {
             debug!("Finished loading all thumbnails (none pending).");
         }
 
+        assert!(pending.ongoing.is_empty());
         pending.processed = 0;
         pending.high_priority.shrink_to_fit();
         pending.med_priority.shrink_to_fit();
@@ -234,24 +314,22 @@ impl Thumbnailer {
             return;
         }
 
-        let Some((obj, priority, from_event, factory)) = self.find_next() else {
+        let Some(job) = self.find_next() else {
             return;
         };
 
 
-        let entry = obj.get();
-        let path = entry.abs_path.clone();
-        // It only cares about seconds
-        let mtime = obj.get().mtime;
-        let mime_type = entry.mime;
-        let size = self.size.get();
+        self.pool.spawn(move || {
+            let guard = job.lock.lock().unwrap();
+            if job.cancel.load(Ordering::Relaxed) {
+                debug!("Cancelled thumbnail job for {:?} immediately after queueing it", job.path);
+                drop(guard);
+                return Self::abandon_thumbnail(job);
+            }
 
-        // let start = Instant::now();
-
-        let gen_thumb = move || {
-            let uri = match path.canonicalize() {
+            let uri = match job.path.canonicalize() {
                 Ok(canon) => File::for_path(canon).uri(),
-                Err(_e) => File::for_path(&path).uri(),
+                Err(_e) => File::for_path(&job.path).uri(),
             };
 
             // Exceedingly rare for any kind of event-based operation to already have a valid
@@ -259,51 +337,53 @@ impl Thumbnailer {
             // thumbnails while being incomplete, this can be a stale partial thumbnail.
             //
             // Also can't trust mtime to make sense according to wall time or UTC time.
-            if !from_event {
-                if let Some(existing) = factory.lookup(size, &uri, mtime.sec) {
+            if !job.from_event {
+                if let Some(existing) = job.lookup(&uri) {
                     let gfile = gtk::gio::File::for_path(existing);
                     match Texture::from_file(&gfile) {
                         Ok(tex) => {
                             // This is just too spammy outside of debugging
                             // trace!("Loaded existing thumbnail for {uri:?}");
-                            return Self::finish_thumbnail(
-                                factory, tex, path, mtime, priority, size,
-                            );
+                            drop(guard);
+                            return Self::finish_thumbnail(job, tex);
                         }
                         Err(e) => {
                             error!("Failed to load existing thumbnail: {e:?}");
-                            return Self::fail_thumbnail(factory, path, mtime);
+                            drop(guard);
+                            return Self::fail_thumbnail(job);
                         }
                     }
                 }
             }
+
             // aw-fm doesn't write failed thumbnails for operations from events,
             // so this is most likely legitimate.
-            if factory.has_failed(size, &uri, mtime.sec) {
-                return Self::fail_thumbnail(factory, path, mtime);
+            if job.has_failed(&uri) {
+                drop(guard);
+                return Self::fail_thumbnail(job);
             }
 
-            if !factory.can_thumbnail(size, &uri, mime_type, mtime.sec) {
+            if !job.can_thumbnail(&uri) {
                 // trace!("Marking thumbnail as failed, though it wasn't attempted.");
-                return Self::fail_thumbnail(factory, path, mtime);
+                drop(guard);
+                return Self::fail_thumbnail(job);
             }
 
-            match factory.generate_and_save_thumbnail(size, &uri, mime_type, mtime.sec, from_event)
-            {
-                Some(tex) => {
-                    // Spammy
-                    // trace!(
-                    //     "Generated new thumbnail in {:?} for {:?}",
-                    //     start.elapsed(),
-                    //     path.file_name().unwrap_or(path.as_os_str())
-                    // );
-                    Self::finish_thumbnail(factory, tex, path, mtime, priority, size);
-                }
-                None => Self::fail_thumbnail(factory, path, mtime),
+            #[allow(clippy::branches_sharing_code)]
+            if let Some(tex) = job.generate_and_save_thumbnail(&uri) {
+                // Spammy
+                // trace!(
+                //     "Generated new thumbnail in {:?} for {:?}",
+                //     start.elapsed(),
+                //     path.file_name().unwrap_or(path.as_os_str())
+                // );
+                drop(guard);
+                Self::finish_thumbnail(job, tex);
+            } else {
+                drop(guard);
+                Self::fail_thumbnail(job);
             }
-        };
-
-        self.pool.spawn(gen_thumb);
+        });
     }
 
     // This is for dialogs and other places that may grab a very small number of thumbnails.
@@ -342,18 +422,21 @@ impl Thumbnailer {
             return None;
         }
 
-        generate_and_save_thumbnail(factory, &uri, mime, mtime.sec, false)
+        // Treat this as a cancelled background job and don't write it.
+        // Not worth bothering to check pending.ongoing here.
+        generate_and_save_thumbnail(factory, &uri, mime, mtime.sec, false, &AtomicBool::new(true))
     }
 }
 
 
 mod send {
-
     use gnome_desktop::traits::DesktopThumbnailFactoryExt;
     use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailSize};
     use gtk::gdk::Texture;
     use gtk::gio::glib::GString;
     use gtk::glib::ffi::{g_thread_self, GThread};
+
+    use super::Job;
 
     #[derive(Debug, Clone)]
     pub(super) struct Factories(DesktopThumbnailFactory, DesktopThumbnailFactory);
@@ -424,47 +507,38 @@ mod send {
                 (None, Vec::new())
             }
         }
+    }
 
-        pub fn lookup(
-            &self,
-            size: DesktopThumbnailSize,
-            uri: &str,
-            mtime_sec: u64,
-        ) -> Option<GString> {
-            self.0.get(size).lookup(uri, mtime_sec as i64)
+    impl Job {
+        pub fn lookup(&self, uri: &str) -> Option<GString> {
+            self.factory.0.get(self.size).lookup(uri, self.mtime.sec as i64)
         }
 
-        pub fn has_failed(&self, size: DesktopThumbnailSize, uri: &str, mtime_sec: u64) -> bool {
-            self.0.get(size).has_valid_failed_thumbnail(uri, mtime_sec as i64)
+        pub fn has_failed(&self, uri: &str) -> bool {
+            self.factory
+                .0
+                .get(self.size)
+                .has_valid_failed_thumbnail(uri, self.mtime.sec as i64)
         }
 
-        pub fn can_thumbnail(
-            &self,
-            size: DesktopThumbnailSize,
-            uri: &str,
-            mime_type: &str,
-            mtime_sec: u64,
-        ) -> bool {
-            self.0.get(size).can_thumbnail(uri, mime_type, mtime_sec as i64)
+        pub fn can_thumbnail(&self, uri: &str) -> bool {
+            self.factory
+                .0
+                .get(self.size)
+                .can_thumbnail(uri, self.mime, self.mtime.sec as i64)
         }
 
         // It would be faster for the UI to set the thumbnail first and then go to save it.
         // Given how small and simple these files are, and the weird cases that could happen if we
         // fail to save a thumbnail after setting it, it's just not worth it.
-        pub fn generate_and_save_thumbnail(
-            &self,
-            size: DesktopThumbnailSize,
-            uri: &str,
-            mime_type: &str,
-            mtime_sec: u64,
-            from_event: bool,
-        ) -> Option<Texture> {
+        pub fn generate_and_save_thumbnail(&self, uri: &str) -> Option<Texture> {
             super::generate_and_save_thumbnail(
-                &self.0.get(size),
+                self.factory.0.get(self.size),
                 uri,
-                mime_type,
-                mtime_sec,
-                from_event,
+                self.mime,
+                self.mtime.sec,
+                self.from_event,
+                &self.cancel,
             )
         }
     }
@@ -476,6 +550,7 @@ pub fn generate_and_save_thumbnail(
     mime_type: &str,
     mtime_sec: u64,
     from_event: bool,
+    cancel_save: &AtomicBool,
 ) -> Option<Texture> {
     let generated = factory.generate_thumbnail(uri, mime_type, Cancellable::NONE);
 
@@ -501,7 +576,7 @@ pub fn generate_and_save_thumbnail(
             // Don't store failed thumbnails for updates from events, as the second-level
             // precision causes problems. This means it will be retried later, but that's
             // fine.
-            if !from_event {
+            if !from_event && !cancel_save.load(Ordering::Relaxed) {
                 if let Err(e) =
                     factory.create_failed_thumbnail(uri, mtime_sec as i64, Cancellable::NONE)
                 {
@@ -515,10 +590,17 @@ pub fn generate_and_save_thumbnail(
         }
     };
 
-    if let Err(e) = factory.save_thumbnail(&pb, uri, mtime_sec as i64, Cancellable::NONE) {
-        error!("Failed to save thumbnail for {uri:?}: {e}");
-        // Don't try to save a failed thumbnail here. We can retry in the future.
-        return None;
+    // Avoid saving successful thumbnails if a newer event has come in.
+    // This prevents the case where mtime_sec is the same between two events but the earlier one
+    // finishes a successful but incomplete thumbnail after the later one.
+    if !cancel_save.load(Ordering::Relaxed) {
+        if let Err(e) = factory.save_thumbnail(&pb, uri, mtime_sec as i64, Cancellable::NONE) {
+            error!("Failed to save thumbnail for {uri:?}: {e}");
+            // Don't try to save a failed thumbnail here. We can retry in the future.
+            return None;
+        }
+    } else {
+        warn!("Cancelled saving thumbnail for {uri:?} as a new update has arrived");
     }
 
     Some(Texture::for_pixbuf(&pb))
