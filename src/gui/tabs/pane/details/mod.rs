@@ -10,7 +10,7 @@ use gtk::{
 
 use self::icon_cell::IconCell;
 use self::string_cell::{EntryString, StringCell};
-use super::{get_first_visible_child, setup_item_controllers, setup_view_controllers, Bound};
+use super::{get_last_visible_child, setup_item_controllers, setup_view_controllers, Bound};
 use crate::com::{DirSettings, EntryObject, SortDir, SortMode, SortSettings};
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, tabs_run};
@@ -108,7 +108,7 @@ impl DetailsView {
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
-    pub(super) fn get_first_visible(&self) -> Option<EntryObject> {
+    pub(super) fn get_scroll_target(&self) -> Option<EntryObject> {
         let model = self.column_view.model().unwrap();
         if model.n_items() == 0 {
             return None;
@@ -120,7 +120,7 @@ impl DetailsView {
             .first_child()
             .and_then(|c| c.next_sibling())
             .as_ref()
-            .and_then(get_first_visible_child)
+            .and_then(get_last_visible_child)
             .and_then(|c| c.first_child())
             .and_then(|c| c.first_child())
             .and_downcast::<IconCell>()

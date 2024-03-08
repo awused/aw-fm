@@ -84,20 +84,39 @@ impl View {
     }
 }
 
-fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
-    let mut child = parent.first_child()?;
+// fn get_first_visible_child(parent: &Widget) -> Option<Widget> {
+//     let mut child = parent.first_child()?;
+//     loop {
+//         if child.is_visible() && child.is_mapped() {
+//             let Some(bounds) = child.compute_bounds(parent) else {
+//                 continue;
+//             };
+//             // Get the first fully visible item.
+//             if bounds.y() >= 0.0 {
+//                 break Some(child);
+//             }
+//         }
+//
+//         child = child.next_sibling()?;
+//     }
+// }
+
+fn get_last_visible_child(parent: &Widget) -> Option<Widget> {
+    let parent_height = parent.height() as f32;
+
+    let mut child = parent.last_child()?;
     loop {
         if child.is_visible() && child.is_mapped() {
             let Some(bounds) = child.compute_bounds(parent) else {
                 continue;
             };
             // Get the first fully visible item.
-            if bounds.y() >= 0.0 {
+            if bounds.bottom_right().y() <= parent_height {
                 break Some(child);
             }
         }
 
-        child = child.next_sibling()?;
+        child = child.prev_sibling()?;
     }
 }
 
@@ -513,8 +532,8 @@ impl Pane {
     pub fn get_state(&self, list: &Contents) -> PaneState {
         let scroll_pos = if self.element.imp().scroller.vadjustment().value() > 0.0 {
             let eo = match &self.view {
-                View::Icons(ic) => ic.get_first_visible(),
-                View::Columns(cv) => cv.get_first_visible(),
+                View::Icons(ic) => ic.get_scroll_target(),
+                View::Columns(cv) => cv.get_scroll_target(),
             };
 
             eo.map(|child| super::ScrollPosition {
@@ -551,10 +570,25 @@ impl Pane {
             ListScrollFlags::empty()
         };
 
-        match &self.view {
-            View::Icons(icons) => icons.scroll_to(pos, flags),
-            View::Columns(details) => details.scroll_to(pos, flags),
-        }
+        let id = self.tab;
+        glib::idle_add_local_once(move || {
+            warn!("Working around buggy GTK scrolling by adding a delay");
+            tabs_run(|list| {
+                let Some(p) = list.find(id).and_then(Tab::workaround_scroll_to) else {
+                    return;
+                };
+
+                match &p.view {
+                    View::Icons(icons) => icons.scroll_to(pos, flags),
+                    View::Columns(details) => details.scroll_to(pos, flags),
+                }
+            });
+        });
+
+        // match &self.view {
+        //     View::Icons(icons) => icons.scroll_to(pos, flags),
+        //     View::Columns(details) => details.scroll_to(pos, flags),
+        // }
     }
 
     pub fn seek_to(&self, pos: u32) {

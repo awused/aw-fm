@@ -1162,15 +1162,7 @@ impl Tab {
 
         self.load(left, right);
 
-        let id = self.id();
-        glib::idle_add_local_once(move || {
-            // Workaround a GTK bug by slightly delaying the scroll_to call
-            tabs_run(|tlist| {
-                if let Some(tab) = tlist.find_mut(id) {
-                    tab.apply_pane_state()
-                }
-            })
-        });
+        self.apply_pane_state()
     }
 
     // TODO -- switching away from a tab group is a two-step process
@@ -1755,6 +1747,10 @@ impl Tab {
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
     pub fn workaround_enable_rubberband(&self) {
         self.pane.workaround_enable_rubberband();
+    }
+
+    pub fn workaround_scroll_to(&self) -> Option<&Pane> {
+        self.pane.get_visible()
     }
 }
 

@@ -6,7 +6,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{GestureClick, GridView, ListScrollFlags, MultiSelection, ScrolledWindow};
 
 use self::icon_tile::IconTile;
-use super::{get_first_visible_child, setup_item_controllers, setup_view_controllers, Bound};
+use super::{get_last_visible_child, setup_item_controllers, setup_view_controllers, Bound};
 use crate::com::EntryObject;
 use crate::gui::applications;
 use crate::gui::tabs::id::TabId;
@@ -106,13 +106,13 @@ impl IconView {
     }
 
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/4688
-    pub(super) fn get_first_visible(&self) -> Option<EntryObject> {
+    pub(super) fn get_scroll_target(&self) -> Option<EntryObject> {
         let model = self.grid.model().unwrap();
         if model.n_items() == 0 {
             return None;
         }
 
-        get_first_visible_child(self.grid.upcast_ref::<gtk::Widget>())
+        get_last_visible_child(self.grid.upcast_ref::<gtk::Widget>())
             .and_then(|c| c.first_child())
             .and_downcast::<IconTile>()
             .and_then(|c| c.bound_object())
