@@ -43,7 +43,7 @@ impl IconView {
             deny_bg_click.connect_pressed(move |c, _n, x, y| {
                 // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
                 let w = c.widget();
-                if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
+                if !w.contains(x, y) {
                     warn!("Workaround -- ignoring junk mouse event in {tab:?} on item tile",);
                     return;
                 }

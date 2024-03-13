@@ -200,7 +200,7 @@ impl Pane {
         click.connect_pressed(move |c, _n, x, y| {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
             let w = c.widget();
-            if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
+            if !w.contains(x, y) {
                 warn!("Workaround -- ignoring junk mouse event in {tab:?}");
                 return;
             }
@@ -804,7 +804,7 @@ fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<
     click.connect_pressed(move |c, n, x, y| {
         let w = c.widget();
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-        if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
+        if !w.contains(x, y) {
             warn!("Workaround -- ignoring junk mouse event in {tab:?}");
             return;
         }
@@ -867,7 +867,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
 
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
         let w = c.widget();
-        if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
+        if !w.contains(x, y) {
             warn!(
                 "Workaround -- ignoring junk mouse event in {tab:?} on item {:?} {x} {y}",
                 &*eo.get().name

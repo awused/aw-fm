@@ -33,7 +33,7 @@ impl TabElement {
         mouse.connect_pressed(move |c, n, x, y| {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
             let w = c.widget();
-            if !(x > 0.0 && (x as i32) < w.width() && y > 0.0 && (y as i32) < w.height()) {
+            if !w.contains(x, y) {
                 warn!("Workaround -- ignoring junk mouse event on {tab:?} element",);
                 return;
             }
