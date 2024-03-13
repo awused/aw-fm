@@ -232,3 +232,10 @@ similar characteristics including performance traps and a lack of
 customization. They do, however, support things I probably won't,
 like automount and udev.
 
+## Screenshots
+Panes and tab groups
+![Panes](/../screenshots/screenshots/panes.webp)
+Support for transparent backgrounds
+![Transparency](/../screenshots/screenshots/transparency.jpg)
+Media properties for most formats
+![Media](/../screenshots/screenshots/media.webp)
