@@ -18,6 +18,8 @@ actually do.
   * Panes/splits and tab groups function like minimal workspaces.
 * Custom actions showing up in context menus.
   * Just flat scripts, easy to write and back up.
+* Seeking inside a directory or search results without requiring a full search.
+* Session saving and loading.
 * Not much more, anything I don't personally use doesn't get implemented.
   * Will not cover every use case, like mounting external drives.
 

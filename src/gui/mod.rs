@@ -24,6 +24,7 @@ use crate::closing;
 use crate::config::CONFIG;
 use crate::database::DBCon;
 use crate::gui::tabs::list::TabPosition;
+use crate::state_cache::{save_settings, State, STATE};
 
 mod applications;
 mod clipboard;
@@ -208,6 +209,17 @@ impl Gui {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
 
+        if let Some(saved) = &*STATE {
+            // Don't create very tiny windows.
+            if saved.size.0 >= 100 && saved.size.1 >= 100 {
+                window.set_default_size(saved.size.0 as i32, saved.size.1 as i32);
+            }
+
+            if saved.maximized {
+                window.set_maximized(true);
+            }
+        }
+
 
         let tabs = TabsList::new(&window);
 
@@ -269,40 +281,17 @@ impl Gui {
         self.tabs.borrow_mut().initial_setup();
         self.setup_interaction();
 
-        // let g = self.clone();
-        // TODO -- handle resizing
-        // self.canvas.connect_resize(move |_, width, height| {
-        //     // Resolution change is also a user action.
-        //     g.last_action.set(Some(Instant::now()));
-        //
-        //     assert!(width >= 0 && height >= 0, "Can't have negative width or height");
-        //
-        //     g.send_manager((ManagerAction::Resolution, GuiActionContext::default(), None));
-        // });
-
-        // TODO -- state cache - less necessary than aw-man
         let g = self.clone();
-        self.window.connect_close_request(move |_w| {
+        self.window.connect_close_request(move |w| {
             g.cancel_operations();
-            //     let s = g.win_state.get();
-            //     let size = if s.maximized || s.fullscreen {
-            //         s.memorized_size
-            //     } else {
-            //         (w.width(), w.height()).into()
-            //     };
-            //     save_settings(State { size, maximized: w.is_maximized() });
+
+            save_settings(State {
+                // Does not handle fullscreen state, probably fine
+                size: (w.width() as u32, w.height() as u32),
+                maximized: w.is_maximized(),
+            });
             glib::Propagation::Proceed
         });
-
-        // let g = self.clone();
-        // self.window.connect_maximized_notify(move |_w| {
-        //     g.window_state_changed();
-        // });
-        //
-        // let g = self.clone();
-        // self.window.connect_fullscreened_notify(move |_w| {
-        //     g.window_state_changed();
-        // });
 
         self.window.set_visible(true);
 
@@ -334,24 +323,6 @@ impl Gui {
             }
         }
     }
-
-    // fn window_state_changed(self: &Rc<Self>) {
-    //     let mut s = self.win_state.get();
-    //
-    //     let fullscreen = self.window.is_fullscreen();
-    //
-    //     let maximized = self.window.is_maximized();
-    //
-    //     // These callbacks run after the state has changed.
-    //     if !s.maximized && !s.fullscreen {
-    //         s.memorized_size =
-    //             (self.window.width().unsigned_abs(), self.window.height().unsigned_abs());
-    //     }
-    //
-    //     s.maximized = maximized;
-    //     s.fullscreen = fullscreen;
-    //     self.win_state.set(s);
-    // }
 
     fn handle_update(self: &Rc<Self>, gu: GuiAction) -> ControlFlow {
         use crate::com::GuiAction::*;

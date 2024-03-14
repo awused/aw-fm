@@ -23,6 +23,7 @@ mod database;
 mod gui;
 mod manager;
 mod natsort;
+mod state_cache;
 
 fn handle_panic(_e: Box<dyn Any + Send>) {
     closing::fatal(format!(
