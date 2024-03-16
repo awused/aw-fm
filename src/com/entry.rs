@@ -400,8 +400,6 @@ mod internal {
         }
 
         fn dispose(&self) {
-            // Too spammy
-            // trace!("EntryObject disposed");
             let path = &self.get().abs_path;
             // Could check the load factor and shrink the map.
             // dispose can, technically, be called multiple times, so unsafe to assert here.

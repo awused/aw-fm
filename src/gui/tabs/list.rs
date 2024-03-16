@@ -66,8 +66,6 @@ pub struct TabsList {
     // TODO -- limit number of tabs to 255 or so?
     tabs: Vec<Tab>,
 
-    // We need to keep all groups alive so that reopening closed tabs will recreate defunct groups
-    // groups: Vec<Rc<RefCell<Group>>>,
     closed: Vec<ClosedTab>,
 
     // There is always one active tab or no visible tabs.

@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::time::Instant;
 
 use gtk::gio::{ListModel, ListStore};
-use gtk::glib::{self, ControlFlow, Object};
+use gtk::glib::{self, ControlFlow, Object, Priority};
 use gtk::prelude::*;
 use gtk::{CustomFilter, FilterListModel, MultiSelection};
 
@@ -320,7 +320,7 @@ impl Contents {
         // More with thumbnails
         let start = Instant::now();
         let total = old_list.n_items();
-        glib::idle_add_local(move || {
+        glib::idle_add_local_full(Priority::LOW, move || {
             if old_list.n_items() <= 1000 {
                 trace!("Finished dropping {total} items in {:?}", start.elapsed());
                 return ControlFlow::Break;
@@ -330,9 +330,7 @@ impl Contents {
         });
     }
 
-    pub fn mark_stale(&mut self, sort: SortSettings) {
-        // TODO -- remove the requirement that self.sort == sort
-        assert_eq!(self.sort, sort);
+    pub fn mark_stale(&mut self) {
         debug!("Marking {self:?} as stale");
         self.stale = true;
     }

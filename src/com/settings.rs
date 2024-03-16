@@ -82,3 +82,9 @@ pub struct DirSettings {
     pub sort: SortSettings,
     // pub display_hidden: DisplayHidden,
 }
+
+impl DirSettings {
+    pub fn allow_stale(self, old: Self) -> bool {
+        self.display_mode == old.display_mode
+    }
+}

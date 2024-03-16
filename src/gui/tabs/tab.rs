@@ -213,7 +213,6 @@ pub(super) struct Tab {
 #[derive(Debug)]
 pub(super) struct ClosedTab {
     id: TabUid,
-    // group: GroupId,
     pub after: Option<TabId>,
     current: HistoryEntry,
     past: Vec<HistoryEntry>,
@@ -789,11 +788,12 @@ impl Tab {
 
             if was_search {
                 // Contents were cleared above
-            } else if self.pane.visible() && self.settings == old_settings {
+            } else if self.pane.visible() && self.settings.allow_stale(old_settings) {
                 // Deliberately do not clear or update self.contents here, not yet.
                 // This allows us to keep something visible just a tiny bit longer.
-                // Safe enough when the settings match.
-                self.contents.mark_stale(self.settings.sort);
+                // Safe enough when the settings match, though there's no point in doing it when
+                // the display mode changes.
+                self.contents.mark_stale();
             } else {
                 self.contents.clear(self.settings.sort);
             }
