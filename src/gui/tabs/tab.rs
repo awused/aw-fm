@@ -12,7 +12,7 @@ use ahash::{AHashMap, AHashSet};
 use gtk::gio::Cancellable;
 use gtk::prelude::{CastNone, ListModelExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{SelectionModelExt, WidgetExt};
+use gtk::prelude::{SelectionModelExt, WidgetExt};
 use gtk::{glib, AlertDialog, MultiSelection, Orientation, PopoverMenu, Widget};
 use tokio::sync::oneshot;
 use TabPane as TP;

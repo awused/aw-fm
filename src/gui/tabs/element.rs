@@ -4,7 +4,7 @@ use gtk::gdk::{ContentProvider, DragAction, ModifierType};
 use gtk::glib::{BoxedAnyObject, GString};
 use gtk::prelude::StaticType;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{EventControllerExt, GestureExt, GestureSingleExt, WidgetExt};
+use gtk::prelude::{EventControllerExt, GestureExt, GestureSingleExt, WidgetExt};
 use gtk::{glib, DragSource, DropTarget, GestureClick, Orientation, WidgetPaintable};
 
 use crate::gui::tabs::id::TabId;

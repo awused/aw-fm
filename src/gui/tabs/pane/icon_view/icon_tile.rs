@@ -1,7 +1,7 @@
 use gtk::glib;
 use gtk::prelude::ObjectExt;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::WidgetExt;
+use gtk::prelude::WidgetExt;
 
 use crate::com::{EntryObject, SignalHolder};
 use crate::gui::tabs::pane::Bound;

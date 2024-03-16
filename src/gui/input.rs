@@ -14,7 +14,7 @@ use gtk::glib::{self, Propagation};
 use gtk::pango::{EllipsizeMode, WrapMode};
 use gtk::prelude::{ButtonExt, Cast, IsA};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{
+use gtk::prelude::{
     BoxExt, EditableExt, EntryExt, EventControllerExt, GestureSingleExt, GtkWindowExt, WidgetExt,
 };
 use gtk::{Orientation, Widget, Window};

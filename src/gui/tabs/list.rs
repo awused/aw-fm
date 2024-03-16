@@ -10,7 +10,7 @@ use dirs::home_dir;
 use gtk::gio::ListStore;
 use gtk::prelude::{Cast, CastNone, ListModelExt, ListModelExtManual};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{BoxExt, ListItemExt};
+use gtk::prelude::{BoxExt, ListItemExt};
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
 
 use super::element::TabElement;

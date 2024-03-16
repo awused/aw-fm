@@ -11,7 +11,7 @@ use gtk::glib::clone::Downgrade;
 use gtk::glib::{self, Object};
 use gtk::prelude::{CancellableExtManual, EditableExt, EntryBufferExtManual};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{ButtonExt, CheckButtonExt, EntryExt, GtkWindowExt, WidgetExt};
+use gtk::prelude::{ButtonExt, CheckButtonExt, EntryExt, GtkWindowExt, WidgetExt};
 use gtk::Image;
 
 use super::Operation;

@@ -12,9 +12,8 @@ use std::time::Instant;
 
 use ahash::AHashMap;
 use gtk::gio::{Menu, MenuItem, SimpleAction, SimpleActionGroup};
-use gtk::glib::{ToVariant, Variant, VariantTy};
-use gtk::prelude::{ActionExt, ActionMapExt};
-use gtk::traits::{GtkWindowExt, PopoverExt, WidgetExt};
+use gtk::glib::{Variant, VariantTy};
+use gtk::prelude::*;
 use gtk::{PopoverMenu, PositionType};
 use once_cell::unsync::Lazy;
 use regex::bytes::Regex;

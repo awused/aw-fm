@@ -5,7 +5,7 @@ use gtk::gdk::{DragAction, Key, ModifierType};
 use gtk::glib::Propagation;
 use gtk::prelude::{Cast, CastNone, ListModelExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{
+use gtk::prelude::{
     EditableExt, EventControllerExt, GestureSingleExt, SelectionModelExt, WidgetExt,
 };
 use gtk::{glib, DropTargetAsync, EventControllerFocus, GestureClick, MultiSelection};

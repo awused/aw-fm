@@ -10,7 +10,7 @@ use gtk::prelude::{
     ObjectExt,
 };
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{ButtonExt, CheckButtonExt, GtkWindowExt, ListItemExt, WidgetExt};
+use gtk::prelude::{ButtonExt, CheckButtonExt, GtkWindowExt, ListItemExt, WidgetExt};
 use gtk::{glib, SingleSelection};
 
 use super::application::Application;

@@ -10,7 +10,7 @@ use gtk::gio::Icon;
 use gtk::glib::{self, Propagation, WeakRef};
 use gtk::prelude::{Cast, CastNone, IsA, ObjectExt, OrientableExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::traits::{
+use gtk::prelude::{
     AdjustmentExt, BoxExt, EditableExt, EntryExt, EventControllerExt, FilterExt, GestureExt,
     GestureSingleExt, PopoverExt, WidgetExt,
 };
