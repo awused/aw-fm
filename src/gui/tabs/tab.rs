@@ -793,7 +793,7 @@ impl Tab {
                 // This allows us to keep something visible just a tiny bit longer.
                 // Safe enough when the settings match, though there's no point in doing it when
                 // the display mode changes.
-                self.contents.mark_stale();
+                self.contents.mark_stale(self.settings.sort);
             } else {
                 self.contents.clear(self.settings.sort);
             }

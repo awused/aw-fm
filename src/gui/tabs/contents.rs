@@ -330,8 +330,9 @@ impl Contents {
         });
     }
 
-    pub fn mark_stale(&mut self) {
+    pub fn mark_stale(&mut self, sort: SortSettings) {
         debug!("Marking {self:?} as stale");
+        self.sort = sort;
         self.stale = true;
     }
 }
