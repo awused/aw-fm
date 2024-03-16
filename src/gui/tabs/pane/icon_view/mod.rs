@@ -18,6 +18,13 @@ pub(super) struct IconView {
     grid: GridView,
 }
 
+impl Drop for IconView {
+    fn drop(&mut self) {
+        trace!("Working around GTK crash by setting model to null");
+        self.grid.set_model(None::<&MultiSelection>);
+    }
+}
+
 impl IconView {
     pub(super) fn new(
         scroller: &ScrolledWindow,

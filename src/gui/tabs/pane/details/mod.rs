@@ -29,6 +29,13 @@ pub(super) struct DetailsView {
     current_sort: Rc<Cell<SortSettings>>,
 }
 
+impl Drop for DetailsView {
+    fn drop(&mut self) {
+        trace!("Working around GTK crash by setting model to null");
+        self.column_view.set_model(None::<&MultiSelection>);
+    }
+}
+
 // TODO [gtk4.12] use ColumnViewRow
 // Or don't, it's broken garbage
 
