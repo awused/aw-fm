@@ -220,10 +220,13 @@ pub fn handle_drop(drop_ev: &gdk::Drop, tab: TabId, path: Arc<Path>) -> bool {
 mod imp {
     use std::ffi::OsString;
     use std::future::Future;
+    use std::os::unix::ffi::OsStringExt;
     use std::os::unix::prelude::OsStrExt;
     use std::pin::Pin;
     use std::rc::Rc;
 
+    use gtk::glib::value::ToValue;
+    use gtk::glib::GString;
     use gtk::prelude::{FileExt, OutputStreamExt};
     use gtk::subclass::prelude::*;
     use gtk::{gdk, gio, glib};
@@ -272,6 +275,27 @@ mod imp {
                 .add_mime_type(TEXT)
                 .add_mime_type(STRING)
                 .build()
+        }
+
+        fn value(&self, gtype: glib::Type) -> Result<glib::Value, glib::Error> {
+            if gtype == glib::Type::STRING {
+                let mut out = OsString::new();
+                self.entries
+                    .get()
+                    .unwrap()
+                    .iter()
+                    .for_each(|e| out.push(e.get().abs_path.as_os_str()));
+
+                match GString::from_utf8(out.into_vec()) {
+                    Ok(s) => Ok(s.to_value()),
+                    Err(e) => {
+                        error!("Failed to convert set of paths to valid utf-8: {e:?}");
+                        Ok(GString::new().to_value())
+                    }
+                }
+            } else {
+                panic!("Got unknown glib type {gtype:?} in ContentProviderImpl::value()");
+            }
         }
 
         fn write_mime_type_future(
