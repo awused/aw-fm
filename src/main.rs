@@ -50,7 +50,6 @@ fn main() {
     gtk::init().expect("GTK could not be initialized");
 
     let (manager_sender, manager_receiver) = tokio::sync::mpsc::unbounded_channel();
-    // PRIORITY_LOW prioritize GTK redrawing events.
     let (gui_sender, gui_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     closing::init(gui_sender.clone());
@@ -66,12 +65,11 @@ fn main() {
         // The only things we do after this are cleanup.
         closing::fatal(format!("GUI thread panicked unexpectedly: {e:?}"));
     }
+    closing::close();
 
     // These should never panic on their own, but they may if they're interacting with the gui
     // thread and it panics.
-    if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
-        drop(man_handle.join());
-    })) {
+    if let Err(e) = man_handle.join() {
         closing::fatal(format!("Manager thread panicked unexpectedly: {e:?}"));
     }
 }

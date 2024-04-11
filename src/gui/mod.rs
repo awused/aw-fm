@@ -160,16 +160,17 @@ pub fn run(
 
                 if path.is_relative() {
                     let Some(cwd) = cl.cwd() else {
-                        return show_warning(
-                            "Got request to open tab with relative path and no working directory",
-                        );
+                        return show_warning(format!(
+                            "Got request to open tab with relative path {path:?} and no working \
+                             directory"
+                        ));
                     };
 
                     path = cwd.join(path).clean();
                 }
 
                 if path.is_relative() {
-                    return show_warning("Could not make {path:?} absolute");
+                    return show_warning(format!("Could not make {path:?} absolute"));
                 }
 
                 g.tabs.borrow_mut().open_tab(path, TabPosition::End, true);
