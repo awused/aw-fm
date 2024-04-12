@@ -81,8 +81,8 @@ specify them.
 * `Help`
   * List current keybinds.
 * `Quit`
-* `Refresh`
-  * Refreshes all tabs.
+* `Refresh`/`RefreshAll`
+  * Refreshes all visible or all tabs.
   * This shouldn't be necessary unless file system notifies are incomplete,
     like over NFS.
 * `Activate`

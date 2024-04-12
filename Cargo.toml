@@ -51,9 +51,9 @@ gnome-desktop = { git = "https://github.com/awused/gnome-desktop-rs", features =
 # gnome-desktop = { path = "../../third_party/gnome-desktop-rs/gnome-desktop", features = [ "v42" ] }
 
 # It's this or ffmpeg
-gstreamer = "0.22.3"
-gstreamer-audio = "0.22.0"
-gstreamer-video = "0.22.1"
+gstreamer = "0.22.4"
+gstreamer-audio = "0.22.4"
+gstreamer-video = "0.22.4"
 gstreamer-pbutils = "0.22.0"
 
 [target.'cfg(unix)'.dependencies]

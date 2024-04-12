@@ -62,6 +62,7 @@ impl Search {
         }
     }
 
+    // TODO -- refresh -- sync unload for search
     pub fn unload(&mut self, sort: SortSettings) {
         self.state = State::Unloaded;
         self.contents.clear(sort);

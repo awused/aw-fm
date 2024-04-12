@@ -477,6 +477,7 @@ impl Gui {
             "ReopenTab" => return tabs.reopen(),
 
             "Refresh" => return tabs.refresh(),
+            "RefreshAll" => return tabs.refresh_all(),
             "CloseTab" => return tabs.active_close_tab(),
             "ClosePane" => return tabs.active_close_pane(),
             "HidePanes" => return tabs.active_hide(),

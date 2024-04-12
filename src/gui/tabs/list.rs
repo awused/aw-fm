@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsString;
 use std::path::Path;
 use std::rc::Rc;
@@ -347,11 +348,7 @@ impl TabsList {
     }
 
     pub fn get_active_dir(&self) -> Option<Arc<Path>> {
-        let Some(active) = self.active else {
-            return None;
-        };
-
-        Some(self.find(active).unwrap().dir())
+        Some(self.find(self.active?).unwrap().dir())
     }
 
     fn switch_active_tab(&mut self, id: TabId) {
@@ -389,9 +386,7 @@ impl TabsList {
 
     // New tab is always at the end of self.tabs
     fn clone_active(&mut self, for_split: bool) -> Option<TabId> {
-        let Some(active) = self.active else {
-            return None;
-        };
+        let active = self.active?;
 
         let active_index = self.position(active).unwrap();
 
@@ -581,6 +576,57 @@ impl TabsList {
     }
 
     pub fn refresh(&mut self) {
+        if self.active.is_none() {
+            return show_warning("Refresh called without any visible tabs");
+        };
+
+        // TODO -- Should be (path, is_search)
+        let mut unload_paths = BTreeSet::new();
+        let mut unloaded = HashSet::new();
+
+        for t in &mut self.tabs {
+            if !t.visible() {
+                continue;
+            }
+
+            debug!("Unloading visible tab {:?}", t.id());
+            unloaded.insert(t.id());
+            t.unload_unchecked();
+            // TODO -- Should be (path, is_search)
+            unload_paths.insert(t.dir());
+        }
+
+        'outer: loop {
+            for t in &mut self.tabs {
+                if unloaded.contains(&t.id()) {
+                    continue;
+                }
+
+                for p in &unload_paths {
+                    if t.overlaps(p) {
+                        debug!("Unloading tab {:?} that overlaps with {p:?}", t.id());
+                        unloaded.insert(t.id());
+                        // TODO -- If this is a search tab, this can leave search Entries alive and
+                        // stale in callbacks. Search contents should be dropped synchronously.
+                        // t.unload_unchecked(purge_search = true)
+                        t.unload_unchecked();
+
+                        if unload_paths.insert(t.dir()) {
+                            // Expanded the set of overlapping paths, reconsider earlier tabs.
+                            continue 'outer;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            break 'outer;
+        }
+
+        self.reload_visible();
+    }
+
+    pub fn refresh_all(&mut self) {
         info!("Refreshing all tabs");
         for t in &mut self.tabs {
             t.unload_unchecked();
@@ -598,6 +644,10 @@ impl TabsList {
             EntryObject::purge();
         }
 
+        self.reload_visible();
+    }
+
+    fn reload_visible(&mut self) {
         for i in 0..self.tabs.len() {
             if !self.tabs[i].visible() {
                 continue;
@@ -853,34 +903,35 @@ impl TabsList {
 
         let active_tab = self.find_mut(active).unwrap();
 
-        if let Some(group) = active_tab.multi_tab_group() {
-            let mut children = group.borrow().children.clone();
-            let mut to_finish = Vec::with_capacity(children.len());
-
-            for (i, t) in self.tabs.iter_mut().enumerate() {
-                let Some(pos) = children.iter().position(|id| *id == t.id()) else {
-                    continue;
-                };
-
-                children.swap_remove(pos);
-                to_finish.push(i);
-                t.start_hide();
-
-                if children.is_empty() {
-                    break;
-                };
-            }
-
-            let t = self.find_mut(group.borrow().parent).unwrap();
-            t.start_hide();
-            t.finish_hide();
-
-            for i in to_finish {
-                self.tabs[i].finish_hide();
-            }
-        } else {
+        let Some(group) = active_tab.multi_tab_group() else {
             active_tab.start_hide();
             active_tab.finish_hide();
+            return;
+        };
+
+        let mut children = group.borrow().children.clone();
+        let mut to_finish = Vec::with_capacity(children.len());
+
+        for (i, t) in self.tabs.iter_mut().enumerate() {
+            let Some(pos) = children.iter().position(|id| *id == t.id()) else {
+                continue;
+            };
+
+            children.swap_remove(pos);
+            to_finish.push(i);
+            t.start_hide();
+
+            if children.is_empty() {
+                break;
+            };
+        }
+
+        let t = self.find_mut(group.borrow().parent).unwrap();
+        t.start_hide();
+        t.finish_hide();
+
+        for i in to_finish {
+            self.tabs[i].finish_hide();
         }
     }
 

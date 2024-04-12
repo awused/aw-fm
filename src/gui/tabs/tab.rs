@@ -274,6 +274,11 @@ impl Tab {
         self.dir.path().clone()
     }
 
+    pub fn overlaps(&self, p: &Arc<Path>) -> bool {
+        // TODO [refresh] actually consider overlapping searches
+        self.matches_arc(p)
+    }
+
     pub fn matches_arc(&self, other: &Arc<Path>) -> bool {
         Arc::ptr_eq(self.dir.path(), other)
     }
