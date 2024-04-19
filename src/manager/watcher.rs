@@ -345,7 +345,7 @@ impl Manager {
                             }
                         }
                         Err(_e) => {
-                            error!("Path {:?} wasn't in search root {:?}", parent, search_root);
+                            error!("Path {parent:?} wasn't in search root {search_root:?}");
                             return;
                         }
                     }
@@ -384,7 +384,7 @@ impl Manager {
                     "Search watcher in {path:?} took a long time to initialize. \
                     Updates may be missed");
                 error!("{msg}");
-                let _ignored = self.gui_sender.send(GuiAction::DirectoryError(path.clone(), msg));
+                let _ignored = self.gui_sender.send(GuiAction::ConveyWarning(msg));
 
                 let gui_sender = self.gui_sender.clone();
                 let sender = self.slow_searches_sender.clone();

@@ -102,6 +102,7 @@ pub enum GuiAction {
     EntryReadError(Arc<Path>, Arc<Path>, String),
     // Any generic error we want to convey to the user.
     ConveyError(String),
+    ConveyWarning(String),
 
     Action(String),
     Quit,

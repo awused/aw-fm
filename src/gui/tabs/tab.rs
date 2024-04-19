@@ -417,7 +417,6 @@ impl Tab {
 
         let mut t = Self {
             id: closed.id,
-            // TODO [group]
             group: None,
 
             dir,
@@ -865,7 +864,6 @@ impl Tab {
                 continue;
             }
 
-            // TODO [gtk4.12]-- explicitly focus, which doesn't work yet.
             debug!("Seeking to {:?}", &*eo.get().name);
 
             if self.loaded() && self.visible() {
@@ -1140,7 +1138,7 @@ impl Tab {
             return;
         };
 
-        info!("Applying {:?} to tab {:?}", state, self.id);
+        info!("Applying {state:?} to tab {:?}", self.id);
 
         let state = self.pane.must_resolve_pending();
         let pane = self.pane.get_visible_mut().unwrap();
@@ -1238,7 +1236,6 @@ impl Tab {
     }
 
     pub fn close(self, after: Option<TabId>) -> ClosedTab {
-        // TODO [group]
         let current = self.current_history();
         ClosedTab {
             id: self.id,

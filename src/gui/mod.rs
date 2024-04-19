@@ -347,6 +347,7 @@ impl Gui {
             DirectoryError(_, error) | EntryReadError(_, _, error) | ConveyError(error) => {
                 self.error(error);
             }
+            ConveyWarning(warning) => self.warning(warning),
             Action(action) => self.run_command(&action),
             Quit => {
                 self.window.close();

@@ -152,6 +152,9 @@ impl Manager {
 
         match ma {
             Open(path, sort, cancel) => {
+                // This will process any pending removals immediately, but can't handle updates
+                // that haven't yet reached this process. Those are rare enough in practice that it
+                // is unlikely to be worth fixing.
                 self.flush_updates(Vec::new());
 
                 if self.watch_dir(&path) {
