@@ -17,7 +17,7 @@ use gtk::{Orientation, Widget, Window};
 
 use super::properties::dialog::PropDialog;
 use super::tabs::id::TabId;
-use super::{label_attributes, Gui};
+use super::{label_attributes, ActionTarget, Gui};
 use crate::closing;
 use crate::com::{DisplayMode, EntryObject, ManagerAction, SortDir, SortMode};
 use crate::config::CONFIG;
@@ -54,7 +54,7 @@ impl Gui {
         let g = self.clone();
         key.connect_key_pressed(move |_e, a, _b, c| {
             if let Some(s) = g.shortcut_from_key(a, c) {
-                g.run_command(s);
+                g.run_command_active(s);
             }
             Propagation::Proceed
         });
@@ -134,7 +134,7 @@ impl Gui {
             click.connect_pressed(move |gc, _n, _x, _y| {
                 let command = gc.widget().tooltip_text().unwrap();
                 info!("Running command from clicked bookmark: {command}");
-                g.run_command(&command);
+                g.run_command_active(&command);
             });
 
             label.add_controller(click);
@@ -361,11 +361,16 @@ impl Gui {
         shortcuts
     }
 
-    pub(super) fn run_command(self: &Rc<Self>, cmd: &str) {
+    pub(super) fn run_command_active(self: &Rc<Self>, cmd: &str) {
+        let target = self.tabs.borrow().active_action_target();
+        self.run_command(target, cmd)
+    }
+
+    pub(super) fn run_command(self: &Rc<Self>, target: ActionTarget, cmd: &str) {
         // Do not trim the end of cmd because files and directories can end in spaces
         let cmd = cmd.trim_start();
 
-        debug!("Running command {cmd}");
+        debug!("Running command {cmd} in {target:?}");
 
         // This may not be worth the headache, but it saves a fair bit of boilerplate
         let mut tabs = self.tabs.borrow_mut();
@@ -376,15 +381,15 @@ impl Gui {
 
             let _ = match cmd {
                 "Display" => match DisplayMode::from_str(arg) {
-                    Ok(m) => return tabs.active_display_mode(m),
+                    Ok(m) => return tabs.display_mode(target, m),
                     Err(_e) => true,
                 },
                 "SortBy" => match SortMode::from_str(arg) {
-                    Ok(m) => return tabs.active_sort_mode(m),
+                    Ok(m) => return tabs.sort_mode(target, m),
                     Err(_e) => true,
                 },
                 "SortDir" => match SortDir::from_str(arg) {
-                    Ok(d) => return tabs.active_sort_dir(d),
+                    Ok(d) => return tabs.sort_direction(target, d),
                     Err(_e) => true,
                 },
 
@@ -438,6 +443,7 @@ impl Gui {
                     drop(tabs);
                     return self.send_manager(ManagerAction::Script(
                         PathBuf::from(arg).into(),
+                        target,
                         self.get_env(),
                     ));
                 }

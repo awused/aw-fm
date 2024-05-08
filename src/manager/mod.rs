@@ -171,7 +171,7 @@ impl Manager {
             EndSearch(cancel) => self.unwatch_search(cancel),
 
             Execute(s, env) => self.execute(s, env),
-            Script(s, env) => self.script(s, env),
+            Script(s, target, env) => self.script(s, target, env),
             Launch(s, env) => self.launch(s, env),
 
             GetChildren(dirs, cancel) => self.get_children(dirs, cancel),

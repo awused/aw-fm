@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::collections::hash_map;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -18,7 +19,7 @@ use gtk::{PopoverMenu, PositionType};
 use once_cell::unsync::Lazy;
 use regex::bytes::Regex;
 
-use super::Gui;
+use super::{ActionTarget, Gui, TabId};
 use crate::com::{DirSettings, Entry, EntryObject, ManagerAction};
 use crate::config::{ContextMenuEntry, ContextMenuGroup, Selection, ACTIONS_DIR, CONFIG};
 use crate::gui::clipboard;
@@ -86,7 +87,7 @@ impl GC {
 
             let g = g.clone();
             sa.connect_activate(move |a, _v| {
-                g.run_command(&a.name());
+                g.run_command(g.menu.get().unwrap().action_target.get(), &a.name());
             });
 
             return sa;
@@ -102,7 +103,7 @@ impl GC {
         sa.connect_activate(move |a, v| {
             let name = a.name();
             let arg = v.unwrap().str().unwrap();
-            g.run_command(&format!("{name} {arg}"));
+            g.run_command(g.menu.get().unwrap().action_target.get(), &format!("{name} {arg}"));
         });
 
         sa
@@ -404,7 +405,11 @@ impl CustomAction {
         let p = path.clone();
         action.connect_activate(move |_a, _v| {
             if settings.parse_output {
-                g.send_manager(ManagerAction::Script(p.clone(), g.get_env()))
+                g.send_manager(ManagerAction::Script(
+                    p.clone(),
+                    g.menu.get().unwrap().action_target.get(),
+                    g.get_env(),
+                ))
             } else {
                 g.send_manager(ManagerAction::Execute(p.clone(), g.get_env()))
             }
@@ -428,7 +433,7 @@ impl CustomAction {
         let g = g.clone();
         let cmd = context.action.clone();
         action.connect_activate(move |_a, _v| {
-            g.run_command(&cmd);
+            g.run_command(g.menu.get().unwrap().action_target.get(), &cmd);
         });
 
         group.add_action(&action);
@@ -474,6 +479,8 @@ pub(super) struct GuiMenu {
     menu: PopoverMenu,
     custom: Vec<CustomAction>,
     custom_context: Vec<CustomAction>,
+    // TODO [Action Targets] -- Context menus should close if the active tab changes
+    action_target: Cell<ActionTarget>,
 }
 
 impl GuiMenu {
@@ -491,7 +498,7 @@ impl GuiMenu {
         let g = gui.clone();
         command.connect_activate(move |_a, v| {
             let action = v.unwrap().str().unwrap();
-            g.run_command(action);
+            g.run_command(g.menu.get().unwrap().action_target.get(), action);
         });
 
         let action_group = SimpleActionGroup::new();
@@ -516,6 +523,7 @@ impl GuiMenu {
             menu,
             custom,
             custom_context,
+            action_target: Cell::new(ActionTarget::Active),
         }
     }
 
@@ -643,10 +651,13 @@ impl GuiMenu {
     pub fn prepare(
         &self,
         g: &Gui,
+        tab: TabId,
         settings: DirSettings,
         entries: Vec<EntryObject>,
         dir: &Path,
     ) -> PopoverMenu {
+        self.action_target.set(ActionTarget::Tab(tab));
+
         let start = Instant::now();
         self.display.change_state(&settings.display_mode.as_ref().to_variant());
         self.sort_mode.change_state(&settings.sort.mode.as_ref().to_variant());

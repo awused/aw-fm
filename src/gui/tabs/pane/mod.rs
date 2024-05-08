@@ -500,15 +500,15 @@ impl Pane {
         }
     }
 
-    pub fn update_settings(&mut self, settings: DirSettings, list: &Contents) {
+    pub fn update_settings(&mut self, settings: DirSettings, list: &Contents) -> bool {
         self.deny_view_click.set(false);
 
         if self.view.matches(settings.display_mode) {
             self.view.update_settings(settings);
-            return;
+            return false;
         }
 
-        let vs = self.get_state(list);
+        let vs = self.element.is_visible().then(|| self.get_state(list));
 
         self.view = match settings.display_mode {
             DisplayMode::Icons => View::Icons(IconView::new(
@@ -526,7 +526,10 @@ impl Pane {
             )),
         };
 
-        self.apply_state(vs, list);
+        if let Some(vs) = vs {
+            self.apply_state(vs, list);
+        }
+        true
     }
 
     pub fn get_state(&self, list: &Contents) -> PaneState {

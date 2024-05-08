@@ -36,6 +36,8 @@ mod properties;
 mod tabs;
 mod thumbnailer;
 
+pub use tabs::id::TabId;
+
 // The Rc<> ends up more ergonomic in most cases but it's too much of a pain to pass things into
 // GObjects.
 // Rc<RefCell<Option<Gui>>> might work better in some cases.
@@ -300,18 +302,17 @@ impl Gui {
             let g = self.clone();
             let check_dpi = move |surface: &Surface| {
                 let scale = surface.scale();
-                let size = if scale <= 1.0
-                    && g.thumbnailer.size.get() != DesktopThumbnailSize::Normal
-                {
-                    info!("Returned to regular DPI, using normal thumbnails");
+                let size = if scale <= 1.2 {
                     DesktopThumbnailSize::Normal
-                } else if scale > 1.0 && g.thumbnailer.size.get() != DesktopThumbnailSize::Large {
-                    info!("Detected high DPI, using large thumbnails");
-                    DesktopThumbnailSize::Large
                 } else {
+                    DesktopThumbnailSize::Large
+                };
+
+                if g.thumbnailer.size.get() == size {
                     return;
                 };
 
+                info!("Detected DPI change, switching to {size:?} thumbnails");
                 g.thumbnailer.size.set(size);
                 EntryObject::change_thumb_size(size);
             };
@@ -348,7 +349,7 @@ impl Gui {
                 self.error(error);
             }
             ConveyWarning(warning) => self.warning(warning),
-            Action(action) => self.run_command(&action),
+            Action(action, target) => self.run_command(target, &action),
             Quit => {
                 self.window.close();
                 closing::close();

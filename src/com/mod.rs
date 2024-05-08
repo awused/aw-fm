@@ -16,6 +16,7 @@ use tokio::sync::oneshot;
 pub use self::entry::*;
 pub use self::settings::*;
 pub use self::snapshot::*;
+use crate::gui::TabId;
 
 
 mod entry;
@@ -25,9 +26,9 @@ mod snapshot;
 
 #[derive(Debug)]
 pub enum Update {
-    // We don't really care about a creation vs update here, treat them all as a potential update.
-    // Races with reading the initial directory can cause us get a creation event for an entry we
-    // already have.
+    /// We don't really care about a creation vs update here, treat them all as a potential update.
+    /// Races with reading the initial directory can cause us get a creation event for an entry we
+    /// already have.
     Entry(Arc<Entry>),
     Removed(Arc<Path>),
 }
@@ -56,6 +57,17 @@ pub struct SearchUpdate {
     pub update: Update,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ActionTarget {
+    /// The action was called with no associated tab
+    NoTab,
+    /// A specific tab, if this tab is closed the action will not run.
+    Tab(TabId),
+    /// The active tab, whatever it _currently_ is.
+    /// Only useful for scripts when they call ClearTarget, otherwise it'll be
+    /// Tab with a specific ID.
+    Active,
+}
 
 #[derive(Debug)]
 pub enum ManagerAction {
@@ -66,7 +78,7 @@ pub enum ManagerAction {
 
     // For commands from configs/scripts
     Execute(Arc<Path>, Vec<(String, OsString)>),
-    Script(Arc<Path>, Vec<(String, OsString)>),
+    Script(Arc<Path>, ActionTarget, Vec<(String, OsString)>),
     // When launching an application or executable directly
     Launch(Arc<Path>, Vec<(String, OsString)>),
 
@@ -104,7 +116,7 @@ pub enum GuiAction {
     ConveyError(String),
     ConveyWarning(String),
 
-    Action(String),
+    Action(String, ActionTarget),
     Quit,
 }
 

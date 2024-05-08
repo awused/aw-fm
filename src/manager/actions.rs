@@ -9,7 +9,7 @@ use tokio::{pin, select};
 
 use super::Manager;
 use crate::closing;
-use crate::com::GuiAction;
+use crate::com::{ActionTarget, GuiAction};
 
 
 impl Manager {
@@ -25,7 +25,12 @@ impl Manager {
         tokio::task::spawn_local(run(cmd, self.gui_sender.clone(), true));
     }
 
-    pub(super) fn script(&self, cmd: Arc<Path>, gui_env: Vec<(String, OsString)>) {
+    pub(super) fn script(
+        &self,
+        cmd: Arc<Path>,
+        target: ActionTarget,
+        gui_env: Vec<(String, OsString)>,
+    ) {
         let cmd = match prep_command(cmd, gui_env, true) {
             Ok(cmd) => cmd,
             Err(e) => {
@@ -34,7 +39,7 @@ impl Manager {
             }
         };
 
-        tokio::task::spawn_local(run_with_output(cmd, self.gui_sender.clone()));
+        tokio::task::spawn_local(run_with_output(cmd, target, self.gui_sender.clone()));
     }
 
     pub(super) fn launch(&self, cmd: Arc<Path>, gui_env: Vec<(String, OsString)>) {
@@ -68,7 +73,11 @@ fn prep_command(
     }
 }
 
-async fn run_with_output(mut cmd: Command, gui_chan: UnboundedSender<GuiAction>) {
+async fn run_with_output(
+    mut cmd: Command,
+    mut target_tab: ActionTarget,
+    gui_chan: UnboundedSender<GuiAction>,
+) {
     let fut = cmd.output();
 
     pin!(fut);
@@ -87,11 +96,17 @@ async fn run_with_output(mut cmd: Command, gui_chan: UnboundedSender<GuiAction>)
                 let stdout = String::from_utf8_lossy(&output.stdout);
 
                 for line in stdout.trim().lines() {
+                    if line == "ClearTarget" {
+                        info!("Clearing script target tab, was {target_tab:?}");
+                        target_tab = ActionTarget::Active;
+                        continue;
+                    }
+
                     info!("Running command from script: {line}");
                     // It's possible to get the responses and include them in the JSON output,
                     // but probably unnecessary. This also doesn't wait for any slow/interactive
                     // commands to finish.
-                    drop(gui_chan.send(GuiAction::Action(line.to_string())));
+                    drop(gui_chan.send(GuiAction::Action(line.to_string(), target_tab)));
                 }
 
                 return;

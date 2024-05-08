@@ -25,7 +25,7 @@ use crate::gui::clipboard::ClipboardOp;
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
-use crate::gui::{operations, show_error, show_warning, tabs_run};
+use crate::gui::{operations, show_error, show_warning, tabs_run, ActionTarget};
 
 // For event handlers which cannot be run with the tabs lock being held.
 // Assumes the tab still exists since GTK notifies are run synchronously.
@@ -166,6 +166,18 @@ impl TabsList {
 
     fn position(&self, id: TabId) -> Option<usize> {
         self.tabs.iter().position(|t| t.id() == id)
+    }
+
+    pub fn active_action_target(&self) -> ActionTarget {
+        self.active.map_or(ActionTarget::NoTab, ActionTarget::Tab)
+    }
+
+    fn resolve(&self, target: ActionTarget) -> Option<(TabId, usize)> {
+        match target {
+            ActionTarget::NoTab => None,
+            ActionTarget::Active => self.active.map(|a| (a, self.position(a).unwrap())),
+            ActionTarget::Tab(id) => self.position(id).map(|pos| (id, pos)),
+        }
     }
 
     pub(super) fn find(&self, id: TabId) -> Option<&Tab> {
@@ -782,6 +794,21 @@ impl TabsList {
         f(tab, left, right)
     }
 
+    // Tries to run f() against the target tab, if one exists
+    fn try_resolve<T, F: FnOnce(&mut Tab) -> T>(
+        &mut self,
+        target: ActionTarget,
+        f: F,
+    ) -> Option<T> {
+        self.resolve(target).map_or_else(
+            || {
+                info!("No matching tab for {target:?}");
+                None
+            },
+            |(_target, pos)| Some(f(&mut self.tabs[pos])),
+        )
+    }
+
     // Tries to run f() against the active tab, if one exists
     fn try_active<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(&mut self, f: F) -> Option<T> {
         self.active.map(|active| self.must_run_tab(active, f))
@@ -949,28 +976,16 @@ impl TabsList {
         self.tab_elements.remove(eindex);
     }
 
-    pub fn active_display_mode(&mut self, mode: DisplayMode) {
-        let Some(active) = self.active else {
-            return warn!("Display called with no open panes");
-        };
-
-        self.find_mut(active).unwrap().update_display_mode(mode);
+    pub fn display_mode(&mut self, target: ActionTarget, mode: DisplayMode) {
+        self.try_resolve(target, |t| t.update_display_mode(mode));
     }
 
-    pub fn active_sort_mode(&mut self, mode: SortMode) {
-        let Some(active) = self.active else {
-            return warn!("SortBy called with no open panes");
-        };
-
-        self.find_mut(active).unwrap().update_sort_mode(mode);
+    pub fn sort_mode(&mut self, target: ActionTarget, mode: SortMode) {
+        self.try_resolve(target, |t| t.update_sort_mode(mode));
     }
 
-    pub fn active_sort_dir(&mut self, dir: SortDir) {
-        let Some(active) = self.active else {
-            return warn!("SortDir called with no open panes");
-        };
-
-        self.find_mut(active).unwrap().update_sort_dir(dir);
+    pub fn sort_direction(&mut self, target: ActionTarget, dir: SortDir) {
+        self.try_resolve(target, |t| t.update_sort_direction(dir));
     }
 
     pub fn active_search(&mut self, query: &str) {

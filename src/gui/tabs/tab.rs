@@ -123,7 +123,11 @@ impl TabPane {
                 };
                 *self = Self::Pending(pane, new_state);
             }
-            Self::Detached { state, .. } | Self::Pending(_, state) => *state = new_state,
+            Self::Pending(_, state) => *state = new_state,
+            Self::Detached { state, pending, .. } => {
+                *state = new_state;
+                *pending = true;
+            }
             Self::Empty => unreachable!(),
         }
     }
@@ -179,6 +183,14 @@ impl TabPane {
 
         *self = Self::Pane(pane);
         state
+    }
+
+    fn set_detached_pending_flag(&mut self) {
+        match self {
+            Self::Pane(_) | Self::Pending(..) => {}
+            Self::Detached { pending, .. } => *pending = true,
+            Self::Empty => unreachable!(),
+        }
     }
 }
 
@@ -469,10 +481,7 @@ impl Tab {
         orient: Orientation,
         forced: bool,
     ) -> Option<(gtk::Paned, Rc<RefCell<Group>>)> {
-        let Some(paned) = self.pane.split(orient, forced) else {
-            return None;
-        };
-
+        let paned = self.pane.split(orient, forced)?;
 
         Some((paned, self.get_or_start_group()))
     }
@@ -724,12 +733,16 @@ impl Tab {
     fn update_settings(&mut self) {
         self.contents.sort(self.settings.sort);
 
-        if let Some(search) = &mut self.search {
+        let set_pending = if let Some(search) = &mut self.search {
             search.update_settings(self.settings);
 
-            self.pane.update_settings(self.settings, search.contents());
+            self.pane.update_settings(self.settings, search.contents())
         } else {
             self.pane.update_settings(self.settings, &self.contents)
+        };
+
+        if set_pending {
+            self.pane.set_detached_pending_flag();
         }
         self.save_settings();
     }
@@ -749,7 +762,7 @@ impl Tab {
         self.update_settings();
     }
 
-    pub fn update_sort_dir(&mut self, dir: SortDir) {
+    pub fn update_sort_direction(&mut self, dir: SortDir) {
         self.settings.sort.direction = dir;
         self.update_settings();
     }
@@ -1043,7 +1056,7 @@ impl Tab {
         self.apply_pane_state()
     }
 
-    // Goes to the child directory if one was previous open or if there's only one.
+    // Goes to the child directory if one was previously open or if there's only one.
     pub(super) fn child(&mut self, left: &[Self], right: &[Self]) {
         if self.search.is_some() {
             warn!("Can't move to child in search tab {:?}", self.id);
@@ -1072,7 +1085,7 @@ impl Tab {
         }
 
         if self.contents.selection.n_items() >= 2 {
-            let second = self.contents.selection.item(0).and_downcast::<EntryObject>().unwrap();
+            let second = self.contents.selection.item(1).and_downcast::<EntryObject>().unwrap();
             if second.get().dir() {
                 warn!("More than one subdirectory found in {:?}, cannot use Child", self.id);
                 return;
@@ -1095,8 +1108,6 @@ impl Tab {
             error!(
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
-            self.apply_pane_state();
-            return;
         }
 
         self.apply_pane_state()
@@ -1703,10 +1714,10 @@ impl Tab {
     }
 
     pub fn context_menu(&self) -> PopoverMenu {
-        info!("Spawning context menu for {:?}", self.id());
+        info!("Spawning context menu for {:?}", self.id);
         let sel: Vec<EntryObject> = Selected::from(self.visible_selection()).collect();
 
-        gui_run(|g| g.menu.get().unwrap().prepare(g, self.settings, sel, &self.dir()))
+        gui_run(|g| g.menu.get().unwrap().prepare(g, self.id(), self.settings, sel, &self.dir()))
     }
 
     pub fn env_vars(&self, prefix: &str, env: &mut Vec<(String, OsString)>) {

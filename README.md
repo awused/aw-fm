@@ -66,11 +66,11 @@ Custom actions are enabled by scripts in the actions directory, default
 they do not always appear in the context menu.
 
 They must be executable text files and options are read from within the file.
-See the [example script](examples/sample.sh) for an explanation of the
+See the [example script](examples/sample-action.sh) for an explanation of the
 options.
 
 Custom actions behave as if run by `Script`: any output will be treated as a
-newline-separated series of commands to run.
+newline-separated series of commands to run. See below for more details.
 
 #### Commands
 
@@ -154,7 +154,7 @@ specify them.
 * `Split horizontal|vertical`
   * Splits the current tab in two, creating or adding to the existing group.
   * The new tab is on the right or bottom of the split.
-  * If no tabs are visible, opens a new on.
+  * If no tabs are visible, opens a new one.
 * `SaveSession name`, `LoadSession name`, and `DeleteSession name`
   * Saves, loads, or deletes the current session.
   * Only currently saves the list of open tabs.
@@ -190,13 +190,17 @@ specify them.
     files _will_ still be deleted.
   * Not all operations or actions can be undone.
     Deletion is not undoable and trashing is currently not undoable.
+* `ClearTarget`
+  * Changes the target for later commands from whatever the active tab was when
+    the script was called to whatever the active tab is currently.
+  * Only useful in the context of custom actions or `Script` calls.
 
 ### External Executable Environment
 
 The executables from `Execute`, `Script`, and custom actions will be called
 with no arguments and several environment variables set.
 [rofi-jump-home.sh](examples/rofi-jump-home.sh) is an example that opens rofi
-to navigate to a directory inside the user's home directory.
+to navigate to a subdirectory inside the user's home directory.
 
 All of these variables may be empty or absent.
 
@@ -215,6 +219,27 @@ Environment Variable | Explanation
 <!-- AWFM_PID | The PID of the aw-fm process. -->
 <!-- AWFM_SOCKET | The socket used for IPC, if enabled. -->
 <!-- AWFM_WINDOW | The window ID for the primary window. Currently only on X11. -->
+
+By default commands run in the context of tab that was active when they spawn.
+Calling `ClearTarget` will instead run them in the context of the currently
+active tab, even if it changes.
+
+This script will open a new tab and close the previous tab, if any was open,
+since CloseTab will run in the context of whatever tab was initially open.
+
+```bash
+echo NewTab
+echo CloseTab
+```
+
+This script will open a new tab and then immediately close the new tab,
+leaving whatever tab was open initially untouched.
+
+```bash
+echo ClearTarget
+echo NewTab
+echo CloseTab
+```
 
 ## Building on Windows
 
@@ -235,6 +260,7 @@ customization. They do, however, support things I probably won't,
 like automount and udev.
 
 ## Screenshots
+
 Panes and tab groups
 ![Panes](/../screenshots/screenshots/panes.webp)
 Support for transparent backgrounds
