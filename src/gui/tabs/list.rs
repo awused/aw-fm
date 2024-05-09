@@ -52,8 +52,7 @@ impl Group {
 
 #[derive(Debug)]
 pub enum TabPosition {
-    AfterActive,
-    After(TabId),
+    After(ActionTarget),
     End,
 }
 
@@ -337,20 +336,6 @@ impl TabsList {
         }
     }
 
-    pub fn navigate(&mut self, id: TabId, path: &Path) {
-        let Some(index) = self.position(id) else {
-            return;
-        };
-
-        let Some(target) = NavTarget::open_or_jump(path, self) else {
-            return;
-        };
-
-        let (left, tab, right) = self.split_around_mut(index);
-
-        tab.navigate(left, right, target)
-    }
-
     pub fn scroll_to_completed(&mut self, op: &Rc<operations::Operation>) {
         let Some(tab) = self.find_mut(op.tab) else {
             return info!("Not scrolling to completed operation in closed tab {:?}", op.tab);
@@ -432,8 +417,7 @@ impl TabsList {
         self.tabs.push(new_tab);
 
         let after = match position {
-            TabPosition::AfterActive => self.active,
-            TabPosition::After(id) => Some(id),
+            TabPosition::After(t) => self.resolve(t).map(|(id, _idx)| id),
             TabPosition::End => None,
         };
 
@@ -495,7 +479,7 @@ impl TabsList {
             return;
         };
 
-        self.create_tab(TabPosition::AfterActive, target, activate);
+        self.create_tab(TabPosition::After(ActionTarget::Active), target, activate);
     }
 
     // Restores splits from saved groups in a session.
@@ -536,11 +520,21 @@ impl TabsList {
         }
     }
 
-    pub fn active_split(&mut self, orient: Orientation, tab: Option<TabId>) {
-        let Some(active) = self.active else {
+    pub fn visible_split(&mut self, target: ActionTarget, orient: Orientation, tab: Option<TabId>) {
+        if self.active.is_none() && matches!(target, ActionTarget::Active | ActionTarget::NoTab) {
             show_warning("Split called with no panes to split");
             return self.new_tab(true);
         };
+
+        let Some((source, source_pos)) = self.resolve(target) else {
+            show_warning("Split called with stale target tab");
+            return;
+        };
+
+        if !self.tabs[source_pos].visible() {
+            show_warning("Split called with non-visible target tab");
+            return;
+        }
 
         if let Some(id) = tab {
             if self.find(id).unwrap().visible() {
@@ -548,9 +542,7 @@ impl TabsList {
             }
         }
 
-        let active_pos = self.position(active).unwrap();
-
-        let Some((paned, group)) = self.tabs[active_pos].split(orient, false) else {
+        let Some((paned, group)) = self.tabs[source_pos].split(orient, false) else {
             return show_warning("Pane is too small to split");
         };
 
@@ -568,7 +560,7 @@ impl TabsList {
             let moved = self.tab_elements.item(eindex).unwrap();
             self.tab_elements.remove(eindex);
 
-            let dest = self.element_position(active).unwrap() + 1;
+            let dest = self.element_position(source).unwrap() + 1;
             self.tab_elements.insert(dest, &moved);
 
             Some((tab, index))
@@ -587,21 +579,29 @@ impl TabsList {
         self.set_active(id);
     }
 
-    pub fn refresh(&mut self) {
-        if self.active.is_none() {
-            return show_warning("Refresh called without any visible tabs");
+    pub fn refresh(&mut self, target: ActionTarget) {
+        let Some((_id, pos)) = self.resolve(target) else {
+            return warn!("Refresh called with no valid target tab");
         };
+
+        let tab_group = self.tabs[pos].multi_tab_group();
 
         // TODO -- Should be (path, is_search)
         let mut unload_paths = BTreeSet::new();
         let mut unloaded = HashSet::new();
 
-        for t in &mut self.tabs {
-            if !t.visible() {
-                continue;
+        for (i, t) in self.tabs.iter_mut().enumerate() {
+            if pos != i {
+                let same_group = tab_group.as_ref().is_some_and(|grc| {
+                    t.multi_tab_group().is_some_and(|grc2| Rc::ptr_eq(grc, &grc2))
+                });
+
+                if !same_group {
+                    continue;
+                }
             }
 
-            debug!("Unloading visible tab {:?}", t.id());
+            debug!("Unloading tab {:?}", t.id());
             unloaded.insert(t.id());
             t.unload_unchecked();
             // TODO -- Should be (path, is_search)
@@ -809,33 +809,38 @@ impl TabsList {
         )
     }
 
+    fn try_resolve_sliced<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(
+        &mut self,
+        target: ActionTarget,
+        f: F,
+    ) -> Option<T> {
+        self.resolve(target).map_or_else(
+            || {
+                info!("No matching tab for {target:?}");
+                None
+            },
+            |(_target, pos)| {
+                let (left, tab, right) = self.split_around_mut(pos);
+                Some(f(tab, left, right))
+            },
+        )
+    }
+
     // Tries to run f() against the active tab, if one exists
     fn try_active<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(&mut self, f: F) -> Option<T> {
         self.active.map(|active| self.must_run_tab(active, f))
     }
 
-    pub fn activate(&mut self) {
-        let Some(active) = self.active else {
-            return warn!("Activate called with no active tab");
-        };
-
-        self.find(active).unwrap().activate();
+    pub fn activate(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.activate());
     }
 
-    pub fn active_open_default(&mut self) {
-        let Some(active) = self.active else {
-            return warn!("OpenDefault called with no active tab");
-        };
-
-        self.find(active).unwrap().open_default();
+    pub fn open_default(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.open_default());
     }
 
-    pub fn active_open_with(&mut self) {
-        let Some(active) = self.active else {
-            return warn!("OpenWith called with no active tab");
-        };
-
-        self.find(active).unwrap().open_with();
+    pub fn open_with(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.open_with());
     }
 
     pub fn active_copy(&self) {
@@ -862,29 +867,49 @@ impl TabsList {
         self.find(active).unwrap().paste();
     }
 
-    // Don't want to expose the Tab methods to Gui, so annoying wrapper functions.
-    pub fn active_navigate(&mut self, path: &Path) {
-        if let Some(active) = self.active {
-            self.navigate(active, path);
+    pub fn navigate(&mut self, action_target: ActionTarget, path: &Path) {
+        let Some(nav_target) = NavTarget::open_or_jump(path, self) else {
             return;
-        }
+        };
 
-        self.open_tab(path, TabPosition::AfterActive, true);
+        let navigated = self
+            .try_resolve_sliced(action_target, |tab, left, right| {
+                tab.navigate(left, right, nav_target);
+            })
+            .is_some();
+        if !navigated {
+            // This can be a bit weird, but if a script without ClearTarget closes a tab and
+            // switches the active tab, we'll open a new tab rather than navigating the
+            // new active tab.
+            self.open_tab(path, TabPosition::After(action_target), true);
+        }
     }
 
-    pub fn active_jump(&mut self, path: &Path) {
+    // Assumes the tab is open, if not the navigation fails.
+    pub fn navigate_open_tab(&mut self, id: TabId, path: &Path) {
+        let Some(nav_target) = NavTarget::open_or_jump(path, self) else {
+            return;
+        };
+
+        self.try_resolve_sliced(ActionTarget::Tab(id), |tab, left, right| {
+            tab.navigate(left, right, nav_target)
+        });
+    }
+
+    pub fn jump(&mut self, action_target: ActionTarget, path: &Path) {
         let Some(jump) = NavTarget::jump(path, self) else {
             return;
         };
 
-        if let Some(active) = self.active {
-            self.must_run_tab(active, |t, l, r| {
-                t.navigate(l, r, jump);
-            });
-            return;
+        let j = jump.clone();
+        let navigated = self
+            .try_resolve_sliced(action_target, |tab, left, right| {
+                tab.navigate(left, right, j);
+            })
+            .is_some();
+        if !navigated {
+            self.create_tab(TabPosition::After(action_target), jump, true);
         }
-
-        self.create_tab(TabPosition::AfterActive, jump, true);
     }
 
     pub fn active_forward(&mut self) {
@@ -988,26 +1013,30 @@ impl TabsList {
         self.try_resolve(target, |t| t.update_sort_direction(dir));
     }
 
-    pub fn active_search(&mut self, query: &str) {
-        let Some(active) = self.active else {
-            return warn!("Search called with no open panes");
-        };
-
-        self.find_mut(active).unwrap().search(query.to_owned());
+    pub fn search(&mut self, target: ActionTarget, query: &str) {
+        self.try_resolve(target, |t| t.search(query.to_owned()));
     }
 
-    pub fn active_trash(&self) {
-        let Some(active) = self.active else {
-            return warn!("Trash called with no open panes");
+    pub fn trash(&self, target: ActionTarget) {
+        let Some((_id, pos)) = self.resolve(target) else {
+            return warn!("Trash called without valid target");
         };
 
-        self.find(active).unwrap().trash();
+        self.tabs[pos].trash();
     }
 
-    pub fn active_delete(&self) {
+    pub fn active_delete(&self, target: ActionTarget) {
         let Some(active) = self.active else {
             return warn!("Delete called with no open panes");
         };
+
+        match target {
+            ActionTarget::Tab(id) if active == id => {}
+            ActionTarget::Active => {}
+            ActionTarget::NoTab | ActionTarget::Tab(_) => {
+                return warn!("Delete called on non-active tab. Aborting");
+            }
+        }
 
         self.find(active).unwrap().delete();
     }

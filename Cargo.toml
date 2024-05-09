@@ -72,6 +72,3 @@ pkg-config = "0.3.30"
 
 [features]
 debug-forced-slow = []
-
-# [patch.crates-io]
-# gtk4 = { path = "../../third_party/gtk4-rs/gtk4" }

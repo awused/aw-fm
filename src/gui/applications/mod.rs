@@ -10,7 +10,7 @@ use gtk::prelude::{AppInfoExt, DisplayExt, GdkAppLaunchContextExt};
 use self::open_with::OpenWith;
 use super::tabs::id::TabId;
 use super::tabs::list::TabPosition;
-use super::{show_error, show_warning, tabs_run, Gui, Selected};
+use super::{show_error, show_warning, tabs_run, ActionTarget, Gui, Selected};
 use crate::com::{EntryKind, EntryObject, ManagerAction};
 use crate::gui::gui_run;
 
@@ -130,14 +130,13 @@ pub(super) fn open(tab: TabId, display: &Display, selected: Selected<'_>, execut
     glib::idle_add_local_once(move || {
         tabs_run(|t| {
             if directories.len() == 1 {
-                t.navigate(tab, &directories[0]);
+                t.navigate_open_tab(tab, &directories[0]);
                 return;
             }
 
             // Open tabs in reverse order.
-            // directories.reverse();
             for d in directories.into_iter().rev() {
-                t.open_tab(&d, TabPosition::AfterActive, false);
+                t.open_tab(&d, TabPosition::After(ActionTarget::Tab(tab)), false);
             }
         })
     });

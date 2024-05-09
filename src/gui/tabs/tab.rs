@@ -522,8 +522,6 @@ impl Tab {
 
     // Starts a new search or updates an existing one with a new query.
     pub fn search(&mut self, query: String) {
-        assert!(self.visible());
-
         if let Some(_search) = &mut self.search {
             self.pane.update_search(&query);
             return;

@@ -7,7 +7,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{glib, DragSource, DropTarget, GestureClick, Orientation, WidgetPaintable};
 
 use crate::gui::tabs::id::TabId;
-use crate::gui::tabs_run;
+use crate::gui::{tabs_run, ActionTarget};
 
 
 glib::wrapper! {
@@ -53,7 +53,7 @@ impl TabElement {
                     };
 
                     c.set_state(gtk::EventSequenceState::Claimed);
-                    tabs_run(|tl| tl.active_split(orient, Some(tab)));
+                    tabs_run(|tl| tl.visible_split(ActionTarget::Active, orient, Some(tab)));
                 }
                 2 => {
                     debug!("Closing {tab:?} from middle click");

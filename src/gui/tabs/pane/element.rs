@@ -42,6 +42,7 @@ impl Deref for StackChild {
 
 // Contains signals attached to something else, not tied to the lifecycle of this Pane.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(super) struct PaneSignals(SignalHolder<MultiSelection>, SignalHolder<MultiSelection>);
 
 impl PaneElement {

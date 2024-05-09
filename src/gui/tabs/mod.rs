@@ -78,7 +78,7 @@ impl PaneState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct NavTarget {
     // A clean and absolute but not canonical path.
     dir: Arc<Path>,

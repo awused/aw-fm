@@ -108,6 +108,8 @@ specify them.
   * aw-fm doesn't have utilities to manage trash.
 * `Delete`
   * Spawns a confirmation dialog before permanently deleting the selected items.
+  * As a special case, `Script`s can only run `Delete` on the _currently_ active
+    tab and it will fail if the active tab has changed without `ClearTarget`.
 * `Rename`
   * Spawns a rename dialog for the current file.
 * `Properties`
@@ -155,6 +157,7 @@ specify them.
   * Splits the current tab in two, creating or adding to the existing group.
   * The new tab is on the right or bottom of the split.
   * If no tabs are visible, opens a new one.
+  * In `Script`s, if the target tab is no longer visible, does nothing.
 * `SaveSession name`, `LoadSession name`, and `DeleteSession name`
   * Saves, loads, or deletes the current session.
   * Only currently saves the list of open tabs.
@@ -202,7 +205,9 @@ with no arguments and several environment variables set.
 [rofi-jump-home.sh](examples/rofi-jump-home.sh) is an example that opens rofi
 to navigate to a subdirectory inside the user's home directory.
 
-All of these variables may be empty or absent.
+All of these variables may be empty or absent. They are not updated in response
+to actions taken by the script or the user while the script is running, so they
+may become stale.
 
 Environment Variable | Explanation
 -------------------- | ----------

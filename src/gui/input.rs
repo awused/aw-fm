@@ -195,7 +195,7 @@ impl Gui {
 
             let new_name = e.text();
             if new_name.is_empty() || new_name.contains('/') || new_name.contains('\\') {
-                return show_warning("Invalid name for file \"{new_name}\"");
+                return show_warning(format!("Invalid name for file \"{new_name}\""));
             }
 
             let parent = path.parent().unwrap();
@@ -355,7 +355,7 @@ impl Gui {
             };
 
             let k = Key::from_name(&s.key)
-                .unwrap_or_else(|| panic!("{}", format!("Could not decode Key: {}", &s.key)));
+                .unwrap_or_else(|| panic!("Could not decode Key: {}", &s.key));
             inner.insert(k, s.action.clone());
         }
         shortcuts
@@ -393,24 +393,24 @@ impl Gui {
                     Err(_e) => true,
                 },
 
-                "Navigate" => return tabs.active_navigate(Path::new(arg)),
-                "JumpTo" => return tabs.active_jump(Path::new(arg)),
-                "NewTab" => return tabs.open_tab(Path::new(arg), TabPosition::AfterActive, true),
+                "Navigate" => return tabs.navigate(target, Path::new(arg)),
+                "JumpTo" => return tabs.jump(target, Path::new(arg)),
+                "NewTab" => return tabs.open_tab(Path::new(arg), TabPosition::After(target), true),
                 "NewBackgroundTab" => {
-                    return tabs.open_tab(Path::new(arg), TabPosition::AfterActive, false);
+                    return tabs.open_tab(Path::new(arg), TabPosition::After(target), false);
                 }
 
                 "Split" => match arg {
                     "horizontal" => {
-                        return tabs.active_split(Orientation::Horizontal, None);
+                        return tabs.visible_split(target, Orientation::Horizontal, None);
                     }
                     "vertical" => {
-                        return tabs.active_split(Orientation::Vertical, None);
+                        return tabs.visible_split(target, Orientation::Vertical, None);
                     }
                     _ => true,
                 },
 
-                "Search" => return tabs.active_search(arg),
+                "Search" => return tabs.search(target, arg),
 
                 "SaveSession" => {
                     if let Some(session) = tabs.get_session() {
@@ -458,10 +458,11 @@ impl Gui {
                 return self.window.close();
             }
             "Help" => return self.help_dialog(),
-            "Activate" => return tabs.activate(),
-            "OpenDefault" => return tabs.active_open_default(),
-            "OpenWith" => return tabs.active_open_with(),
+            "Activate" => return tabs.activate(target),
+            "OpenDefault" => return tabs.open_default(target),
+            "OpenWith" => return tabs.open_with(target),
 
+            // TODO [Action Targets]
             "Copy" => return tabs.active_copy(),
             "Cut" => return tabs.active_cut(),
             "Paste" => return tabs.active_paste(),
@@ -472,38 +473,46 @@ impl Gui {
             }
             "Undo" => {
                 drop(tabs);
+                // TODO -- should this be tied to a specific tab? or directory?
                 return self.undo_operation();
             }
 
             "Home" => {
-                return tabs.active_navigate(&home_dir().unwrap_or_default());
+                return tabs.navigate(target, &home_dir().unwrap_or_default());
             }
+            // TODO [Action Targets]
             "NewTab" => return tabs.new_tab(true),
             "NewBackgroundTab" => return tabs.new_tab(false),
             "ReopenTab" => return tabs.reopen(),
 
-            "Refresh" => return tabs.refresh(),
+            "Refresh" => return tabs.refresh(target),
             "RefreshAll" => return tabs.refresh_all(),
+            // TODO [Action Targets] - these could all be a bit tricky and CloseActive might need
+            // to be renamed
             "CloseTab" => return tabs.active_close_tab(),
             "ClosePane" => return tabs.active_close_pane(),
             "HidePanes" => return tabs.active_hide(),
             "CloseActive" => return tabs.active_close_both(),
 
+            // TODO -- these are all just variants of navigate
+            // TODO [Action Targets]
             "Forward" => return tabs.active_forward(),
             "Back" => return tabs.active_back(),
             "Parent" => return tabs.active_parent(),
             "Child" => return tabs.active_child(),
 
-            "Trash" => return tabs.active_trash(),
-            "Delete" => return tabs.active_delete(),
+            "Trash" => return tabs.trash(target),
+            "Delete" => return tabs.active_delete(target),
 
+            // TODO [Action Targets]
             "Rename" => return tabs.active_rename(),
             "Properties" => return tabs.active_properties(),
 
+            // TODO [Action Targets]
             "NewFolder" => return tabs.active_create(true),
             "NewFile" => return tabs.active_create(false),
 
-            "Search" => return tabs.active_search(""),
+            "Search" => return tabs.search(target, ""),
             _ => true,
         };
 

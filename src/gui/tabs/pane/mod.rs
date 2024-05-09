@@ -28,7 +28,7 @@ use crate::database::{SavedSplit, SplitChild};
 use crate::gui::clipboard::{ClipboardOp, URIS};
 use crate::gui::tabs::list::TabPosition;
 use crate::gui::tabs::NavTarget;
-use crate::gui::{gui_run, tabs_run};
+use crate::gui::{gui_run, tabs_run, ActionTarget};
 use crate::natsort::normalize_lowercase;
 
 mod details;
@@ -247,7 +247,7 @@ impl Pane {
 
         let sig = imp.text_entry.connect_activate(move |e| {
             let path: PathBuf = e.text().into();
-            tabs_run(|t| t.navigate(tab, &path));
+            tabs_run(|t| t.navigate_open_tab(tab, &path));
         });
         let connections = vec![SignalHolder::new(&*imp.text_entry, sig)];
 
@@ -887,7 +887,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
         } else if c.current_button() == 2 {
             let path = eo.get().abs_path.clone();
             if let Some(nav) = NavTarget::open_or_jump_abs(path) {
-                tabs_run(|t| t.create_tab(TabPosition::After(tab), nav, false));
+                tabs_run(|t| t.create_tab(TabPosition::After(ActionTarget::Tab(tab)), nav, false));
             }
         } else if c.current_event().unwrap().triggers_context_menu() {
             let w = c.widget();
