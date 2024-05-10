@@ -1237,7 +1237,7 @@ impl Tab {
         self.finish_hide();
     }
 
-    pub fn hide_pane(&mut self) {
+    pub fn hide_single_pane(&mut self) {
         self.start_hide();
         self.pane.set_visible(false);
         self.element.set_active(false);

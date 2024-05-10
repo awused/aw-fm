@@ -145,12 +145,17 @@ specify them.
   * If directory or file is set, it will behave like `Navigate`.
   * By default it will clone the current tab or the user's home directory.
   * Examples: `Navigate /path/to/directory` `Navigate /path/to/file.png`
-* `CloseTab`, `ClosePane`, `CloseActive`
-  * Close the active tab, pane, or both.
-  * All panes can be closed without closing all tabs.
+* `CloseTab`
+  * Close the active tab.
   * Closing the pane of a tab inside a group will remove that tab from the group.
+* `CloseTabNoReplacement`
+  * Like `CloseTab`, but if the tab was the only visible tab it does not open a
+    replacement.
+* `ClosePane`
+  * Hides the current pane.
+  * If that tab was part of a tab group, also removes the tab from that group.
 * `HidePanes`
-  * Hides all visible panes.
+  * Hides all visible panes. Does not remove any tabs from groups.
 * `ReopenTab`
   * Reopens the last closed tabs in reverse order.
 * `Split horizontal|vertical`

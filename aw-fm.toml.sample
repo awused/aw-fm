@@ -57,7 +57,7 @@ shortcuts = [
 
   {key = "W", modifiers = "Control", action = "CloseTab"},
   {key = "W", modifiers = "Control, Shift", action = "ClosePane"},
-  {key = "W", modifiers = "Control, Alt", action = "CloseActive"},
+  {key = "W", modifiers = "Control, Alt", action = "CloseTabNoReplacement"},
   {key = "W", modifiers = "Alt", action = "HidePanes"},
 
   {key = "V", modifiers = "Alt", action = "Split vertical"},

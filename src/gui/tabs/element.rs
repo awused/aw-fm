@@ -53,11 +53,12 @@ impl TabElement {
                     };
 
                     c.set_state(gtk::EventSequenceState::Claimed);
+                    // The target is the tab being split, not this tab being added to the split
                     tabs_run(|tl| tl.visible_split(ActionTarget::Active, orient, Some(tab)));
                 }
                 2 => {
                     debug!("Closing {tab:?} from middle click");
-                    tabs_run(|tl| tl.close_tab(tab));
+                    tabs_run(|tl| tl.close_tab_id(tab));
                 }
                 _ => {}
             }

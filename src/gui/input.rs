@@ -462,10 +462,9 @@ impl Gui {
             "OpenDefault" => return tabs.open_default(target),
             "OpenWith" => return tabs.open_with(target),
 
-            // TODO [Action Targets]
-            "Copy" => return tabs.active_copy(),
-            "Cut" => return tabs.active_cut(),
-            "Paste" => return tabs.active_paste(),
+            "Copy" => return tabs.copy(target),
+            "Cut" => return tabs.cut(target),
+            "Paste" => return tabs.paste(target),
 
             "Cancel" => {
                 drop(tabs);
@@ -480,37 +479,34 @@ impl Gui {
             "Home" => {
                 return tabs.navigate(target, &home_dir().unwrap_or_default());
             }
-            // TODO [Action Targets]
-            "NewTab" => return tabs.new_tab(true),
-            "NewBackgroundTab" => return tabs.new_tab(false),
+
+            "NewTab" => return tabs.new_tab(target, true),
+            "NewBackgroundTab" => return tabs.new_tab(target, false),
             "ReopenTab" => return tabs.reopen(),
 
             "Refresh" => return tabs.refresh(target),
             "RefreshAll" => return tabs.refresh_all(),
-            // TODO [Action Targets] - these could all be a bit tricky and CloseActive might need
-            // to be renamed
-            "CloseTab" => return tabs.active_close_tab(),
-            "ClosePane" => return tabs.active_close_pane(),
-            "HidePanes" => return tabs.active_hide(),
-            "CloseActive" => return tabs.active_close_both(),
 
-            // TODO -- these are all just variants of navigate
-            // TODO [Action Targets]
-            "Forward" => return tabs.active_forward(),
-            "Back" => return tabs.active_back(),
-            "Parent" => return tabs.active_parent(),
-            "Child" => return tabs.active_child(),
+            "CloseTab" => return tabs.close_tab(target),
+            "ClosePane" => return tabs.close_pane(target),
+            "HidePanes" => return tabs.hide_all_visible(target),
+            "CloseActive" | "CloseTabNoReplacement" => {
+                return tabs.close_tab_no_replacement(target);
+            }
+
+            "Forward" => return tabs.forward(target),
+            "Back" => return tabs.back(target),
+            "Parent" => return tabs.parent(target),
+            "Child" => return tabs.child(target),
 
             "Trash" => return tabs.trash(target),
             "Delete" => return tabs.active_delete(target),
 
-            // TODO [Action Targets]
-            "Rename" => return tabs.active_rename(),
-            "Properties" => return tabs.active_properties(),
+            "Rename" => return tabs.rename(target),
+            "Properties" => return tabs.properties(target),
 
-            // TODO [Action Targets]
-            "NewFolder" => return tabs.active_create(true),
-            "NewFile" => return tabs.active_create(false),
+            "NewFolder" => return tabs.create(target, true),
+            "NewFile" => return tabs.create(target, false),
 
             "Search" => return tabs.search(target, ""),
             _ => true,

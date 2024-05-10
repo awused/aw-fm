@@ -151,11 +151,12 @@ impl TabsList {
     pub fn initial_setup(&mut self) {
         assert!(self.tabs.is_empty());
 
-        let Some(target) = NavTarget::initial(self) else {
+        let Some(nav_target) = NavTarget::initial(self) else {
             return;
         };
 
-        let (tab, element) = Tab::new(next_id(), target, &[], |w| self.pane_container.append(w));
+        let (tab, element) =
+            Tab::new(next_id(), nav_target, &[], |w| self.pane_container.append(w));
 
         self.tabs.push(tab);
         self.tab_elements.append(&element);
@@ -276,7 +277,7 @@ impl TabsList {
                         "Unexpected failure loading {path:?} and all parent directories"
                     ));
                     let id = tab.id();
-                    self.close_tab(id);
+                    self.close_tab_id(id);
                     continue;
                 }
                 i += 1
@@ -329,7 +330,7 @@ impl TabsList {
                     "Unexpected failure loading {path:?} and all parent directories"
                 ));
                 let id = tab.id();
-                self.close_tab(id);
+                self.close_tab_id(id);
                 continue;
             }
             i += 1
@@ -361,7 +362,7 @@ impl TabsList {
             return;
         }
 
-        self.active_hide();
+        self.hide_all_visible(ActionTarget::Active);
 
 
         if let Some(group) = self.tabs[index].multi_tab_group() {
@@ -382,20 +383,18 @@ impl TabsList {
     }
 
     // New tab is always at the end of self.tabs
-    fn clone_active(&mut self, for_split: bool) -> Option<TabId> {
-        let active = self.active?;
-
-        let active_index = self.position(active).unwrap();
+    fn clone_tab(&mut self, target: ActionTarget, for_split: bool) -> Option<TabId> {
+        let (id, index) = self.resolve(target)?;
 
         let element_index = if for_split {
-            self.element_position(active).unwrap() + 1
+            self.element_position(id).unwrap() + 1
         } else {
             // Bit inefficient, extra linear search
-            self.element_insertion_index(active).unwrap()
+            self.element_insertion_index(id).unwrap()
         };
 
         let (new_tab, element) =
-            Tab::cloned(next_id(), &self.tabs[active_index], |w| self.pane_container.append(w));
+            Tab::cloned(next_id(), &self.tabs[index], |w| self.pane_container.append(w));
         let id = new_tab.id();
 
         self.tabs.push(new_tab);
@@ -407,11 +406,11 @@ impl TabsList {
     pub(super) fn create_tab(
         &mut self,
         position: TabPosition,
-        target: NavTarget,
+        nav_target: NavTarget,
         activate: bool,
     ) -> TabId {
         let (new_tab, element) =
-            Tab::new(next_id(), target, &self.tabs, |w| self.pane_container.append(w));
+            Tab::new(next_id(), nav_target, &self.tabs, |w| self.pane_container.append(w));
 
         let id = new_tab.id();
         self.tabs.push(new_tab);
@@ -455,16 +454,16 @@ impl TabsList {
     // For now, tabs always open after the active tab
     // !activate -> background tab
     pub fn open_tab<P: AsRef<Path>>(&mut self, path: P, pos: TabPosition, activate: bool) {
-        let Some(target) = NavTarget::open_or_jump(path, self) else {
+        let Some(nav_target) = NavTarget::open_or_jump(path, self) else {
             return;
         };
 
-        self.create_tab(pos, target, activate);
+        self.create_tab(pos, nav_target, activate);
     }
 
     // Clones the active tab or opens a new tab to the user's home directory.
-    pub fn new_tab(&mut self, activate: bool) {
-        if let Some(id) = self.clone_active(false) {
+    pub fn new_tab(&mut self, action_target: ActionTarget, activate: bool) {
+        if let Some(id) = self.clone_tab(action_target, false) {
             if activate {
                 self.switch_active_tab(id)
             }
@@ -475,11 +474,11 @@ impl TabsList {
             return;
         };
 
-        let Some(target) = NavTarget::open_or_jump(home, self) else {
+        let Some(nav_target) = NavTarget::open_or_jump(home, self) else {
             return;
         };
 
-        self.create_tab(TabPosition::After(ActionTarget::Active), target, activate);
+        self.create_tab(TabPosition::After(ActionTarget::Active), nav_target, activate);
     }
 
     // Restores splits from saved groups in a session.
@@ -523,7 +522,7 @@ impl TabsList {
     pub fn visible_split(&mut self, target: ActionTarget, orient: Orientation, tab: Option<TabId>) {
         if self.active.is_none() && matches!(target, ActionTarget::Active | ActionTarget::NoTab) {
             show_warning("Split called with no panes to split");
-            return self.new_tab(true);
+            return self.new_tab(target, true);
         };
 
         let Some((source, source_pos)) = self.resolve(target) else {
@@ -536,9 +535,15 @@ impl TabsList {
             return;
         }
 
+        // With delayed output in scripts, the user can split any visible tab.
+        let splitting_active = Some(source) == self.active;
+
         if let Some(id) = tab {
             if self.find(id).unwrap().visible() {
-                return self.set_active(id);
+                if splitting_active {
+                    self.set_active(id);
+                }
+                return;
             }
         }
 
@@ -569,14 +574,16 @@ impl TabsList {
         };
 
         let (id, index) = existing.unwrap_or_else(|| {
-            let new = self.clone_active(true).unwrap();
+            let new = self.clone_tab(target, true).unwrap();
             (new, self.tabs.len() - 1)
         });
 
         let (left, tab, right) = self.split_around_mut(index);
         tab.add_to_visible_group(left, right, group, paned);
 
-        self.set_active(id);
+        if splitting_active {
+            self.set_active(id);
+        }
     }
 
     pub fn refresh(&mut self, target: ActionTarget) {
@@ -718,7 +725,7 @@ impl TabsList {
         self.tabs[index].leave_group();
     }
 
-    fn hide_single_pane(&mut self, id: TabId) {
+    fn remove_from_group_and_hide_pane(&mut self, id: TabId) {
         let index = self.position(id).unwrap();
 
         if let Some(kin) = self.tabs[index].next_of_kin_by_pane() {
@@ -730,11 +737,11 @@ impl TabsList {
             if self.active == Some(id) {
                 self.active = None;
             }
-            self.tabs[index].hide_pane();
+            self.tabs[index].hide_single_pane();
         }
     }
 
-    pub(super) fn close_tab(&mut self, id: TabId) {
+    pub(super) fn close_tab_id(&mut self, id: TabId) {
         let mut eindex = self.element_position(id).unwrap();
         let index = self.position(id).unwrap();
 
@@ -755,7 +762,7 @@ impl TabsList {
 
         if let Some(_group) = tab.multi_tab_group() {
             // Real pain here.
-            self.hide_single_pane(id);
+            self.remove_from_group_and_hide_pane(id);
             // Closing the pane can change this
             eindex = self.element_position(id).unwrap();
         } else if self.tabs.len() > 1 && tab.visible() {
@@ -826,11 +833,6 @@ impl TabsList {
         )
     }
 
-    // Tries to run f() against the active tab, if one exists
-    fn try_active<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(&mut self, f: F) -> Option<T> {
-        self.active.map(|active| self.must_run_tab(active, f))
-    }
-
     pub fn activate(&mut self, target: ActionTarget) {
         self.try_resolve(target, |t| t.activate());
     }
@@ -843,28 +845,16 @@ impl TabsList {
         self.try_resolve(target, |t| t.open_with());
     }
 
-    pub fn active_copy(&self) {
-        let Some(active) = self.active else {
-            return;
-        };
-
-        self.find(active).unwrap().set_clipboard(ClipboardOp::Copy);
+    pub fn copy(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.set_clipboard(ClipboardOp::Copy));
     }
 
-    pub fn active_cut(&self) {
-        let Some(active) = self.active else {
-            return;
-        };
-
-        self.find(active).unwrap().set_clipboard(ClipboardOp::Cut);
+    pub fn cut(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.set_clipboard(ClipboardOp::Cut));
     }
 
-    pub fn active_paste(&self) {
-        let Some(active) = self.active else {
-            return;
-        };
-
-        self.find(active).unwrap().paste();
+    pub fn paste(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.paste());
     }
 
     pub fn navigate(&mut self, action_target: ActionTarget, path: &Path) {
@@ -912,52 +902,55 @@ impl TabsList {
         }
     }
 
-    pub fn active_forward(&mut self) {
-        self.try_active(Tab::forward);
+    pub fn forward(&mut self, target: ActionTarget) {
+        self.try_resolve_sliced(target, Tab::forward);
     }
 
-    pub fn active_back(&mut self) {
-        self.try_active(Tab::back);
+    pub fn back(&mut self, target: ActionTarget) {
+        self.try_resolve_sliced(target, Tab::back);
     }
 
-    pub fn active_parent(&mut self) {
-        self.try_active(Tab::parent);
+    pub fn parent(&mut self, target: ActionTarget) {
+        self.try_resolve_sliced(target, Tab::parent);
     }
 
-    pub fn active_child(&mut self) {
-        self.try_active(Tab::child);
+    pub fn child(&mut self, target: ActionTarget) {
+        self.try_resolve_sliced(target, Tab::child);
     }
 
-    pub fn active_close_tab(&mut self) {
-        let Some(active) = self.active else {
-            warn!("CloseTab called with no active tab");
+    pub fn close_tab(&mut self, target: ActionTarget) {
+        let Some((tab, _pos)) = self.resolve(target) else {
+            warn!("CloseTab called with no valid target tab");
             return;
         };
 
-        self.close_tab(active);
+        self.close_tab_id(tab);
     }
 
-    // This is explicitly closing the active pane
+    // Closes a pane and removes it from its group, if any.
     // Doesn't open a new pane to replace it, but does find the next sibling to promote to being
-    // active.
-    pub fn active_close_pane(&mut self) {
-        let Some(active) = self.active else {
-            return warn!("ClosePane called with no open panes");
+    // active if this was the active tab.
+    pub fn close_pane(&mut self, target: ActionTarget) {
+        let Some((tab, _pos)) = self.resolve(target) else {
+            return warn!("ClosePane called with no valid target tab");
         };
 
-        self.hide_single_pane(active);
+        self.remove_from_group_and_hide_pane(tab)
     }
 
-    pub fn active_hide(&mut self) {
-        let Some(active) = self.active else {
-            return debug!("HidePanes called with no open panes");
+    pub fn hide_all_visible(&mut self, target: ActionTarget) {
+        let Some((_tab, pos)) = self.resolve(target) else {
+            return debug!("HidePanes called with no valid target tab");
         };
 
-        let active_tab = self.find_mut(active).unwrap();
+        if !self.tabs[pos].visible() {
+            return warn!("HidePanes called with non-visible target tab");
+        }
 
-        let Some(group) = active_tab.multi_tab_group() else {
-            active_tab.start_hide();
-            active_tab.finish_hide();
+        let target_tab = &mut self.tabs[pos];
+
+        let Some(group) = target_tab.multi_tab_group() else {
+            target_tab.hide_single_pane();
             return;
         };
 
@@ -987,15 +980,18 @@ impl TabsList {
         }
     }
 
-    pub fn active_close_both(&mut self) {
-        let Some(old_active) = self.active else {
-            return warn!("CloseActive called with no open panes");
+    // Closes a specific tab. If it was the only visible tab, does _not_ promote another tab to
+    // being visible.
+    pub fn close_tab_no_replacement(&mut self, target: ActionTarget) {
+        let Some((id, _pos)) = self.resolve(target) else {
+            return warn!("CloseTabNoReplacement called with no valid target");
         };
 
-        self.hide_single_pane(old_active);
+        self.remove_from_group_and_hide_pane(id);
 
-        let index = self.position(old_active).unwrap();
-        let eindex = self.element_position(old_active).unwrap();
+        // _pos should not be stale, but play it safe
+        let index = self.position(id).unwrap();
+        let eindex = self.element_position(id).unwrap();
 
         self.tabs.swap_remove(index);
         self.tab_elements.remove(eindex);
@@ -1017,12 +1013,8 @@ impl TabsList {
         self.try_resolve(target, |t| t.search(query.to_owned()));
     }
 
-    pub fn trash(&self, target: ActionTarget) {
-        let Some((_id, pos)) = self.resolve(target) else {
-            return warn!("Trash called without valid target");
-        };
-
-        self.tabs[pos].trash();
+    pub fn trash(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.trash());
     }
 
     pub fn active_delete(&self, target: ActionTarget) {
@@ -1041,31 +1033,18 @@ impl TabsList {
         self.find(active).unwrap().delete();
     }
 
-    pub fn active_rename(&self) {
-        let Some(active) = self.active else {
-            return warn!("Rename called with no open panes");
-        };
-
-        self.find(active).unwrap().rename();
+    pub fn rename(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.rename());
     }
 
-    pub fn active_properties(&self) {
-        let Some(active) = self.active else {
-            return warn!("Properties called with no open panes");
-        };
-
-        self.find(active).unwrap().properties();
+    pub fn properties(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.properties());
     }
 
-    pub fn active_create(&self, folder: bool) {
-        let Some(active) = self.active else {
-            return warn!(
-                "New{} called with no open panes",
-                if folder { "Folder" } else { "File" }
-            );
+    pub fn create(&mut self, target: ActionTarget, folder: bool) {
+        if self.try_resolve(target, |t| t.create(folder)).is_none() {
+            warn!("New{} called with no valid target", if folder { "Folder" } else { "File" });
         };
-
-        self.find(active).unwrap().create(folder);
     }
 
     pub fn reorder(&mut self, source: TabId, dest: TabId, mut after: bool) {
@@ -1107,7 +1086,7 @@ impl TabsList {
             // Will not change dest_index since they're in different groups and this will, at
             // worst, reorder tabs within source's group.
             if self.tabs[src_idx].visible() {
-                self.hide_single_pane(source);
+                self.remove_from_group_and_hide_pane(source);
             } else {
                 self.remove_tab_from_group(source);
             }
@@ -1170,18 +1149,18 @@ impl TabsList {
         // Take advantage of existing data if we can.
         let old_tabs = self.tabs.len();
         for path in session.paths {
-            let target = NavTarget::assume_dir(path);
-            self.create_tab(TabPosition::End, target, false);
+            let nav_target = NavTarget::assume_dir(path);
+            self.create_tab(TabPosition::End, nav_target, false);
         }
 
         for n in 0..old_tabs {
             // We do swap_remove so this is fine.
             let tab = &mut self.tabs[old_tabs - n - 1];
             if tab.visible() {
-                tab.hide_pane();
+                tab.hide_single_pane();
             }
             let id = tab.id();
-            self.close_tab(id);
+            self.close_tab_id(id);
         }
 
         for saved in session.groups {
