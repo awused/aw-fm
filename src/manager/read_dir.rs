@@ -64,11 +64,22 @@ mod constants {
 }
 
 
-// Could potentially be a non-rayon threadpool for directory reading and only use rayon for
-// individual entries.
+// Use a separate pool for directory readers so that large slow directories don't stall out other
+// directories, and entries don't end up stalling the ReadDir.
+// Still limit how many are read at once instead of using spawn_blocking.
+// Rayon is not really being utilized here, but it already exists as a dependency.
 static READ_POOL: Lazy<ThreadPool> = Lazy::new(|| {
     ThreadPoolBuilder::new()
         .thread_name(|u| format!("read-dir-{u}"))
+        .panic_handler(handle_panic)
+        .num_threads(4)
+        .build()
+        .expect("Error creating directory read threadpool")
+});
+
+static ENTRY_POOL: Lazy<ThreadPool> = Lazy::new(|| {
+    ThreadPoolBuilder::new()
+        .thread_name(|u| format!("read-entry-{u}"))
         .panic_handler(handle_panic)
         // This shouldn't be too large - the returns diminish fast and there's a risk of
         // overwhelming slow network drives.
@@ -81,7 +92,7 @@ static READ_POOL: Lazy<ThreadPool> = Lazy::new(|| {
         // 32 - ~130ms
         .num_threads(4)
         .build()
-        .expect("Error creating directory read threadpool")
+        .expect("Error creating entry read threadpool")
 });
 
 static SORT_POOL: Lazy<ThreadPool> = Lazy::new(|| {
@@ -131,42 +142,46 @@ fn read_dir_sync(
             }
         };
 
-        rdir.take_while(|_| !cancel.load(Relaxed) && !closing::closed())
-            .par_bridge()
-            .for_each(|dirent| {
-                if cancel.load(Relaxed) {
-                    return;
-                }
-
-                let dirent = match dirent {
-                    Ok(e) => e,
-                    Err(e) => {
-                        error!("Unexpected error reading directory {path:?} {e}");
-                        drop(sender.send(ReadResult::DirError(e)));
+        ENTRY_POOL.in_place_scope(|_| {
+            rdir.take_while(|_| !cancel.load(Relaxed) && !closing::closed())
+                .par_bridge()
+                .for_each(|dirent| {
+                    if cancel.load(Relaxed) {
                         return;
                     }
-                };
 
-                let (entry, needs_full_count) = match Entry::new(dirent.path().into()) {
-                    Ok(entry) => entry,
-                    Err((path, e)) => {
-                        error!("Unexpected error reading file info {path:?} {e}");
-                        drop(sender.send(ReadResult::EntryError(path, e)));
-                        return;
+                    let dirent = match dirent {
+                        Ok(e) => e,
+                        Err(e) => {
+                            error!("Unexpected error reading directory {path:?} {e}");
+                            drop(sender.send(ReadResult::DirError(e)));
+                            return;
+                        }
+                    };
+
+                    let (entry, needs_full_count) = match Entry::new(dirent.path().into()) {
+                        Ok(entry) => entry,
+                        Err((path, e)) => {
+                            error!("Unexpected error reading file info {path:?} {e}");
+                            drop(sender.send(ReadResult::EntryError(path, e)));
+                            return;
+                        }
+                    };
+
+                    if needs_full_count {
+                        flat_dir_count(entry.abs_path.clone(), gui_sender.clone());
                     }
-                };
 
-                if needs_full_count {
-                    flat_dir_count(entry.abs_path.clone(), gui_sender.clone());
-                }
-
-                if sender.send(ReadResult::Entry(entry)).is_err()
-                    && !closing::closed()
-                    && !cancel.load(Relaxed)
-                {
-                    closing::fatal(format!("Channel unexpectedly closed while reading {path:?}"));
-                }
-            });
+                    if sender.send(ReadResult::Entry(entry)).is_err()
+                        && !closing::closed()
+                        && !cancel.load(Relaxed)
+                    {
+                        closing::fatal(format!(
+                            "Channel unexpectedly closed while reading {path:?}"
+                        ));
+                    }
+                });
+        });
 
         let _ignored = send_done.send(());
     });
