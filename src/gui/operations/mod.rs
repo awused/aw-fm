@@ -15,7 +15,6 @@ use regex::bytes::{Captures, Regex};
 use self::progress::Progress;
 use super::tabs::id::TabId;
 use super::{gui_run, Gui};
-use crate::com::{GuiAction, Update};
 use crate::config::{DirectoryCollision, FileCollision};
 use crate::gui::operations::ask::AskDialog;
 use crate::gui::{show_error, show_warning, tabs_run};

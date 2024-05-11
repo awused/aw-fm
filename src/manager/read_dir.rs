@@ -4,7 +4,7 @@ use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use constants::*;
@@ -17,7 +17,6 @@ use gtk::glib::GStr;
 use gtk::prelude::FileExt;
 use ignore::{WalkBuilder, WalkState};
 use once_cell::sync::Lazy;
-use rayon::prelude::{ParallelBridge, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tokio::select;
@@ -77,7 +76,8 @@ static READ_POOL: Lazy<ThreadPool> = Lazy::new(|| {
         .expect("Error creating directory read threadpool")
 });
 
-static ENTRY_POOL: Lazy<ThreadPool> = Lazy::new(|| {
+
+fn spawn_entry_pool() -> ThreadPool {
     ThreadPoolBuilder::new()
         .thread_name(|u| format!("read-entry-{u}"))
         .panic_handler(handle_panic)
@@ -93,7 +93,11 @@ static ENTRY_POOL: Lazy<ThreadPool> = Lazy::new(|| {
         .num_threads(4)
         .build()
         .expect("Error creating entry read threadpool")
-});
+}
+
+// Keep one reusable ENTRY_POOL for most directory reads.
+// In the case this one is in use, we spin up another pool as needed.
+static ENTRY_POOL: Lazy<Mutex<ThreadPool>> = Lazy::new(|| Mutex::new(spawn_entry_pool()));
 
 static SORT_POOL: Lazy<ThreadPool> = Lazy::new(|| {
     ThreadPoolBuilder::new()
@@ -132,7 +136,7 @@ fn read_dir_sync(
 ) -> oneshot::Receiver<()> {
     let (send_done, recv_done) = oneshot::channel();
 
-    READ_POOL.spawn(move || {
+    READ_POOL.spawn_fifo(move || {
         let rdir = match std::fs::read_dir(&path) {
             Ok(rdir) => rdir,
             Err(e) => {
@@ -142,46 +146,62 @@ fn read_dir_sync(
             }
         };
 
-        ENTRY_POOL.in_place_scope(|_| {
-            rdir.take_while(|_| !cancel.load(Relaxed) && !closing::closed())
-                .par_bridge()
-                .for_each(|dirent| {
-                    if cancel.load(Relaxed) {
-                        return;
-                    }
+        let run_on_pool = |pool: &ThreadPool| {
+            pool.in_place_scope(|scope| {
+                let cancel = &cancel;
+                let path = &path;
+                let sender = &sender;
+                let gui_sender = &gui_sender;
 
-                    let dirent = match dirent {
-                        Ok(e) => e,
-                        Err(e) => {
-                            error!("Unexpected error reading directory {path:?} {e}");
-                            drop(sender.send(ReadResult::DirError(e)));
-                            return;
-                        }
-                    };
+                rdir.take_while(|_| !cancel.load(Relaxed) && !closing::closed()).for_each(
+                    |dirent| {
+                        let dirent = match dirent {
+                            Ok(e) => e,
+                            Err(e) => {
+                                error!("Unexpected error reading directory {path:?} {e}");
+                                drop(sender.send(ReadResult::DirError(e)));
+                                return;
+                            }
+                        };
 
-                    let (entry, needs_full_count) = match Entry::new(dirent.path().into()) {
-                        Ok(entry) => entry,
-                        Err((path, e)) => {
-                            error!("Unexpected error reading file info {path:?} {e}");
-                            drop(sender.send(ReadResult::EntryError(path, e)));
-                            return;
-                        }
-                    };
+                        scope.spawn(move |_| {
+                            if cancel.load(Relaxed) {
+                                return;
+                            }
 
-                    if needs_full_count {
-                        flat_dir_count(entry.abs_path.clone(), gui_sender.clone());
-                    }
+                            let (entry, needs_full_count) = match Entry::new(dirent.path().into()) {
+                                Ok(entry) => entry,
+                                Err((path, e)) => {
+                                    error!("Unexpected error reading file info {path:?} {e}");
+                                    drop(sender.send(ReadResult::EntryError(path, e)));
+                                    return;
+                                }
+                            };
 
-                    if sender.send(ReadResult::Entry(entry)).is_err()
-                        && !closing::closed()
-                        && !cancel.load(Relaxed)
-                    {
-                        closing::fatal(format!(
-                            "Channel unexpectedly closed while reading {path:?}"
-                        ));
-                    }
-                });
-        });
+                            if needs_full_count {
+                                flat_dir_count(entry.abs_path.clone(), gui_sender.clone());
+                            }
+
+                            if sender.send(ReadResult::Entry(entry)).is_err()
+                                && !closing::closed()
+                                && !cancel.load(Relaxed)
+                            {
+                                closing::fatal(format!(
+                                    "Channel unexpectedly closed while reading {path:?}"
+                                ));
+                            }
+                        });
+                    },
+                )
+            })
+        };
+
+        if let Ok(p) = ENTRY_POOL.try_lock() {
+            run_on_pool(&p)
+        } else {
+            debug!("Spawning new entry pool for {path:?}");
+            run_on_pool(&spawn_entry_pool())
+        }
 
         let _ignored = send_done.send(());
     });
