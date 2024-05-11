@@ -16,7 +16,7 @@ use gtk::gio::{
     FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE, FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
     FILE_ATTRIBUTE_STANDARD_ICON, FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
     FILE_ATTRIBUTE_STANDARD_SYMLINK_TARGET, FILE_ATTRIBUTE_STANDARD_TYPE,
-    FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+    FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC, FILE_ATTRIBUTE_UNIX_INODE,
     FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
 };
 use gtk::glib::ffi::GVariant;
@@ -47,6 +47,7 @@ static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
         FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
         FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
         FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE,
+        FILE_ATTRIBUTE_UNIX_INODE,
     ]
     .map(GStr::as_str)
     .join(",")
@@ -110,6 +111,9 @@ pub struct Entry {
     pub mime: &'static str,
     pub symlink: Option<PathBuf>,
     pub icon: Variant,
+
+    // Used for detecting silly renames
+    pub inode: u64,
 }
 
 pub trait GetEntry {
@@ -233,6 +237,8 @@ impl Entry {
         let symlink = if info.is_symlink() { info.symlink_target() } else { None };
         let icon = intern_icon(info.icon().unwrap());
 
+        let inode = info.attribute_uint64(FILE_ATTRIBUTE_UNIX_INODE);
+
         Ok((
             Self {
                 kind,
@@ -244,6 +250,7 @@ impl Entry {
                 mime,
                 symlink,
                 icon,
+                inode,
             },
             needs_full_count,
         ))
@@ -317,6 +324,7 @@ impl Entry {
             mime: self.mime,
             symlink: self.symlink.clone(),
             icon: self.icon.clone(),
+            inode: self.inode,
         }
     }
 }

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::ops::{Deref, DerefMut};
+use std::os::linux::fs::MetadataExt;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
@@ -17,7 +18,7 @@ use tokio::sync::oneshot;
 use TabPane as TP;
 
 use self::flat_dir::FlatDir;
-use super::contents::Contents;
+use super::contents::{Contents, TotalPos};
 use super::element::TabElement;
 use super::id::{TabId, TabUid};
 use super::list::Group;
@@ -1275,20 +1276,51 @@ impl Tab {
         });
     }
 
+    fn find_entry_for_flat(&mut self, update: &Update) -> (Option<EntryObject>, Option<TotalPos>) {
+        let path = update.path();
+
+        // If it exists in any tab (search or flat)
+        let mut global = EntryObject::lookup(path);
+
+        if global.is_none()
+            && matches!(update, Update::Removed(_))
+            && path.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".nfs"))
+        {
+            let start = Instant::now();
+            if let Ok(inode) = path.metadata().as_ref().map(MetadataExt::st_ino) {
+                // We got a "deletion" for a silly renamed file. In practice this is fairly
+                // rare, so handle by scanning for the inode number in the current
+                // directory. Only consider the current flat contents, not search contents.
+                //
+                // If performance becomes a concern we'll need a map of inodes somewhere.
+                global = self.contents.find_by_inode(inode);
+                if let Some(eo) = &global {
+                    warn!(
+                        "Got NFS silly rename for {:?}. Scan took {:?}",
+                        eo.get().abs_path,
+                        start.elapsed()
+                    );
+                } else {
+                    warn!("Got NFS silly rename for missing file. Scan took {:?}", start.elapsed());
+                }
+            }
+        }
+
+        // If it exists in flat tabs (which all share the same state).
+        let local =
+            global.as_ref().and_then(|eg| self.contents.total_position_by_sorted(&eg.get()));
+
+        (global, local)
+    }
+
     pub fn flat_update(&mut self, left: &mut [Self], right: &mut [Self], up: Update) {
         assert!(self.matches_flat_update(&up));
 
-        let Some(update) = self.dir.consume(up) else {
+        let Some(update) = self.dir.maybe_drop_or_delay(up) else {
             return;
         };
 
-        // If it exists in any tab (search or flat)
-        let existing_global = EntryObject::lookup(update.path());
-        // If it exists in flat tabs (which all share the same state).
-        let local_position = existing_global
-            .clone()
-            .and_then(|eg| self.contents.total_position_by_sorted(&eg.get()));
-
+        let (existing_global, local_position) = self.find_entry_for_flat(&update);
 
         // If something exists globally but not locally, it needs to be applied to search tabs.
         let mut search_mutate = None;
@@ -1886,8 +1918,8 @@ mod flat_dir {
             }
         }
 
-        // Returns the update if it wasn't consumed
-        pub fn consume(&self, up: Update) -> Option<Update> {
+        // Returns the update if it wasn't saved for later or dropped
+        pub fn maybe_drop_or_delay(&self, up: Update) -> Option<Update> {
             let mut sb = self.state.borrow_mut();
             match &mut *sb {
                 DirState::Unloaded => {

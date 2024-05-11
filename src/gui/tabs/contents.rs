@@ -211,6 +211,12 @@ impl Contents {
         }
     }
 
+    pub fn find_by_inode(&self, inode: u64) -> Option<EntryObject> {
+        assert!(!self.stale);
+
+        self.list.iter::<EntryObject>().flatten().find(|eo| eo.get().inode == inode)
+    }
+
     pub fn reinsert_updated(&mut self, pos: TotalPos, new: &EntryObject, old: &Entry) {
         let t_pos = pos.0;
         assert!(!self.stale);

@@ -846,13 +846,17 @@ impl Operation {
                     }
                 } else {
                     trace!("Finished deleting {path:?}");
+                    // TODO -- remove this comment once I'm confident in the other silly rename
+                    // handling.
+                    //
                     // Just deleted something, if it's on NFS a silly rename could happen.
                     // There's a tiny chance this is wrong but it's unlikely for a deletion to be
                     // reversed by a creation instantly.
                     //
                     // For a search-only deletion and silly rename this won't be enough, but that's
                     // enough of an edge case to not be a major concern.
-                    gui_run(|g| g.handle_update(GuiAction::Update(Update::Removed(path))));
+                    //
+                    // gui_run(|g| g.handle_update(GuiAction::Update(Update::Removed(path))));
 
                     s.progress.borrow_mut().push_outcome(if was_dir {
                         Outcome::DeleteDir
