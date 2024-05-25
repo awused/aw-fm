@@ -413,14 +413,15 @@ mod internal {
             // dispose can, technically, be called multiple times, so unsafe to assert here.
             // We also purge contents during refresh.
             ALL_ENTRY_OBJECTS.with_borrow_mut(|m| {
-                // Remove only if the key is the same Arc<path>
-                let Some((k, _)) = m.get_key_value(path) else {
+                let Some((k, v)) = m.remove_entry(path) else {
                     return;
                 };
-                if Arc::ptr_eq(k, path) {
-                    m.remove(path);
-                } else {
+
+                // Remove only if the key is the same Arc<path>.
+                // This should be fairly rare, even during refreshes.
+                if !Arc::ptr_eq(&k, path) {
                     trace!("Not removing newer EntryObject for {path:?} after purge");
+                    m.insert(k, v);
                 }
             });
         }

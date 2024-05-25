@@ -542,36 +542,40 @@ impl Pane {
             eo.map(|child| super::ScrollPosition {
                 path: child.get().abs_path.clone(),
                 index: list.filtered_position_by_sorted(&child.get()).unwrap_or_default(),
+                // TODO -- if one item is selected, keep that selected?
+                select: false,
+                focus: false,
             })
         } else {
             None
         };
 
-        // TODO -- if one item is selected, keep that selected?
-        PaneState { scroll_pos, select: false }
+        PaneState { scroll_pos }
     }
 
     pub fn apply_state(&mut self, state: PaneState, list: &Contents) {
         self.deny_view_click.set(false);
 
-        let (pos, select) = state
+        let mut flags = ListScrollFlags::empty();
+
+        let pos = state
             .scroll_pos
             .and_then(|sp| {
                 if let Some(eo) = EntryObject::lookup(&sp.path) {
                     let pos = list.filtered_position_by_sorted(&eo.get());
                     debug!("Scrolling to position from element {pos:?}");
-                    pos.map(|p| (p, state.select))
+                    if sp.select {
+                        flags |= ListScrollFlags::SELECT;
+                    }
+                    if sp.focus {
+                        flags |= ListScrollFlags::FOCUS;
+                    }
+                    pos
                 } else {
-                    Some((sp.index, false))
+                    Some(sp.index)
                 }
             })
-            .unwrap_or((0, false));
-
-        let flags = if select {
-            ListScrollFlags::FOCUS | ListScrollFlags::SELECT
-        } else {
-            ListScrollFlags::empty()
-        };
+            .unwrap_or(0);
 
         let id = self.tab;
         glib::idle_add_local_once(move || {

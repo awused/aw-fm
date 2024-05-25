@@ -24,7 +24,7 @@ use super::id::{TabId, TabUid};
 use super::list::Group;
 use super::pane::Pane;
 use super::search::Search;
-use super::{HistoryEntry, NavTarget, PaneState, ScrollPosition};
+use super::{HistoryEntry, NavTarget, PaneState};
 use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, GetEntry,
     ManagerAction, SearchSnapshot, SearchUpdate, SortDir, SortMode, SortSettings,
@@ -33,7 +33,7 @@ use crate::config::CONFIG;
 use crate::database::SavedGroup;
 use crate::gui::clipboard::{handle_clipboard, handle_drop, ClipboardOp, SelectionProvider};
 use crate::gui::operations::{self, Kind, Outcome};
-use crate::gui::tabs::PartiallyAppliedUpdate;
+use crate::gui::tabs::{PartiallyAppliedUpdate, ScrollPosition};
 use crate::gui::{applications, gui_run, show_error, show_warning, tabs_run, Selected, Update};
 
 /* This efficiently supports multiple tabs being open to the same directory with different
@@ -887,6 +887,8 @@ impl Tab {
                 state.scroll_pos = Some(ScrollPosition {
                     path: eo.get().abs_path.clone(),
                     index: i,
+                    select: true,
+                    focus: true,
                 });
                 self.pane.overwrite_state(state);
 
@@ -934,7 +936,7 @@ impl Tab {
     }
 
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: NavTarget) {
-        info!("Navigating {:?} from {:?} to {:?}", self.id, self.dir.path(), target);
+        info!("Navigating {:?} from {:?} to {target:?}", self.id, self.dir.path());
 
         let history = self.current_history();
 
@@ -951,7 +953,12 @@ impl Tab {
         // Location didn't change, treat this as a jump
         let mut state = self.pane.clone_state(&self.contents);
 
-        state.scroll_pos = Some(ScrollPosition { path, index: 0 });
+        state.scroll_pos = Some(ScrollPosition {
+            path,
+            index: 0,
+            select: true,
+            focus: true,
+        });
         self.pane.overwrite_state(state);
 
         self.apply_pane_state();
@@ -1721,6 +1728,8 @@ impl Tab {
                 scroll_target = Some(ScrollPosition {
                     path: eo.get().abs_path.clone(),
                     index: i,
+                    select: false,
+                    focus: true,
                 });
             }
 

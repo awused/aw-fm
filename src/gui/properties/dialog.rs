@@ -16,7 +16,7 @@ use gtk::glib::{self, Object};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use num_format::{Locale, ToFormattedString};
-use users::{get_group_by_gid, get_user_by_uid};
+use uzers::{get_group_by_gid, get_user_by_uid};
 
 use crate::com::{ChildInfo, EntryObject};
 use crate::gui::{show_error, show_warning, Gui};
@@ -27,7 +27,7 @@ glib::wrapper! {
 }
 
 thread_local! {
-    static GSTREAMER_INIT: OnceCell<()> = OnceCell::new();
+    static GSTREAMER_INIT: OnceCell<()> = const { OnceCell::new() };
 }
 
 impl PropDialog {

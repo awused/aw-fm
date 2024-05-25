@@ -55,9 +55,9 @@ struct ScrollPosition {
     path: Arc<Path>,
     // Used as a backup if path has been removed.
     index: u32,
-    // TODO [gtk4.12] explicitly select and focus for seek
-    // select: bool,
-    // focus: bool
+    // Only selects/focuses if there's a match by path
+    select: bool,
+    focus: bool,
 }
 
 // Not kept up to date, maybe an enum?
@@ -66,14 +66,18 @@ struct PaneState {
     // If the directory has updated we just don't care, it'll be wrong.
     pub scroll_pos: Option<ScrollPosition>,
     // Only selects if scroll_pos is some and there's a match by path, not index
-    pub select: bool,
+    // pub select: bool,
 }
 
 impl PaneState {
     fn for_jump(jump: Option<Arc<Path>>) -> Self {
         Self {
-            select: jump.is_some(),
-            scroll_pos: jump.map(|path| ScrollPosition { path, index: 0 }),
+            scroll_pos: jump.map(|path| ScrollPosition {
+                path,
+                index: 0,
+                select: true,
+                focus: true,
+            }),
         }
     }
 }
@@ -183,7 +187,7 @@ pub mod id {
     use std::cell::Cell;
 
     thread_local! {
-        static NEXT_ID: Cell<u64> = Cell::new(0);
+        static NEXT_ID: Cell<u64> = const { Cell::new(0) };
     }
 
     // A unique identifier for tabs.
