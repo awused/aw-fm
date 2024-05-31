@@ -479,7 +479,6 @@ pub(super) struct GuiMenu {
     menu: PopoverMenu,
     custom: Vec<CustomAction>,
     custom_context: Vec<CustomAction>,
-    // TODO [Action Targets] -- Context menus should close if the active tab changes
     action_target: Cell<ActionTarget>,
 }
 
@@ -735,5 +734,21 @@ impl GuiMenu {
 
         trace!("Finished filtering custom actions in {:?}", start.elapsed());
         self.menu.clone()
+    }
+
+    // TODO -- should this only trigger when the target tab stops being visible?
+    pub fn handle_active_change(&self, active: Option<TabId>) {
+        if !self.menu.is_visible() {
+            return;
+        }
+
+        let ActionTarget::Tab(target) = self.action_target.get() else {
+            return self.menu.popdown();
+        };
+
+        if Some(target) != active {
+            debug!("Automatically closing context menu after active tab changed");
+            self.menu.popdown();
+        }
     }
 }

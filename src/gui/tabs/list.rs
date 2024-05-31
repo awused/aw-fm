@@ -25,7 +25,7 @@ use crate::gui::clipboard::ClipboardOp;
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
-use crate::gui::{operations, show_error, show_warning, tabs_run, ActionTarget};
+use crate::gui::{gui_run, operations, show_error, show_warning, tabs_run, ActionTarget};
 
 // For event handlers which cannot be run with the tabs lock being held.
 // Assumes the tab still exists since GTK notifies are run synchronously.
@@ -208,6 +208,13 @@ impl TabsList {
 
         self.active = Some(id);
         self.tabs[index].set_active();
+        gui_run(|g| g.menu.get().unwrap().handle_active_change(self.active));
+    }
+
+    // Does not hide/close panes or tabs
+    fn clear_active(&mut self) {
+        self.active = None;
+        gui_run(|g| g.menu.get().unwrap().handle_active_change(self.active));
     }
 
     fn element_position(&self, id: TabId) -> Option<u32> {
@@ -735,7 +742,7 @@ impl TabsList {
             self.remove_tab_from_group(id);
         } else {
             if self.active == Some(id) {
-                self.active = None;
+                self.clear_active();
             }
             self.tabs[index].hide_single_pane();
         }
@@ -783,7 +790,7 @@ impl TabsList {
         }
 
         if Some(id) == self.active {
-            self.active = None;
+            self.clear_active();
         }
 
         let closed = self.tabs.swap_remove(index).close(after);
