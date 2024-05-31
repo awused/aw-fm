@@ -45,7 +45,9 @@ impl Eq for Segment<'_> {}
 #[self_referencing]
 pub struct ParsedString {
     original: Box<OsStr>,
-    lowercase: Box<str>,
+    #[borrows(original)]
+    #[covariant]
+    lowercase: Cow<str, 'this>,
     #[borrows(lowercase)]
     #[covariant]
     segs: Vec<Segment<'this>>,
@@ -56,17 +58,49 @@ pub struct ParsedString {
 
 #[must_use]
 pub fn key(s: &OsStr) -> ParsedString {
-    let original = s.to_owned().into_boxed_os_str();
-    let lowercase = original.to_string_lossy().to_lowercase().into_boxed_str();
-
-    ParsedString::from_strings(original, lowercase)
+    let s: Box<OsStr> = s.into();
+    s.into()
 }
 
 impl From<OsString> for ParsedString {
     fn from(original: OsString) -> Self {
-        let lowercase = original.to_string_lossy().to_lowercase().into_boxed_str();
+        original.into_boxed_os_str().into()
+    }
+}
 
-        Self::from_strings(original.into_boxed_os_str(), lowercase)
+impl From<Box<OsStr>> for ParsedString {
+    fn from(original: Box<OsStr>) -> Self {
+        ParsedStringBuilder {
+            original,
+            lowercase_builder: |s| lowercase(s),
+            segs_builder: |s| {
+                let mut i = 0;
+                let mut segs = Vec::new();
+                SEGMENT_RE.with(|r| {
+                    for c in r.captures_iter(s) {
+                        let s = c.get(1).unwrap().as_str();
+                        let ds = c.get(2).unwrap().as_str();
+                        let full = c.get(0).unwrap();
+                        i = full.end();
+                        let seg = if ds == "." {
+                            Seg(s, 0.0)
+                        } else if let Ok(d) = ds.parse::<f64>() {
+                            if d.is_finite() { Seg(s, d) } else { Seg(full.as_str(), 0.0) }
+                        } else {
+                            Seg(full.as_str(), 0.0)
+                        };
+
+                        segs.push(seg);
+                    }
+                });
+
+                let last = &s[i..];
+                segs.push(Last(last));
+                segs
+            },
+            normalized_builder: |s| normalize_lowercase(s),
+        }
+        .build()
     }
 }
 
@@ -110,9 +144,7 @@ impl fmt::Debug for ParsedString {
 
 impl Clone for ParsedString {
     fn clone(&self) -> Self {
-        let original = self.borrow_original().clone();
-        let lowercase = self.borrow_lowercase().clone();
-        Self::from_strings(original, lowercase)
+        self.borrow_original().clone().into()
     }
 }
 
@@ -128,7 +160,7 @@ impl ParsedString {
     pub fn empty() -> Self {
         ParsedStringBuilder {
             original: Box::default(),
-            lowercase: Box::default(),
+            lowercase_builder: |_s| Cow::default(),
             segs_builder: |_s| Vec::new(),
             normalized_builder: |_s| Cow::default(),
         }
@@ -138,44 +170,15 @@ impl ParsedString {
     pub fn normalized(&self) -> &str {
         self.borrow_normalized()
     }
+}
 
-    #[must_use]
-    pub fn into_original(self) -> OsString {
-        self.into_heads().original.into_os_string()
-    }
+pub fn lowercase(original: &OsStr) -> Cow<str> {
+    let original = original.to_string_lossy();
 
-    fn from_strings(original: Box<OsStr>, lowercase: Box<str>) -> Self {
-        ParsedStringBuilder {
-            original,
-            lowercase,
-            segs_builder: |s| {
-                let mut i = 0;
-                let mut segs = Vec::new();
-                SEGMENT_RE.with(|r| {
-                    for c in r.captures_iter(s) {
-                        let s = c.get(1).unwrap().as_str();
-                        let ds = c.get(2).unwrap().as_str();
-                        let full = c.get(0).unwrap();
-                        i = full.end();
-                        let seg = if ds == "." {
-                            Seg(s, 0.0)
-                        } else if let Ok(d) = ds.parse::<f64>() {
-                            if d.is_finite() { Seg(s, d) } else { Seg(full.as_str(), 0.0) }
-                        } else {
-                            Seg(full.as_str(), 0.0)
-                        };
-
-                        segs.push(seg);
-                    }
-                });
-
-                let last = &s[i..];
-                segs.push(Last(last));
-                segs
-            },
-            normalized_builder: |s| normalize_lowercase(s),
-        }
-        .build()
+    if !original.chars().any(char::is_uppercase) {
+        original
+    } else {
+        original.to_lowercase().into()
     }
 }
 
