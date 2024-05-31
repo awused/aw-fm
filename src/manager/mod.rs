@@ -7,18 +7,21 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use completion::complete;
 use notify::{Event, RecommendedWatcher};
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot::Receiver;
 use tokio::task::LocalSet;
 use tokio::time::{sleep_until, timeout, Instant};
 
 use self::watcher::PendingUpdates;
-use crate::com::{GuiAction, ManagerAction};
+use crate::com::{CompletionResult, GuiAction, ManagerAction};
 use crate::manager::watcher::Sources;
 use crate::{closing, spawn_thread};
 
 mod actions;
+mod completion;
 mod read_dir;
 mod watcher;
 
@@ -26,7 +29,7 @@ type RecurseId = Arc<AtomicBool>;
 
 // Manages I/O work on files and directories.
 // Compared to the manager in aw-man, this one is much dumber and all of the driving logic lives in
-// the gui thread. This thread just manages reading directory contents and sqlite and feeding data
+// the gui thread. This thread just manages reading directory contents and feeding data
 // to the gui without blocking it.
 #[derive(Debug)]
 struct Manager {
@@ -46,6 +49,8 @@ struct Manager {
 
     notify_sender: UnboundedSender<(notify::Result<Event>, Option<RecurseId>)>,
     notify_receiver: UnboundedReceiver<(notify::Result<Event>, Option<RecurseId>)>,
+
+    completion: Option<(Receiver<CompletionResult>, Arc<AtomicBool>)>,
 }
 
 pub fn run(
@@ -107,6 +112,8 @@ impl Manager {
 
             notify_sender,
             notify_receiver,
+
+            completion: None,
         }
     }
 
@@ -136,6 +143,13 @@ impl Manager {
                     }
 
                     self.open_searches.push((cancel, watcher));
+                }
+                completed = async { (&mut self.completion.as_mut().unwrap().0).await }, if self.completion.is_some() => {
+                    self.completion = None;
+
+                    if let Ok(completed) = completed {
+                        println!("TODO -- handle successful completion {completed:?}");
+                    }
                 }
                 _ = async { sleep_until(self.next_tick.unwrap()).await },
                         if self.next_tick.is_some() => {
@@ -189,6 +203,19 @@ impl Manager {
                 }
 
                 let _ignored = resp.send(());
+            }
+
+            Complete(path, initial, tab) => {
+                if let Some((_, cancel)) = self.completion.replace(complete(path, initial, tab)) {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            }
+
+            CancelCompletion => {
+                if let Some((_, cancel)) = self.completion.take() {
+                    trace!("Cancelling ongoing completion");
+                    cancel.store(true, Ordering::Relaxed);
+                }
             }
         }
     }

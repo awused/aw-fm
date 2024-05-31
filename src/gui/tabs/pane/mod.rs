@@ -28,7 +28,7 @@ use crate::database::{SavedSplit, SplitChild};
 use crate::gui::clipboard::{ClipboardOp, URIS};
 use crate::gui::tabs::list::TabPosition;
 use crate::gui::tabs::NavTarget;
-use crate::gui::{gui_run, tabs_run, ActionTarget};
+use crate::gui::{gui_run, tabs_run, ActionTarget, ControllerDisconnector, ManagerAction};
 use crate::natsort::normalize_lowercase;
 
 mod details;
@@ -136,6 +136,8 @@ pub(super) struct Pane {
     _signals: PaneSignals,
 
     connections: Vec<SignalHolder<gtk::Entry>>,
+
+    completion_controllers: Vec<ControllerDisconnector>,
 }
 
 impl Drop for Pane {
@@ -223,6 +225,8 @@ impl Pane {
             _signals: signals,
 
             connections: Vec::new(),
+
+            completion_controllers: Vec::new(),
         }
     }
 
@@ -237,21 +241,21 @@ impl Pane {
         imp.text_entry.set_text(&location);
         imp.original_text.replace(location);
 
-
-        // TODO -- autocomplete for directories only (should be fast since they're always first)
-        // Needs deprecated GtkCompletion which seems buggy
-
-        // imp.text_entry.connect_changed(|e| {
-        //     println!("TODO -- changed {e:?}");
-        // });
+        let change_sig = imp.text_entry.connect_changed(|_e| {
+            gui_run(|g| g.send_manager(ManagerAction::CancelCompletion));
+        });
 
         let sig = imp.text_entry.connect_activate(move |e| {
             let path: PathBuf = e.text().into();
             tabs_run(|t| t.navigate_open_tab(tab, &path));
         });
-        let connections = vec![SignalHolder::new(&*imp.text_entry, sig)];
 
-        self.connections = connections;
+        self.connections.push(SignalHolder::new(&*imp.text_entry, sig));
+        self.connections.push(SignalHolder::new(&*imp.text_entry, change_sig));
+
+        if self.completion_controllers.is_empty() {
+            self.completion_controllers = self.element.setup_completion();
+        }
     }
 
     fn setup_search(
@@ -263,7 +267,10 @@ impl Pane {
         let original = queries.0;
         let query_rc = queries.1;
 
+        gui_run(|g| g.send_manager(ManagerAction::CancelCompletion));
         self.connections.clear();
+        self.completion_controllers.clear();
+
         let tab = self.tab;
         debug!("Creating new search pane for {tab:?}: {:?}", original.borrow());
 
@@ -332,7 +339,7 @@ impl Pane {
             eo.get().name.normalized().contains(&*q)
         });
 
-        self.connections = vec![SignalHolder::new(&*imp.text_entry, signal)];
+        self.connections.push(SignalHolder::new(&*imp.text_entry, signal));
     }
 
     pub(super) fn new_flat(

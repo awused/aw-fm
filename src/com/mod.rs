@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use derive_more::{Deref, DerefMut, From};
 use gtk::glib::{Object, SignalHandlerId};
-use gtk::prelude::{IsA, ObjectExt};
+use gtk::prelude::{EventControllerExt, IsA, ObjectExt, WidgetExt};
+use gtk::EventController;
 use tokio::sync::oneshot;
 
 pub use self::entry::*;
@@ -70,6 +71,13 @@ pub enum ActionTarget {
 }
 
 #[derive(Debug)]
+pub struct CompletionResult {
+    pub tab: TabId,
+    pub initial: String,
+    pub target: PathBuf,
+}
+
+#[derive(Debug)]
 pub enum ManagerAction {
     Open(Arc<Path>, SortSettings, Arc<AtomicBool>),
     Unwatch(Arc<Path>),
@@ -85,6 +93,9 @@ pub enum ManagerAction {
     GetChildren(Vec<Arc<Path>>, Arc<AtomicBool>),
 
     Flush(Vec<PathBuf>, oneshot::Sender<()>),
+
+    Complete(PathBuf, String, TabId),
+    CancelCompletion,
 }
 
 
@@ -144,5 +155,21 @@ impl<T: IsA<Object>> Drop for SignalHolder<T> {
 impl<T: IsA<Object>> SignalHolder<T> {
     pub fn new(obj: &T, id: SignalHandlerId) -> Self {
         Self(obj.clone(), Some(id))
+    }
+}
+
+
+#[derive(Debug)]
+pub struct ControllerDisconnector(EventController);
+
+impl Drop for ControllerDisconnector {
+    fn drop(&mut self) {
+        self.0.widget().remove_controller(&self.0);
+    }
+}
+
+impl From<EventController> for ControllerDisconnector {
+    fn from(controller: EventController) -> Self {
+        Self(controller)
     }
 }

@@ -1,5 +1,6 @@
 use std::fmt::Write;
 use std::ops::Deref;
+use std::path::PathBuf;
 
 use gtk::gdk::{DragAction, Key, ModifierType};
 use gtk::glib::Propagation;
@@ -15,7 +16,7 @@ use crate::gui::clipboard::URIS;
 use crate::gui::tabs::id::TabId;
 use crate::gui::tabs::list::event_run_tab;
 use crate::gui::tabs::tab::Tab;
-use crate::gui::{tabs_run, Selected};
+use crate::gui::{gui_run, tabs_run, ControllerDisconnector, ManagerAction, Selected};
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
@@ -162,7 +163,6 @@ impl PaneElement {
                 t.drag_drop(dr, None)
             })
         });
-
         self.imp().scroller.add_controller(drop_target);
 
         let seek_controller = gtk::EventControllerKey::new();
@@ -170,8 +170,44 @@ impl PaneElement {
             let pane = kc.widget().parent().and_downcast::<Self>().unwrap();
             pane.handle_seek(key, mods)
         });
-
         self.imp().scroller.add_controller(seek_controller);
+    }
+
+    pub(super) fn setup_completion(&self) -> Vec<ControllerDisconnector> {
+        let tab = *self.imp().tab.get().unwrap();
+        let completion = gtk::EventControllerKey::new();
+        completion.connect_key_pressed(move |kc, key, _, mods| {
+            if key == Key::space && mods == ModifierType::CONTROL_MASK {
+                let entry = kc.widget().downcast::<gtk::Entry>().unwrap();
+
+                let initial: String = entry.text().trim_start().to_string();
+                let mut path: PathBuf = initial.clone().into();
+
+                if path.is_relative() {
+                    let Some(cwd) = gui_run(|g| g.tabs.borrow().find(tab).map(Tab::dir)) else {
+                        return Propagation::Proceed;
+                    };
+                    path = cwd.to_path_buf().join(path);
+                }
+
+                println!("complete {}", entry.text());
+                gui_run(|g| g.send_manager(ManagerAction::Complete(path, initial, tab)))
+            }
+            Propagation::Proceed
+        });
+        self.imp().text_entry.add_controller(completion.clone());
+
+
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_leave(move |_| {
+            gui_run(|g| g.send_manager(ManagerAction::CancelCompletion));
+        });
+        self.imp().text_entry.add_controller(focus.clone());
+
+        vec![
+            completion.upcast::<gtk::EventController>().into(),
+            focus.upcast::<gtk::EventController>().into(),
+        ]
     }
 
     pub(super) fn setup_signals(&self, selection: &MultiSelection) -> PaneSignals {
@@ -242,7 +278,6 @@ impl PaneElement {
         update_selected(selection, 0, 0);
 
         let selection_signal = selection.connect_selection_changed(update_selected);
-
         let selection_signal = SignalHolder::new(selection, selection_signal);
 
         PaneSignals(count_signal, selection_signal)

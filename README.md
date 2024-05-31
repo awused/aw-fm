@@ -57,6 +57,9 @@ on a file or directory is the same as the `NewBackgroundTab` command below. Cont
 clicking on a tab will open it in a horizontal split, shift clicking leads to a vertical
 split.
 
+Completion can be triggered with `ctrl+space` in the location bar. Currently this
+is hardcoded.
+
 ### Customization
 
 #### Custom Actions
