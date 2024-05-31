@@ -192,7 +192,7 @@ impl Thumbnailer {
     fn finish_thumbnail(job: Job, tex: Texture) {
         let priority = match job.priority {
             ThumbPriority::Low | ThumbPriority::Medium => Priority::LOW,
-            ThumbPriority::High => Priority::HIGH_IDLE,
+            ThumbPriority::High => Priority::DEFAULT_IDLE,
         };
 
         let mut factory = Some(job.factory);
@@ -217,9 +217,9 @@ impl Thumbnailer {
         let mut path = Some(job.path);
         drop(job.lock);
 
-        // Must be HIGH_IDLE so that these never lose a race with finish_thumbnail calls.
+        // Must be DEFAULT_IDLE so that these never lose a race with finish_thumbnail calls.
         // While that should be nearly impossible, failed thumbnails should be rare.
-        gtk::glib::idle_add_full(Priority::HIGH_IDLE, move || {
+        gtk::glib::idle_add_full(Priority::DEFAULT_IDLE, move || {
             let path = path.take().unwrap();
             if let Some(obj) = EntryObject::lookup(&path) {
                 obj.imp().fail_thumbnail(job.mtime);
@@ -391,9 +391,7 @@ impl Thumbnailer {
     //
     // Worst-case we can make this async and parallel as well, but that shouldn't be necessary.
     pub(super) fn sync_thumbnail(&self, p: &Path, mime: &str, mtime: FileTime) -> Option<Texture> {
-        let Some(factory) = &self.sync_factory else {
-            return None;
-        };
+        let factory = self.sync_factory.as_ref()?;
 
         let factory = factory.get(self.size.get());
 
