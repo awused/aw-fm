@@ -34,7 +34,9 @@ use crate::database::SavedGroup;
 use crate::gui::clipboard::{handle_clipboard, handle_drop, ClipboardOp, SelectionProvider};
 use crate::gui::operations::{self, Kind, Outcome};
 use crate::gui::tabs::{PartiallyAppliedUpdate, ScrollPosition};
-use crate::gui::{applications, gui_run, show_error, show_warning, tabs_run, Selected, Update};
+use crate::gui::{
+    applications, gui_run, show_error, show_warning, tabs_run, CompletionResult, Selected, Update,
+};
 
 /* This efficiently supports multiple tabs being open to the same directory with different
  * settings.
@@ -1566,6 +1568,18 @@ impl Tab {
 
     pub fn create(&self, folder: bool) {
         gui_run(|g| g.create_dialog(self.id(), self.dir(), folder));
+    }
+
+    pub fn handle_completion(&self, completed: CompletionResult) {
+        if self.search.is_some() {
+            return;
+        }
+
+        let Some(pane) = self.pane.get_visible() else {
+            return;
+        };
+
+        pane.handle_completion(completed);
     }
 
     // TODO -- handle operations inside a dir during search? (annoying edge case)

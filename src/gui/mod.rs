@@ -350,6 +350,7 @@ impl Gui {
             }
             ConveyWarning(warning) => self.warning(warning),
             Action(action, target) => self.run_command(target, &action),
+            Completion(completed) => self.tabs.borrow_mut().handle_completion(completed),
             Quit => {
                 self.window.close();
                 closing::close();

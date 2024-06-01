@@ -28,7 +28,10 @@ use crate::database::{SavedSplit, SplitChild};
 use crate::gui::clipboard::{ClipboardOp, URIS};
 use crate::gui::tabs::list::TabPosition;
 use crate::gui::tabs::NavTarget;
-use crate::gui::{gui_run, tabs_run, ActionTarget, ControllerDisconnector, ManagerAction};
+use crate::gui::{
+    gui_run, tabs_run, ActionTarget, CompletionResult, ControllerDisconnector, DebugIgnore,
+    ManagerAction,
+};
 use crate::natsort::normalize_lowercase;
 
 mod details;
@@ -138,6 +141,7 @@ pub(super) struct Pane {
     connections: Vec<SignalHolder<gtk::Entry>>,
 
     completion_controllers: Vec<ControllerDisconnector>,
+    completion_result: DebugIgnore<Rc<Cell<Option<CompletionResult>>>>,
 }
 
 impl Drop for Pane {
@@ -181,17 +185,14 @@ impl Pane {
         let key = EventControllerKey::new();
         let weak = element.downgrade();
         key.connect_key_pressed(move |c, k, _b, m| {
-            if !m.is_empty() {
+            if !m.is_empty() || k != Key::Escape {
                 return Propagation::Proceed;
             }
 
-            if Key::Escape == k {
-                let w = c.widget().downcast::<gtk::Entry>().unwrap();
-                w.set_text(&weak.upgrade().unwrap().imp().original_text.borrow());
-                Propagation::Stop
-            } else {
-                Propagation::Proceed
-            }
+            let w = c.widget().downcast::<gtk::Entry>().unwrap();
+            w.set_text(&weak.upgrade().unwrap().imp().original_text.borrow());
+            w.set_position(-1);
+            Propagation::Stop
         });
         element.imp().text_entry.add_controller(key);
 
@@ -227,7 +228,82 @@ impl Pane {
             connections: Vec::new(),
 
             completion_controllers: Vec::new(),
+            completion_result: DebugIgnore::default(),
         }
+    }
+
+    fn setup_completion(&mut self) {
+        let tab = self.tab;
+        let imp = self.element.imp();
+
+        let completion = gtk::EventControllerKey::new();
+        let existing = self.completion_result.clone();
+        completion.connect_key_pressed(move |kc, key, _, mods| {
+            if mods != ModifierType::CONTROL_MASK {
+                return Propagation::Proceed;
+            }
+
+            let entry = kc.widget().downcast::<gtk::Entry>().unwrap();
+
+            if key == Key::z {
+                if let Some(res) = existing.take() {
+                    // This undoes the completion, not all changes from original_text
+                    entry.set_text(&res.initial);
+                    entry.set_position(-1);
+                }
+                return Propagation::Proceed;
+            } else if key != Key::space {
+                return Propagation::Proceed;
+            }
+
+            let initial: String = entry.text().to_string();
+
+            if let Some(mut res) = existing.take() {
+                if res.candidates[res.position].to_string_lossy() == initial {
+                    res.position = (res.position + 1) % res.candidates.len();
+                    entry.set_text(&res.candidates[res.position].to_string_lossy());
+                    entry.set_position(-1);
+                    existing.set(Some(res));
+                    return Propagation::Proceed;
+                }
+            }
+
+            let mut path: PathBuf = initial.trim_start().into();
+
+            if path.is_relative() {
+                let Some(cwd) = gui_run(|g| g.tabs.borrow().find(tab).map(Tab::dir)) else {
+                    return Propagation::Proceed;
+                };
+                path = cwd.to_path_buf().join(path);
+            }
+
+            gui_run(|g| g.send_manager(ManagerAction::Complete(path, initial, tab)));
+            Propagation::Proceed
+        });
+        // Needed to catch ctrl+z
+        completion.set_propagation_phase(gtk::PropagationPhase::Capture);
+        imp.text_entry.add_controller(completion.clone());
+
+
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_leave(move |_| {
+            gui_run(|g| g.send_manager(ManagerAction::CancelCompletion));
+        });
+        imp.text_entry.add_controller(focus.clone());
+
+
+        let existing = self.completion_result.clone();
+        let change_sig = imp.text_entry.connect_changed(move |_e| {
+            existing.take();
+            gui_run(|g| g.send_manager(ManagerAction::CancelCompletion));
+        });
+
+
+        self.completion_controllers
+            .push(completion.upcast::<gtk::EventController>().into());
+        self.completion_controllers.push(focus.upcast::<gtk::EventController>().into());
+
+        self.connections.push(SignalHolder::new(&*imp.text_entry, change_sig));
     }
 
     fn setup_flat(&mut self, path: &Path) {
@@ -237,13 +313,8 @@ impl Pane {
 
         let location = path.to_string_lossy().to_string();
 
+        self.element.flat_text(location);
         let imp = self.element.imp();
-        imp.text_entry.set_text(&location);
-        imp.original_text.replace(location);
-
-        let change_sig = imp.text_entry.connect_changed(|_e| {
-            gui_run(|g| g.send_manager(ManagerAction::CancelCompletion));
-        });
 
         let sig = imp.text_entry.connect_activate(move |e| {
             let path: PathBuf = e.text().into();
@@ -251,11 +322,7 @@ impl Pane {
         });
 
         self.connections.push(SignalHolder::new(&*imp.text_entry, sig));
-        self.connections.push(SignalHolder::new(&*imp.text_entry, change_sig));
-
-        if self.completion_controllers.is_empty() {
-            self.completion_controllers = self.element.setup_completion();
-        }
+        self.setup_completion()
     }
 
     fn setup_search(
@@ -270,6 +337,7 @@ impl Pane {
         gui_run(|g| g.send_manager(ManagerAction::CancelCompletion));
         self.connections.clear();
         self.completion_controllers.clear();
+        self.completion_result.take();
 
         let tab = self.tab;
         debug!("Creating new search pane for {tab:?}: {:?}", original.borrow());
@@ -539,6 +607,19 @@ impl Pane {
         true
     }
 
+    pub fn handle_completion(&self, completion: CompletionResult) {
+        let imp = self.element.imp();
+
+        if imp.text_entry.text() != completion.initial {
+            return trace!("Discarding completion result since text has changed");
+        }
+
+        imp.text_entry
+            .set_text(&completion.candidates[completion.position].to_string_lossy());
+        imp.text_entry.set_position(-1);
+        self.completion_result.set(Some(completion));
+    }
+
     pub fn get_state(&self, list: &Contents) -> PaneState {
         let scroll_pos = if self.element.imp().scroller.vadjustment().value() > 0.0 {
             let eo = match &self.view {
@@ -551,7 +632,9 @@ impl Pane {
                 index: list.filtered_position_by_sorted(&child.get()).unwrap_or_default(),
                 // TODO -- if one item is selected, keep that selected?
                 select: false,
-                focus: false,
+                // If we don't do this, we end up focused on the first element even when it's not
+                // visible.
+                focus: true,
             })
         } else {
             None
@@ -583,6 +666,10 @@ impl Pane {
                 }
             })
             .unwrap_or(0);
+
+        if flags.contains(ListScrollFlags::FOCUS) && self.element.focus_child().is_some() {
+            self.view.grab_focus();
+        }
 
         let id = self.tab;
         glib::idle_add_local_once(move || {

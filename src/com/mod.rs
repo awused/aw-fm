@@ -74,7 +74,8 @@ pub enum ActionTarget {
 pub struct CompletionResult {
     pub tab: TabId,
     pub initial: String,
-    pub target: PathBuf,
+    pub candidates: Vec<PathBuf>,
+    pub position: usize,
 }
 
 #[derive(Debug)]
@@ -128,6 +129,8 @@ pub enum GuiAction {
     ConveyWarning(String),
 
     Action(String, ActionTarget),
+    Completion(CompletionResult),
+
     Quit,
 }
 

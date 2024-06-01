@@ -25,7 +25,9 @@ use crate::gui::clipboard::ClipboardOp;
 use crate::gui::main_window::MainWindow;
 use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
-use crate::gui::{gui_run, operations, show_error, show_warning, tabs_run, ActionTarget};
+use crate::gui::{
+    gui_run, operations, show_error, show_warning, tabs_run, ActionTarget, CompletionResult,
+};
 
 // For event handlers which cannot be run with the tabs lock being held.
 // Assumes the tab still exists since GTK notifies are run synchronously.
@@ -1052,6 +1054,12 @@ impl TabsList {
         if self.try_resolve(target, |t| t.create(folder)).is_none() {
             warn!("New{} called with no valid target", if folder { "Folder" } else { "File" });
         };
+    }
+
+    pub fn handle_completion(&mut self, completed: CompletionResult) {
+        if let Some(tab) = self.find(completed.tab) {
+            tab.handle_completion(completed);
+        }
     }
 
     pub fn reorder(&mut self, source: TabId, dest: TabId, mut after: bool) {

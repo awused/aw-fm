@@ -148,7 +148,7 @@ impl Manager {
                     self.completion = None;
 
                     if let Ok(completed) = completed {
-                        println!("TODO -- handle successful completion {completed:?}");
+                        self.send(GuiAction::Completion(completed));
                     }
                 }
                 _ = async { sleep_until(self.next_tick.unwrap()).await },

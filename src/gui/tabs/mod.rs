@@ -57,6 +57,8 @@ struct ScrollPosition {
     index: u32,
     // Only selects/focuses if there's a match by path
     select: bool,
+    // TODO -- This should be a separate Path; focus target and scroll target should be
+    // different
     focus: bool,
 }
 
