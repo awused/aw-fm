@@ -43,7 +43,7 @@ impl PartialOrd for Segment<'_> {
 impl Eq for Segment<'_> {}
 
 #[self_referencing]
-pub struct ParsedString {
+pub struct NatKey {
     original: Box<OsStr>,
     #[borrows(original)]
     #[covariant]
@@ -57,20 +57,20 @@ pub struct ParsedString {
 }
 
 #[must_use]
-pub fn key(s: &OsStr) -> ParsedString {
+pub fn key(s: &OsStr) -> NatKey {
     let s: Box<OsStr> = s.into();
     s.into()
 }
 
-impl From<OsString> for ParsedString {
+impl From<OsString> for NatKey {
     fn from(original: OsString) -> Self {
         original.into_boxed_os_str().into()
     }
 }
 
-impl From<Box<OsStr>> for ParsedString {
+impl From<Box<OsStr>> for NatKey {
     fn from(original: Box<OsStr>) -> Self {
-        ParsedStringBuilder {
+        NatKeyBuilder {
             original,
             lowercase_builder: |s| lowercase(s),
             segs_builder: |s| {
@@ -104,7 +104,7 @@ impl From<Box<OsStr>> for ParsedString {
     }
 }
 
-impl Ord for ParsedString {
+impl Ord for NatKey {
     fn cmp(&self, other: &Self) -> Ordering {
         for (a, b) in self.borrow_segs().iter().zip(other.borrow_segs().iter()) {
             let c = a.cmp(b);
@@ -118,21 +118,21 @@ impl Ord for ParsedString {
     }
 }
 
-impl PartialOrd for ParsedString {
+impl PartialOrd for NatKey {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Eq for ParsedString {}
+impl Eq for NatKey {}
 
-impl PartialEq for ParsedString {
+impl PartialEq for NatKey {
     fn eq(&self, other: &Self) -> bool {
         self.borrow_original() == other.borrow_original()
     }
 }
 
-impl fmt::Debug for ParsedString {
+impl fmt::Debug for NatKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ParsedString")
             .field("original", &self.borrow_original())
@@ -142,13 +142,13 @@ impl fmt::Debug for ParsedString {
     }
 }
 
-impl Clone for ParsedString {
+impl Clone for NatKey {
     fn clone(&self) -> Self {
         self.borrow_original().clone().into()
     }
 }
 
-impl Deref for ParsedString {
+impl Deref for NatKey {
     type Target = OsStr;
 
     fn deref(&self) -> &Self::Target {
@@ -156,9 +156,9 @@ impl Deref for ParsedString {
     }
 }
 
-impl ParsedString {
+impl NatKey {
     pub fn empty() -> Self {
-        ParsedStringBuilder {
+        NatKeyBuilder {
             original: Box::default(),
             lowercase_builder: |_s| Cow::default(),
             segs_builder: |_s| Vec::new(),

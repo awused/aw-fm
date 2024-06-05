@@ -27,7 +27,7 @@ use once_cell::sync::Lazy;
 
 use super::{SortDir, SortMode, SortSettings};
 use crate::gui::{queue_thumb, ThumbPriority};
-use crate::natsort::{self, ParsedString};
+use crate::natsort::{self, NatKey};
 
 
 // In theory could use standard::edit-name and standard::display-name instead of taking
@@ -102,7 +102,7 @@ pub struct Entry {
     // This is an absolute but NOT canonicalized path.
     pub abs_path: Arc<Path>,
     // It's kind of expensive to do this but necessary as an mtime/ctime tiebreaker anyway.
-    pub name: ParsedString,
+    pub name: NatKey,
     pub mtime: FileTime,
 
     // Doesn't work over NFS, could fall back to "changed" time but that's not what we really
