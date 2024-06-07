@@ -47,9 +47,6 @@ shortcuts = [
   {key = "N", modifiers = "Control,Shift", action = "NewFolder"},
   {key = "N", modifiers = "Control", action = "NewFile"},
 
-  # {key = "P", modifiers = "Control", action = "Navigate /home/" },
-  # {key = "P", modifiers = "Alt", action = "Script /path/to/rofi-jump-home.sh"},
-
   {key = "H", modifiers = "Control", action = "Home" },
   {key = "T", modifiers = "Control", action = "NewTab"},
   {key = "T", modifiers = "Alt", action = "NewBackgroundTab"},
@@ -66,6 +63,8 @@ shortcuts = [
   {key = "F", modifiers = "Control", action = "Search"},
 
   {key = "R", modifiers = "Control", action = "Rename"},
+
+  {key = "L", modifiers = "Control", action = "FocusLocation"},
 
   {key = "Up", modifiers = "Alt", action = "Parent"},
   {key = "Down", modifiers = "Alt", action = "Child"},

@@ -1050,6 +1050,10 @@ impl TabsList {
         self.try_resolve(target, |t| t.properties());
     }
 
+    pub fn focus_location_bar(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.focus_location_bar());
+    }
+
     pub fn create(&mut self, target: ActionTarget, folder: bool) {
         if self.try_resolve(target, |t| t.create(folder)).is_none() {
             warn!("New{} called with no valid target", if folder { "Folder" } else { "File" });

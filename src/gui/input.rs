@@ -505,6 +505,8 @@ impl Gui {
             "Rename" => return tabs.rename(target),
             "Properties" => return tabs.properties(target),
 
+            "FocusLocation" => return tabs.focus_location_bar(target),
+
             "NewFolder" => return tabs.create(target, true),
             "NewFile" => return tabs.create(target, false),
 

@@ -117,6 +117,8 @@ specify them.
   * Spawns a rename dialog for the current file.
 * `Properties`
   * Opens a fairly standard properties dialog for the current selection.
+* `FocusLocation`
+  * Moves the focus to the location bar and selects the text.
 
 ##### Navigation Commands
 

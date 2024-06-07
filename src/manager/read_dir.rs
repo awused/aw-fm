@@ -46,7 +46,7 @@ mod constants {
     //
     // May raise to 10k+ as in practice directories are either very fast or very large and very
     // slow.
-    pub static INITIAL_BATCH: usize = 2000;
+    pub static INITIAL_BATCH: usize = 1000;
     // The timeout after which we send a completed batch as soon as no more items are immediately
     // available.
     pub static BATCH_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -575,7 +575,7 @@ async fn read_slow_dir(
 
         // Allow up to 5ms between entries, until we hit batch_deadline, then only consume
         // immediately ready values. This avoids the case where we get multiple small batches in a
-        // row.
+        // row and perpetually stall on sending items to the UI.
         'batch: loop {
             select! {
                 biased;

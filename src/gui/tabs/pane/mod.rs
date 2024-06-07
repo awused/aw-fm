@@ -565,6 +565,10 @@ impl Pane {
         self.element.clipboard_text(text);
     }
 
+    pub(super) fn focus_location_bar(&self) {
+        self.element.imp().text_entry.grab_focus();
+    }
+
     pub fn set_active(&mut self, active: bool) {
         self.element.imp().active.set(active);
         if active {

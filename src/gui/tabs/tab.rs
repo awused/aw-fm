@@ -1566,6 +1566,12 @@ impl Tab {
         gui_run(|g| g.properties_dialog(self.dir.path(), self.search.is_some(), files));
     }
 
+    pub fn focus_location_bar(&self) {
+        if let Some(p) = self.pane.get_visible() {
+            p.focus_location_bar();
+        }
+    }
+
     pub fn create(&self, folder: bool) {
         gui_run(|g| g.create_dialog(self.id(), self.dir(), folder));
     }
