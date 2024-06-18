@@ -90,6 +90,11 @@ fn next_candidates(
                     }
 
                     let path = de.path();
+
+                    if fragment.is_empty() {
+                        return Some((parent_priority, path));
+                    }
+
                     let lower = lowercase(path.file_name()?);
                     let normalized = normalize_lowercase(&lower);
 

@@ -105,9 +105,6 @@ pub struct Config {
     pub context_menu: Vec<ContextMenuEntry>,
 
     #[serde(default)]
-    pub skip_trash: bool,
-
-    #[serde(default)]
     pub directory_collisions: DirectoryCollision,
     #[serde(default)]
     pub file_collisions: FileCollision,

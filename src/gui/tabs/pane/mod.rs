@@ -146,6 +146,9 @@ pub(super) struct Pane {
 
 impl Drop for Pane {
     fn drop(&mut self) {
+        // Must drop these first, there's a gtk4 bug around get_widget() not being nullable.
+        self.completion_controllers.clear();
+
         if self.element.parent().is_none() {
             // If parent is None here, we've explicitly detached it to replace it with another
             // pane.

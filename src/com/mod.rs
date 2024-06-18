@@ -122,7 +122,9 @@ pub enum GuiAction {
 
     DirectoryOpenError(Arc<Path>, String),
     // Directory errors that aren't as fatal. Could maybe flash the tab?
+    #[allow(unused)]
     DirectoryError(Arc<Path>, String),
+    #[allow(unused)]
     EntryReadError(Arc<Path>, Arc<Path>, String),
     // Any generic error we want to convey to the user.
     ConveyError(String),
