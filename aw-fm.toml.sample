@@ -230,19 +230,22 @@ paste_into_search = false
 # images, while in directories with many videos up to 16 is beneficial.
 #
 # Max 255 (bad idea), 0 entirely disables thumbnail loading.
+# Recommended: 2-8
 max_thumbnailers = 6
 
 # How many thumbnailers to run in the background.
-# This is used for files that aren't currently visible.
+# This is used for files that aren't currently visible/near-visible.
 #
 # Max 255, 0 disables background thumbnailing.
+# Negative values cause thumbnails to be unloaded, greatly reducing memory usage.
 # No effect if larger than max_thumbnailers.
+# Recommended: 1, 0, or -1
 background_thumbnailers = 1
 
 # Whether or not to force the use of normal 128px thumbnails even at high DPIs.
 #
 # When false, aw-fm will generate and use 256px thumbnails when the DPI scaling is above 1.
-# Setting this to true can save memory and storage space but at the cost of blurrier thumbnails.
+# Setting this to true can save memory and storage space at the cost of blurrier thumbnails.
 #
 # No effect if you do not have any high DPI monitors or don't otherwise trigger UI scaling.
 force_small_thumbnails = false

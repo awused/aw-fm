@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::cmp::min;
 use std::collections::{btree_map, BTreeMap, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -114,7 +115,7 @@ impl PendingThumbs {
 impl Thumbnailer {
     pub fn new() -> Self {
         let high = CONFIG.max_thumbnailers as u16;
-        let low = CONFIG.background_thumbnailers as u16;
+        let low = min(CONFIG.background_thumbnailers.try_into().unwrap_or_default(), 255);
         let (sync_factory, factories) = SendFactory::make(high);
 
         let pending = PendingThumbs { factories, ..PendingThumbs::default() };
@@ -150,9 +151,6 @@ impl Thumbnailer {
                 self.pending.borrow_mut().low_priority.push((weak, from_event));
             }
             ThumbPriority::Medium => {
-                if self.low == 0 {
-                    return;
-                }
                 // The ones added first aren't particularly useful, but if we have a bunch of bound
                 // elements the ones added later are less likely to be useful.
                 self.pending.borrow_mut().med_priority.push_back((weak, from_event));
@@ -261,7 +259,11 @@ impl Thumbnailer {
                 }
             }
 
-            if self.high > self.low && self.high - pending.factories.len() as u16 > self.low {
+            // If low priority tasks are enabled, use those tasks for medium priority thumbnails.
+            if self.low > 0
+                && self.high > self.low
+                && self.high - pending.factories.len() as u16 > self.low
+            {
                 break 'find_job None;
             }
 
@@ -271,6 +273,10 @@ impl Thumbnailer {
                         break 'find_job Some((strong, ThumbPriority::Medium, from_event));
                     }
                 }
+            }
+
+            if self.high > self.low && self.high - pending.factories.len() as u16 > self.low {
+                break 'find_job None;
             }
 
             while let Some((weak, from_event)) = pending.low_priority.pop() {

@@ -54,7 +54,8 @@ fn next_candidates(
     let lower = lowercase(fragment);
     let filter = normalize_lowercase(&lower);
     // We escape the filter, so this should never fail
-    let pattern = Regex::new(&format!(r#"((?-u:\b)|_)?{}"#, regex::escape(&filter))).unwrap();
+    let pattern = (!filter.is_empty())
+        .then(|| Regex::new(&format!(r#"((?-u:\b)|_)?{}"#, regex::escape(&filter))).unwrap());
     let hidden = CONFIG.search_show_all;
 
     candidates
@@ -91,9 +92,9 @@ fn next_candidates(
 
                     let path = de.path();
 
-                    if fragment.is_empty() {
+                    let Some(pattern) = pattern.as_ref() else {
                         return Some((parent_priority, path));
-                    }
+                    };
 
                     let lower = lowercase(path.file_name()?);
                     let normalized = normalize_lowercase(&lower);

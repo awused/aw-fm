@@ -361,10 +361,12 @@ mod internal {
     use gtk::glib::subclass::Signal;
     use gtk::prelude::ObjectExt;
     use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassExt};
-    use once_cell::sync::Lazy;
+    use once_cell::sync::Lazy as SyncLazy;
+    use once_cell::unsync::Lazy;
 
     use super::{FileTime, ThumbPriority, Thumbnail, ALL_ENTRY_OBJECTS};
     use crate::com::EntryKind;
+    use crate::config::CONFIG;
     use crate::gui::thumb_size;
 
     // (bound, mapped)
@@ -402,8 +404,8 @@ mod internal {
 
     impl ObjectImpl for EntryWrapper {
         fn signals() -> &'static [glib::subclass::Signal] {
-            static SIGNALS: Lazy<Vec<Signal>> =
-                Lazy::new(|| vec![Signal::builder("update").build()]);
+            static SIGNALS: SyncLazy<Vec<Signal>> =
+                SyncLazy::new(|| vec![Signal::builder("update").build()]);
             SIGNALS.as_ref()
         }
 
@@ -430,6 +432,10 @@ mod internal {
     // Might be worth redoing this and moving more logic down into EntryObject.
     // These should not be Entry methods since they don't make sense for a bare Entry.
     impl EntryWrapper {
+        thread_local! {
+            static UNLOAD_LOW: Lazy<bool> = Lazy::new(|| CONFIG.background_thumbnailers < 0);
+        }
+
         pub(super) fn init(&self, entry: super::Entry) -> Option<ThumbPriority> {
             let (thumbnail, p) = match entry.kind {
                 EntryKind::File { .. } => (Thumbnail::Unloaded, Some(ThumbPriority::Low)),
@@ -537,6 +543,20 @@ mod internal {
             w.1 = w.1.checked_add_signed(mapped).unwrap();
 
             let new_p = w.priority();
+
+            if new_p == ThumbPriority::Low && Self::UNLOAD_LOW.with(|u| **u) {
+                match &inner.thumbnail {
+                    Thumbnail::Unloaded
+                    | Thumbnail::Loading(_)
+                    | Thumbnail::Loaded(..)
+                    | Thumbnail::Outdated(..) => {
+                        inner.thumbnail = Thumbnail::Unloaded;
+                    }
+                    Thumbnail::Nothing | Thumbnail::Failed => {}
+                }
+                return None;
+            }
+
             if new_p != old_p && inner.thumbnail.needs_load(thumb_size()) {
                 Some(new_p)
             } else {
@@ -648,8 +668,8 @@ mod internal {
     }
 }
 
-// This does burn a bit of memory, but it avoids any costly searches on updates and insertions.
 thread_local! {
+    // This does burn a bit of memory, but it avoids any costly searches on updates and insertions.
     static ALL_ENTRY_OBJECTS: RefCell<AHashMap<Arc<Path>, WeakRef<EntryObject>>> =
         AHashMap::new().into();
 

@@ -128,7 +128,7 @@ pub struct Config {
     #[serde(default)]
     pub max_thumbnailers: u8,
     #[serde(default)]
-    pub background_thumbnailers: u8,
+    pub background_thumbnailers: i16,
     #[serde(default)]
     pub force_small_thumbnails: bool,
 }
