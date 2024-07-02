@@ -37,6 +37,7 @@ struct Manager {
 
     // If there are pending mutations, we wait to clear and process them.
     // If the boolean is true, there was a second event we debounced.
+    // A vector of tuples would usually perform better here.
     recent_mutations: BTreeMap<Arc<Path>, PendingUpdates>,
     next_tick: Option<Instant>,
 

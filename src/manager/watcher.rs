@@ -21,10 +21,11 @@ use crate::config::CONFIG;
 const DEBOUNCE_DURATION: Duration = Duration::from_millis(1000);
 // Used to optimize the common case where a bunch of notifies arrive basically instantly for one
 // file. Especially after creation.
-const DEDUPE_DELAY: Duration = Duration::from_millis(5);
+const DEDUPE_DELAY: Duration = Duration::from_millis(3);
 
 // Used so we tick less often and handle events as batches more.
-const BATCH_GRACE: Duration = Duration::from_millis(5);
+const BATCH_GRACE: Duration = Duration::from_millis(3);
+
 
 // Nothing -> Deduping
 // Deduping -> Expiring
@@ -53,7 +54,12 @@ impl Sources {
 }
 
 #[derive(Debug)]
-pub struct PendingUpdates(Instant, State, Sources);
+pub struct PendingUpdates {
+    expiry: Instant,
+    state: State,
+    sources: Sources,
+    removal: bool,
+}
 
 impl Manager {
     pub(super) fn watch_dir(&mut self, path: &Arc<Path>) -> bool {
@@ -90,6 +96,24 @@ impl Manager {
             drop(watcher);
         } else if Some(0) != CONFIG.search_max_depth {
             error!("Stopped watching non-existent search. Updates were broken.");
+        }
+    }
+
+    fn send_removal(sender: &UnboundedSender<GuiAction>, path: Arc<Path>, sources: Sources) {
+        for search_id in sources.searches {
+            let update = Update::Removed(path.clone());
+            let s_up = SearchUpdate { search_id, update };
+
+            sender.send(GuiAction::SearchUpdate(s_up)).unwrap_or_else(|e| {
+                closing::fatal(e.to_string());
+            })
+        }
+
+        if sources.flat {
+            let update = Update::Removed(path);
+            sender.send(GuiAction::Update(update)).unwrap_or_else(|e| {
+                closing::fatal(e.to_string());
+            });
         }
     }
 
@@ -132,6 +156,19 @@ impl Manager {
         }
     }
 
+    fn jump_queue(&mut self, path: &Path) {
+        // Jump the queue and change it to dedupe mode
+        if let Some(PendingUpdates { expiry, state, .. }) = self.recent_mutations.get_mut(path) {
+            if *state != State::Deduping {
+                *state = State::Deduping;
+                *expiry = Instant::now() + DEDUPE_DELAY;
+                let next = *expiry + BATCH_GRACE;
+
+                self.next_tick = self.next_tick.map_or(Some(next), |nt| Some(nt.min(next)));
+            }
+        }
+    }
+
     pub(super) fn handle_event(&mut self, event: notify::Result<Event>, source: Option<RecurseId>) {
         use notify::EventKind::*;
 
@@ -144,6 +181,8 @@ impl Manager {
             }
         };
 
+        let mut removal = false;
+
         match event.kind {
             // Access events are worthless
             // Other events are probably meaningless
@@ -153,48 +192,27 @@ impl Manager {
                 trace!("Create {:?}", event.paths);
                 assert_eq!(event.paths.len(), 1);
 
-                let path = &*event.paths[0];
-
-                // Creations jump the queue and reset it to dedupe mode.
-                if let Some(PendingUpdates(expiry, state, _)) = self.recent_mutations.get_mut(path)
-                {
-                    if *state != State::Deduping {
-                        *state = State::Deduping;
-                        *expiry = Instant::now() + DEDUPE_DELAY + BATCH_GRACE;
-
-                        self.next_tick =
-                            self.next_tick.map_or(Some(*expiry), |nt| Some(nt.min(*expiry)));
-                    }
-                }
+                self.jump_queue(&event.paths[0]);
             }
             Remove(_) | Modify(ModifyKind::Name(RenameMode::From)) => {
                 trace!("Remove {:?} {:?}", event.kind, event.paths);
                 assert_eq!(event.paths.len(), 1);
 
-                let mut event = event;
-                let path = event.paths.pop().unwrap();
+                removal = true;
 
-                self.recent_mutations.remove(&*path);
-                let update = Update::Removed(path.into());
-                match source {
-                    Some(search_id) => {
-                        self.send(GuiAction::SearchUpdate(SearchUpdate { search_id, update }))
-                    }
-                    None => self.send(GuiAction::Update(update)),
-                }
-                return;
+                self.jump_queue(&event.paths[0]);
             }
             // Treat Any as a generic Modify
-            Modify(_) | Any => {}
-        }
-
-        if event.paths.len() != 1 {
-            error!(
-                "Received an event of kind {:?} with paths {}. Ignoring.",
-                event.kind,
-                event.paths.len()
-            );
-            return;
+            Modify(_) | Any => {
+                if event.paths.len() != 1 {
+                    error!(
+                        "Received an event of kind {:?} with paths {}. Ignoring.",
+                        event.kind,
+                        event.paths.len()
+                    );
+                    return;
+                }
+            }
         }
 
         let mut event = event;
@@ -202,9 +220,13 @@ impl Manager {
 
         match self.recent_mutations.entry(path.clone()) {
             btree_map::Entry::Occupied(occupied) => {
-                let PendingUpdates(_expiry, state, sources) = occupied.into_mut();
+                let p = occupied.into_mut();
 
-                if *state == State::Deduping {
+                // This can turn a deletion into a creation or vice versa, but it doesn't
+                // mechanically matter. Events should be reflected across all listeners.
+                p.removal = removal;
+
+                if p.state == State::Deduping {
                     trace!("Deduping event for {path:?} from {source:?}");
                 } else {
                     // trace!("Debouncing event for {path:?} from {source:?}");
@@ -212,77 +234,91 @@ impl Manager {
 
                 match source {
                     Some(search) => {
-                        if !sources.searches.iter().any(|s| Arc::ptr_eq(&search, s)) {
-                            sources.searches.push(search);
+                        if !p.sources.searches.iter().any(|s| Arc::ptr_eq(&search, s)) {
+                            p.sources.searches.push(search);
                         }
                     }
-                    None => sources.flat = true,
+                    None => p.sources.flat = true,
                 }
 
-                if *state == State::Expiring {
-                    *state = State::Debounced;
-                    // Expiry remains the same, and next_tick should already be set.
-                    assert!(self.next_tick.is_some());
+                if p.state == State::Expiring {
+                    p.state = State::Debounced;
+                    // next_tick must already be set to be in this branch.
+                    // It's possible that this expiry time hasn't been cleaned up yet,
+                    // but is before next_tick.
+                    self.next_tick = Some(self.next_tick.unwrap().min(p.expiry))
                 }
             }
             btree_map::Entry::Vacant(vacant) => {
-                let expiry = Instant::now() + DEDUPE_DELAY + BATCH_GRACE;
+                let expiry = Instant::now() + DEDUPE_DELAY;
                 let mut sources = Sources::default();
                 match source {
                     Some(search) => sources.searches.push(search),
                     None => sources.flat = true,
                 }
 
-                vacant.insert(PendingUpdates(expiry, State::Deduping, sources));
+                let next = expiry + BATCH_GRACE;
 
-                self.next_tick = self.next_tick.map_or(Some(expiry), |nt| Some(nt.min(expiry)));
+                vacant.insert(PendingUpdates {
+                    expiry,
+                    state: State::Deduping,
+                    sources,
+                    removal,
+                });
+
+                self.next_tick = self.next_tick.map_or(Some(next), |nt| Some(nt.min(next)));
             }
         }
     }
 
     pub(super) fn handle_pending_updates(&mut self) {
         let now = Instant::now();
-        // let starting_len = self.recent_mutations.len();
         let mut maybe_tick = now + DEBOUNCE_DURATION;
-        let mut expired_keys = Vec::new();
 
-        for (path, PendingUpdates(expiry, state, sources)) in &mut self.recent_mutations {
-            if *expiry < now {
-                match state {
+        self.recent_mutations.retain(|path, p| {
+            let kind = if p.removal { "removal" } else { "update" };
+
+            if p.expiry < now {
+                match p.state {
                     State::Expiring => {
-                        // Wasteful clone, but very short lived
-                        expired_keys.push(path.clone());
-                        continue;
+                        return false;
                     }
                     State::Deduping => {
-                        *state = State::Expiring;
-                        trace!("Sending update for {path:?} and {sources:?}");
+                        trace!("Sending {kind} for {path:?} and {:?}", p.sources);
                     }
                     State::Debounced => {
-                        *state = State::Expiring;
-                        trace!("Sending debounced update for {path:?} and {sources:?}");
+                        trace!("Sending debounced {kind} for {path:?} and {:?}", p.sources);
                     }
                 }
 
-                *expiry += DEBOUNCE_DURATION;
-                maybe_tick = maybe_tick.min(*expiry);
-                Self::send_update(&self.gui_sender, path.clone(), std::mem::take(sources));
-            } else if *expiry < maybe_tick {
-                maybe_tick = *expiry;
-            }
-        }
+                p.state = State::Expiring;
+                p.expiry += DEBOUNCE_DURATION;
 
-        for path in expired_keys {
-            self.recent_mutations.remove(&path).unwrap();
-        }
+                if p.removal {
+                    Self::send_removal(
+                        &self.gui_sender,
+                        path.clone(),
+                        std::mem::take(&mut p.sources),
+                    )
+                } else {
+                    Self::send_update(
+                        &self.gui_sender,
+                        path.clone(),
+                        std::mem::take(&mut p.sources),
+                    );
+                }
+            } else if p.expiry < maybe_tick && p.state != State::Expiring {
+                maybe_tick = p.expiry;
+            }
+
+            true
+        });
 
         if self.recent_mutations.is_empty() {
             self.next_tick = None;
         } else {
             self.next_tick = Some(maybe_tick + BATCH_GRACE);
         }
-
-        // trace!("Processed {starting_len} events in {:?}", now.elapsed());
     }
 
     pub(super) fn flush_updates(&mut self, mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -293,16 +329,32 @@ impl Manager {
             self.handle_event(ev, id);
         }
 
-        paths.retain_mut(|p| {
-            let Some(PendingUpdates(_expiry, state, sources)) = self.recent_mutations.get_mut(&**p)
-            else {
+        paths.retain_mut(|path| {
+            let Some(p) = self.recent_mutations.get_mut(&**path) else {
                 return true;
             };
 
-            *state = State::Expiring;
+            if p.state == State::Expiring {
+                return false;
+            }
 
-            debug!("Flushing update for {p:?} and {sources:?}");
-            Self::send_update(&self.gui_sender, std::mem::take(p).into(), std::mem::take(sources));
+            p.state = State::Expiring;
+
+            if p.removal {
+                debug!("Flushing removal for {path:?} and {:?}", p.sources);
+                Self::send_removal(
+                    &self.gui_sender,
+                    std::mem::take(path).into(),
+                    std::mem::take(&mut p.sources),
+                );
+            } else {
+                debug!("Flushing update for {path:?} and {:?}", p.sources);
+                Self::send_update(
+                    &self.gui_sender,
+                    std::mem::take(path).into(),
+                    std::mem::take(&mut p.sources),
+                );
+            }
             false
         });
 

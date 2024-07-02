@@ -324,7 +324,6 @@ impl Thumbnailer {
             return;
         };
 
-
         self.pool.spawn(move || {
             let guard = job.lock.lock().unwrap();
             if job.cancel.load(Ordering::Relaxed) {
@@ -381,7 +380,7 @@ impl Thumbnailer {
                 // trace!(
                 //     "Generated new thumbnail in {:?} for {:?}",
                 //     start.elapsed(),
-                //     path.file_name().unwrap_or(path.as_os_str())
+                //     job.path.file_name().unwrap_or(job.path.as_os_str())
                 // );
                 drop(guard);
                 Self::finish_thumbnail(job, tex);
