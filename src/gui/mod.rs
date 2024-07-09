@@ -413,12 +413,23 @@ struct Selected<'a> {
     selection: &'a MultiSelection,
     selected: Bitset,
     pos: u32,
+    end: u32,
 }
 
 impl<'a> From<&'a MultiSelection> for Selected<'a> {
     fn from(selection: &'a MultiSelection) -> Self {
         let selected = selection.selection();
-        Self { selection, selected, pos: 0 }
+        let size = selected.size();
+        if size > 0 && size <= u32::MAX as u64 {
+            Self {
+                selection,
+                pos: selected.nth(0),
+                end: selected.nth(size as u32 - 1),
+                selected,
+            }
+        } else {
+            Self { selection, pos: 1, end: 0, selected }
+        }
     }
 }
 
@@ -426,14 +437,24 @@ impl<'a> Iterator for Selected<'a> {
     type Item = EntryObject;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if (self.pos as u64) < self.selected.size() {
-            let index = self.selected.nth(self.pos);
-            let obj = self.selection.item(index).unwrap();
+        while self.pos <= self.end && !self.selected.contains(self.pos) {
+            self.pos += 1;
+        }
+
+        if self.pos <= self.end {
+            let obj = self.selection.item(self.pos).unwrap();
             self.pos += 1;
             Some(obj.downcast().unwrap())
         } else {
             None
         }
+
+        // The old code, iterating through the bitset and looking up items by index, was much
+        // slower during deletions for some reason - probably devolving into random access during
+        // the item removal signal handler.
+        //
+        // The new code is only negligibly slower in the worst case where sparse selections are
+        // made in a large set. Even selecting the first and last in 300k items is only ~1ms.
     }
 }
 

@@ -1,5 +1,6 @@
 use std::fmt::Write;
 use std::ops::Deref;
+use std::time::Duration;
 
 use gtk::gdk::{DragAction, Key, ModifierType};
 use gtk::glib::Propagation;
@@ -178,29 +179,13 @@ impl PaneElement {
         self.imp().count.set_text(&format!("{} items", selection.n_items()));
 
         let w = self.downgrade();
-        let count_signal = selection.connect_items_changed(move |list, _p, _a, _r| {
+        let update_selected = move |selection: &MultiSelection| {
             let s = w.upgrade().unwrap();
             let imp = s.imp();
 
-            s.maybe_close_seek(list);
-
-            // There is no selection_changed event on item removal
-            // selection().size() is comparatively expensive but unavoidable.
-
-            if imp.stack.visible_child_name().map_or(false, |n| n != *Count && n != *Seek)
-                && (list.n_items() == 0 || list.selection().size() == 0)
-            {
-                imp.stack.set_visible_child_name(&Count);
+            if let Some(id) = imp.selection_text_update.take() {
+                id.remove();
             }
-
-            imp.count.set_text(&format!("{} items", list.n_items()));
-        });
-        let count_signal = SignalHolder::new(selection, count_signal);
-
-        let w = self.downgrade();
-        let update_selected = move |selection: &MultiSelection, _p: u32, _n: u32| {
-            let s = w.upgrade().unwrap();
-            let imp = s.imp();
 
             // Not perfectly efficient, but we'll only run Selected::from twice in the worst case.
             s.maybe_close_seek(selection);
@@ -239,9 +224,62 @@ impl PaneElement {
             }
         };
 
-        update_selected(selection, 0, 0);
 
-        let selection_signal = selection.connect_selection_changed(update_selected);
+        let w = self.downgrade();
+        let u_selected = update_selected.clone();
+        let count_signal = selection.connect_items_changed(move |list, _p, removed, _added| {
+            let s = w.upgrade().unwrap();
+            let imp = s.imp();
+
+            s.maybe_close_seek(list);
+            imp.count.set_text(&format!("{} items", list.n_items()));
+
+            // There is no selection_changed event on item removal
+            if removed == 0 || imp.stack.visible_child_name().map_or(true, |n| n != *Selection) {
+                return;
+            }
+
+            if let Some(id) = imp.selection_text_update.take() {
+                id.remove();
+            }
+
+            // Handle updating the selected text ("N items selected, 50GB")
+            // Always debounce these until there's >50ms of idle time.
+            // Even if one was scheduled, we removed it earlier.
+            let w = w.clone();
+            let list = list.downgrade();
+            let u_s = u_selected.clone();
+            imp.selection_text_update.set(Some(glib::timeout_add_local_once(
+                Duration::from_millis(50),
+                move || {
+                    let Some(s) = w.upgrade() else {
+                        return;
+                    };
+                    s.imp().selection_text_update.take();
+
+                    if s.imp().stack.visible_child_name().map_or(true, |n| n != *Selection) {
+                        return;
+                    }
+
+                    let Some(list) = list.upgrade() else {
+                        return;
+                    };
+
+                    trace!(
+                        "Running deferred selection text update in {:?}",
+                        s.imp().tab.get().unwrap()
+                    );
+
+                    u_s(&list);
+                },
+            )));
+        });
+        let count_signal = SignalHolder::new(selection, count_signal);
+
+        update_selected(selection);
+
+        let selection_signal =
+            selection.connect_selection_changed(move |list, _p, _n| update_selected(list));
         let selection_signal = SignalHolder::new(selection, selection_signal);
 
         PaneSignals(count_signal, selection_signal)
@@ -251,21 +289,23 @@ impl PaneElement {
         let imp = self.imp();
         let tab = *imp.tab.get().unwrap();
 
-        if imp.stack.visible_child_name().map_or(false, |n| n == *Seek) {
-            let mut sel = Selected::from(list);
-            if sel.len() == 0 {
-                imp.stack.set_visible_child_name(&Count);
-            } else if sel.len() > 1
-                || !sel.next().unwrap().matches_seek(&imp.seek.text().to_lowercase())
-            {
-                imp.stack.set_visible_child_name(&Selection);
-            } else {
-                return;
-            }
-
-            debug!("Closing seek in {tab:?}");
-            imp.seek.set_text("");
+        if imp.stack.visible_child_name().map_or(true, |n| n != *Seek) {
+            return;
         }
+
+        let mut sel = Selected::from(list);
+        if sel.len() == 0 {
+            imp.stack.set_visible_child_name(&Count);
+        } else if sel.len() > 1
+            || !sel.next().unwrap().matches_seek(&imp.seek.text().to_lowercase())
+        {
+            imp.stack.set_visible_child_name(&Selection);
+        } else {
+            return;
+        }
+
+        debug!("Closing seek in {tab:?}");
+        imp.seek.set_text("");
     }
 
     fn handle_seek(&self, key: Key, mods: ModifierType) -> Propagation {
@@ -352,6 +392,7 @@ impl PaneElement {
 mod imp {
     use std::cell::{Cell, RefCell};
 
+    use gtk::glib::SourceId;
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
     use once_cell::unsync::OnceCell;
@@ -385,6 +426,7 @@ mod imp {
         pub active: Cell<bool>,
         pub original_text: RefCell<String>,
         pub tab: OnceCell<TabId>,
+        pub selection_text_update: Cell<Option<SourceId>>,
     }
 
     #[glib::object_subclass]
