@@ -175,111 +175,116 @@ impl PaneElement {
         self.imp().scroller.add_controller(seek_controller);
     }
 
+    fn update_selected_text(&self, list: &MultiSelection) {
+        let imp = self.imp();
+
+        if let Some(id) = imp.selection_text_update.take() {
+            id.remove();
+        }
+
+        // Not perfectly efficient, but we'll only run Selected::from twice in the worst case.
+        self.maybe_close_seek(list);
+
+        let mut sel = Selected::from(list);
+        let len = sel.len();
+        if len == 0 {
+            imp.selection.set_text("");
+
+            if imp.stack.visible_child_name().map_or(false, |n| n != *Count && n != *Seek) {
+                imp.stack.set_visible_child_name(&Count);
+            }
+            return;
+        }
+
+        let text = if len == 1 {
+            let eo = sel.next().unwrap();
+            let entry = eo.get();
+
+            format!(
+                "\"{}\" selected ({}{})",
+                entry.name.to_string_lossy(),
+                if entry.dir() { "containing " } else { "" },
+                entry.long_size_string()
+            )
+        } else {
+            // Costly, but not unbearably slow at <20ms for 100k items.
+            selected_string(sel)
+        };
+
+        imp.selection.set_text(&text);
+        imp.selection.set_tooltip_text(Some(&text));
+
+        if imp.stack.visible_child_name().map_or(false, |n| n != *Selection && n != *Seek) {
+            imp.stack.set_visible_child_name(&Selection);
+        }
+    }
+
+    fn defer_selected_text_update(&self, list: &MultiSelection) {
+        let imp = self.imp();
+
+        if imp.stack.visible_child_name().map_or(true, |n| n != *Selection) {
+            return;
+        }
+
+        if let Some(id) = imp.selection_text_update.take() {
+            id.remove();
+        }
+
+        // Handle updating the selected text ("N items selected, 50GB")
+        // Always defer these until there's >50ms of idle time.
+        // Even if one was scheduled, we removed it earlier.
+        let w = self.downgrade();
+        let list = list.downgrade();
+        imp.selection_text_update.set(Some(glib::timeout_add_local_once(
+            Duration::from_millis(50),
+            move || {
+                let Some(s) = w.upgrade() else {
+                    return;
+                };
+                s.imp().selection_text_update.take();
+
+                if s.imp().stack.visible_child_name().map_or(true, |n| n != *Selection) {
+                    return;
+                }
+
+                let Some(list) = list.upgrade() else {
+                    return;
+                };
+
+                trace!(
+                    "Running deferred selection text update in {:?}",
+                    s.imp().tab.get().unwrap()
+                );
+
+                s.update_selected_text(&list);
+            },
+        )));
+    }
+
     pub(super) fn setup_signals(&self, selection: &MultiSelection) -> PaneSignals {
         self.imp().count.set_text(&format!("{} items", selection.n_items()));
 
         let w = self.downgrade();
-        let update_selected = move |selection: &MultiSelection| {
-            let s = w.upgrade().unwrap();
-            let imp = s.imp();
-
-            if let Some(id) = imp.selection_text_update.take() {
-                id.remove();
-            }
-
-            // Not perfectly efficient, but we'll only run Selected::from twice in the worst case.
-            s.maybe_close_seek(selection);
-
-            let mut sel = Selected::from(selection);
-            let len = sel.len();
-            if len == 0 {
-                imp.selection.set_text("");
-
-                if imp.stack.visible_child_name().map_or(false, |n| n != *Count && n != *Seek) {
-                    imp.stack.set_visible_child_name(&Count);
-                }
-                return;
-            }
-
-            let text = if len == 1 {
-                let eo = sel.next().unwrap();
-                let entry = eo.get();
-
-                format!(
-                    "\"{}\" selected ({}{})",
-                    entry.name.to_string_lossy(),
-                    if entry.dir() { "containing " } else { "" },
-                    entry.long_size_string()
-                )
-            } else {
-                // Costly, but not unbearably slow at <20ms for 100k items.
-                selected_string(sel)
-            };
-
-            imp.selection.set_text(&text);
-            imp.selection.set_tooltip_text(Some(&text));
-
-            if imp.stack.visible_child_name().map_or(false, |n| n != *Selection && n != *Seek) {
-                imp.stack.set_visible_child_name(&Selection);
-            }
-        };
-
-
-        let w = self.downgrade();
-        let u_selected = update_selected.clone();
         let count_signal = selection.connect_items_changed(move |list, _p, removed, _added| {
             let s = w.upgrade().unwrap();
-            let imp = s.imp();
 
             s.maybe_close_seek(list);
-            imp.count.set_text(&format!("{} items", list.n_items()));
+            s.imp().count.set_text(&format!("{} items", list.n_items()));
 
             // There is no selection_changed event on item removal
-            if removed == 0 || imp.stack.visible_child_name().map_or(true, |n| n != *Selection) {
-                return;
+            if removed > 0 {
+                s.defer_selected_text_update(list)
             }
-
-            if let Some(id) = imp.selection_text_update.take() {
-                id.remove();
-            }
-
-            // Handle updating the selected text ("N items selected, 50GB")
-            // Always debounce these until there's >50ms of idle time.
-            // Even if one was scheduled, we removed it earlier.
-            let w = w.clone();
-            let list = list.downgrade();
-            let u_s = u_selected.clone();
-            imp.selection_text_update.set(Some(glib::timeout_add_local_once(
-                Duration::from_millis(50),
-                move || {
-                    let Some(s) = w.upgrade() else {
-                        return;
-                    };
-                    s.imp().selection_text_update.take();
-
-                    if s.imp().stack.visible_child_name().map_or(true, |n| n != *Selection) {
-                        return;
-                    }
-
-                    let Some(list) = list.upgrade() else {
-                        return;
-                    };
-
-                    trace!(
-                        "Running deferred selection text update in {:?}",
-                        s.imp().tab.get().unwrap()
-                    );
-
-                    u_s(&list);
-                },
-            )));
         });
+
         let count_signal = SignalHolder::new(selection, count_signal);
 
-        update_selected(selection);
+        self.update_selected_text(selection);
 
-        let selection_signal =
-            selection.connect_selection_changed(move |list, _p, _n| update_selected(list));
+        let w = self.downgrade();
+        let selection_signal = selection.connect_selection_changed(move |list, _p, _n| {
+            w.upgrade().unwrap().update_selected_text(list)
+        });
         let selection_signal = SignalHolder::new(selection, selection_signal);
 
         PaneSignals(count_signal, selection_signal)
@@ -287,8 +292,6 @@ impl PaneElement {
 
     fn maybe_close_seek(&self, list: &MultiSelection) {
         let imp = self.imp();
-        let tab = *imp.tab.get().unwrap();
-
         if imp.stack.visible_child_name().map_or(true, |n| n != *Seek) {
             return;
         }
@@ -304,7 +307,7 @@ impl PaneElement {
             return;
         }
 
-        debug!("Closing seek in {tab:?}");
+        debug!("Closing seek in {:?}", imp.tab.get().unwrap());
         imp.seek.set_text("");
     }
 
