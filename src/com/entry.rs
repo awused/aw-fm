@@ -357,8 +357,8 @@ mod internal {
 
     use gnome_desktop::DesktopThumbnailSize;
     use gtk::gdk::Texture;
-    use gtk::glib;
     use gtk::glib::subclass::Signal;
+    use gtk::glib::{self, ControlFlow, Priority};
     use gtk::prelude::ObjectExt;
     use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassExt};
     use once_cell::sync::Lazy as SyncLazy;
@@ -532,6 +532,32 @@ mod internal {
             }
         }
 
+        fn unload_thumbnail(&self) {
+            // This, annoyingly, needs to happen after gtk has a chance to correct the
+            // widgets count, which can take a very small amount of time.
+            //
+            // This could instead use an LRU queue of pending unloads and a small buffer, to avoid
+            // wasting CPU and disk time for nothing, but there still needs to be a minimum time
+            // before unloading.
+            let mut weak = Some(self.downgrade());
+            glib::idle_add_local_full(Priority::LOW, move || {
+                let Some(s) = weak.take().unwrap().upgrade() else {
+                    return ControlFlow::Break;
+                };
+
+                let mut b = s.0.borrow_mut();
+                let inner = &mut b.as_mut().unwrap();
+                if inner.widgets.priority() == ThumbPriority::Low {
+                    // This is spammy because gtk changes the bound widgets a lot.
+                    // That also means burning a lot of CPU time sometimes, but eh.
+                    // trace!("Unloaded thumbnail for {:?}", inner.entry.abs_path);
+                    inner.thumbnail = Thumbnail::Unloaded;
+                }
+
+                ControlFlow::Break
+            });
+        }
+
         pub(super) fn change_widgets(&self, bound: i16, mapped: i16) -> Option<ThumbPriority> {
             let mut b = self.0.borrow_mut();
             let inner = &mut b.as_mut().unwrap();
@@ -549,9 +575,7 @@ mod internal {
                     Thumbnail::Unloaded
                     | Thumbnail::Loading(_)
                     | Thumbnail::Loaded(..)
-                    | Thumbnail::Outdated(..) => {
-                        inner.thumbnail = Thumbnail::Unloaded;
-                    }
+                    | Thumbnail::Outdated(..) => self.unload_thumbnail(),
                     Thumbnail::Nothing | Thumbnail::Failed => {}
                 }
                 return None;

@@ -223,7 +223,8 @@ impl Manager {
                 let p = occupied.into_mut();
 
                 // This can turn a deletion into a creation or vice versa, but it doesn't
-                // mechanically matter. Events should be reflected across all listeners.
+                // mechanically matter unless the events are interleaved across different batches.
+                // Events should be reflected across all listeners.
                 p.removal = removal;
 
                 if p.state == State::Deduping {

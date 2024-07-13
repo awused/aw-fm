@@ -495,7 +495,7 @@ fn selected_string(selected: Selected) -> String {
             "{} file{} selected ({})",
             len - dirs,
             if len - dirs > 1 { "s" } else { "" },
-            humansize::format_size(bytes, humansize::WINDOWS)
+            humansize::SizeFormatter::new(bytes, humansize::WINDOWS)
         );
     }
     label

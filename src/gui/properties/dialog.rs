@@ -280,12 +280,12 @@ impl PropDialog {
 
         imp.size_text.set_text(&format!(
             "{} ({} bytes)",
-            humansize::format_size(imp.size.get(), humansize::WINDOWS),
+            humansize::SizeFormatter::new(imp.size.get(), humansize::WINDOWS),
             imp.size.get().to_formatted_string(&Locale::en)
         ));
         imp.allocated_text.set_text(&format!(
             "{} ({} bytes)",
-            humansize::format_size(imp.allocated.get(), humansize::WINDOWS),
+            humansize::SizeFormatter::new(imp.allocated.get(), humansize::WINDOWS),
             imp.allocated.get().to_formatted_string(&Locale::en)
         ));
     }
