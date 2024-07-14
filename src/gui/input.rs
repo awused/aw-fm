@@ -198,14 +198,13 @@ impl Gui {
                 return show_warning(format!("Invalid name for file \"{new_name}\""));
             }
 
-            let parent = path.parent().unwrap();
-            gui_run(|g| {
-                g.start_operation(
-                    tab,
-                    Kind::Rename(parent.join(new_name)),
-                    vec![path.clone()].into(),
-                )
-            });
+            let new_path = path.parent().unwrap().join(new_name);
+            if *path == *new_path {
+                info!("Ignoring rename to same name for {new_path:?}");
+                return;
+            }
+
+            gui_run(|g| g.start_operation(tab, Kind::Rename(new_path), vec![path.clone()].into()));
         };
 
         // activates-default is slow, so clone this closure instead

@@ -43,6 +43,7 @@ impl PropDialog {
 
         let s: Self = Object::new();
         let imp = s.imp();
+        gui.close_on_quit_or_esc(&s);
         imp.cancel.set(cancel).unwrap();
 
         if !search {

@@ -11,7 +11,6 @@ use gtk::{glib, SingleSelection};
 
 use super::application::Application;
 use super::cached_lookup;
-use crate::com::EntryObject;
 use crate::gui::applications::DEFAULT_CACHE;
 use crate::gui::{show_error, show_warning, Gui, Selected};
 
@@ -86,6 +85,10 @@ impl OpenWith {
             list.append(&a);
         }
 
+        imp.files.set(Some(entries));
+        imp.mimetypes.set(Some(mimetypes));
+
+
         let selection = SingleSelection::new(Some(list));
         selection.set_autoselect(true);
 
@@ -98,7 +101,6 @@ impl OpenWith {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             let row = Application::default();
 
-            item.set_activatable(false);
             item.set_child(Some(&row));
         });
 
@@ -112,6 +114,7 @@ impl OpenWith {
 
         imp.list.set_model(Some(&selection));
         imp.list.set_factory(Some(&factory));
+
 
         let w = s.downgrade();
         imp.cancel.connect_clicked(move |_b| {
@@ -127,24 +130,25 @@ impl OpenWith {
 
         let w = s.downgrade();
         let display = gui.window.display();
-        imp.open.connect_clicked(move |_b| {
+        let activate = move || {
             let s = w.upgrade().unwrap();
 
-            s.open_application(&display, &mimetypes, &entries);
+            s.open_application(&display);
             s.close();
-        });
+        };
+
+        let act = activate.clone();
+        imp.list.connect_activate(move |_c, _a| act());
+        imp.open.connect_clicked(move |_b| activate());
 
         s.set_transient_for(Some(&gui.window));
         s.set_visible(true);
     }
 
-    fn open_application(
-        &self,
-        display: &Display,
-        mimetypes: &[&'static str],
-        files: &[EntryObject],
-    ) {
+    fn open_application(&self, display: &Display) {
         let imp = self.imp();
+        let mimetypes = imp.mimetypes.take().unwrap();
+        let files = imp.files.take().unwrap();
 
         let model = imp.list.model().and_downcast::<SingleSelection>().unwrap();
         let Some(app) = model.selected_item().and_downcast::<AppInfo>() else {
@@ -217,8 +221,12 @@ impl OpenWith {
 }
 
 mod imp {
+    use std::cell::Cell;
+
     use gtk::subclass::prelude::*;
     use gtk::{glib, CompositeTemplate};
+
+    use crate::gui::EntryObject;
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "open_with.ui")]
@@ -243,6 +251,9 @@ mod imp {
 
         #[template_child]
         pub open: TemplateChild<gtk::Button>,
+
+        pub files: Cell<Option<Vec<EntryObject>>>,
+        pub mimetypes: Cell<Option<Vec<&'static str>>>,
     }
 
     #[glib::object_subclass]
