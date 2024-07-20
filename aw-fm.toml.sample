@@ -13,7 +13,18 @@
 # When the application is idle for a long period of time tabs that aren't visible can be unloaded.
 # The default of 6 hours should not be disruptive.
 # Comment out or set to 0 to disable.
+#
+# This is not as beneficial if background_thumbnailers is negative (see below).
 idle_timeout = 21600
+
+# How many thumbnailers to run in the background.
+# This is used for files that aren't currently visible/near-visible.
+#
+# Max 255, 0 disables background thumbnailing.
+# Negative values cause thumbnails to be unloaded, greatly reducing memory usage.
+# No effect if larger than max_thumbnailers.
+# Recommended: 1, 0, or -1
+background_thumbnailers = 1
 
 
 # Whether to limit aw-fm to a single window or not.
@@ -233,14 +244,6 @@ paste_into_search = false
 # Recommended: 2-8
 max_thumbnailers = 6
 
-# How many thumbnailers to run in the background.
-# This is used for files that aren't currently visible/near-visible.
-#
-# Max 255, 0 disables background thumbnailing.
-# Negative values cause thumbnails to be unloaded, greatly reducing memory usage.
-# No effect if larger than max_thumbnailers.
-# Recommended: 1, 0, or -1
-background_thumbnailers = 1
 
 # Whether or not to force the use of normal 128px thumbnails even at high DPIs.
 #

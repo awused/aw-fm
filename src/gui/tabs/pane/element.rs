@@ -94,7 +94,7 @@ impl PaneElement {
         let focus = EventControllerFocus::new();
         focus.connect_enter(move |focus| {
             debug!("Focus entered {tab:?}");
-            let element = focus.widget().downcast::<Self>().unwrap();
+            let element = focus.widget().unwrap().downcast::<Self>().unwrap();
             if !element.imp().active.get() {
                 // We set active when focus enters but deliberately do not unset it when focus
                 // leaves. If no other tab grabs focus we keep active set.
@@ -108,7 +108,7 @@ impl PaneElement {
         forward_back_mouse.set_button(0);
         forward_back_mouse.connect_pressed(move |c, _n, x, y| {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-            let w = c.widget();
+            let w = c.widget().unwrap();
             if !w.contains(x, y) {
                 warn!("Workaround -- ignoring junk mouse event in {tab:?}");
                 return;
@@ -156,7 +156,7 @@ impl PaneElement {
         drop_target.connect_drop(move |_dta, dr, _x, _y| {
             // Workaround for https://gitlab.gnome.org/GNOME/gtk/-/issues/6086
             warn!("Manually clearing DROP_ACTIVE flag");
-            _dta.widget().unset_state_flags(gtk::StateFlags::DROP_ACTIVE);
+            _dta.widget().unwrap().unset_state_flags(gtk::StateFlags::DROP_ACTIVE);
 
             tabs_run(|tlist| {
                 info!("Handling drop in {tab:?}");
@@ -169,7 +169,7 @@ impl PaneElement {
 
         let seek_controller = gtk::EventControllerKey::new();
         seek_controller.connect_key_pressed(move |kc, key, _, mods| {
-            let pane = kc.widget().parent().and_downcast::<Self>().unwrap();
+            let pane = kc.widget().and_then(|w| w.parent()).and_downcast::<Self>().unwrap();
             pane.handle_seek(key, mods)
         });
         self.imp().scroller.add_controller(seek_controller);

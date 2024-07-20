@@ -142,7 +142,7 @@ mod imp {
             // There's basically no mutation that won't cause the thumbnail
             // to be regenerated, so this is expensive but never wasted.
             if let Some(texture) = obj.imp().thumbnail() {
-                self.image.set_from_paintable(Some(&texture));
+                self.image.set_paintable(Some(&texture));
             } else {
                 self.image.set_from_gicon(&obj.icon());
             }

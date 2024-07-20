@@ -166,7 +166,7 @@ impl AskDialog {
             self.imp().original_size.set_text(&e.long_size_string());
             self.imp().original_mtime.set_text(&e.mtime.seconds_string())
         } else {
-            self.imp().original_icon.set_from_icon_name(Some("text-x-generic"));
+            self.imp().original_icon.set_icon_name(Some("text-x-generic"));
             self.imp().original_size.set_text("???");
         };
     }
@@ -187,14 +187,14 @@ impl AskDialog {
             self.imp().new_size.set_text(&e.long_size_string());
             self.imp().new_mtime.set_text(&e.mtime.seconds_string())
         } else {
-            self.imp().new_icon.set_from_icon_name(Some("text-x-generic"));
+            self.imp().new_icon.set_icon_name(Some("text-x-generic"));
             self.imp().new_size.set_text("???");
         };
     }
 
     fn set_image(image: &Image, entry: &Entry, tex: Option<Texture>, can_sync_thumbnail: bool) {
         if let Some(tex) = tex {
-            return image.set_from_paintable(Some(&tex));
+            return image.set_paintable(Some(&tex));
         }
 
         if can_sync_thumbnail {
@@ -202,7 +202,7 @@ impl AskDialog {
                 gui_run(|g| g.thumbnailer.sync_thumbnail(&entry.abs_path, entry.mime, entry.mtime));
 
             if let Some(tex) = tex {
-                return image.set_from_paintable(Some(&tex));
+                return image.set_paintable(Some(&tex));
             }
         }
 

@@ -39,7 +39,7 @@ impl Gui {
 
         let g = self.clone();
         dismiss_toast.connect_pressed(move |gc, _n, _x, _y| {
-            gc.widget().set_visible(false);
+            gc.widget().unwrap().set_visible(false);
             if let Some(s) = g.warning_timeout.take() {
                 s.remove()
             }
@@ -132,7 +132,7 @@ impl Gui {
             click.set_button(1);
             let g = self.clone();
             click.connect_pressed(move |gc, _n, _x, _y| {
-                let command = gc.widget().tooltip_text().unwrap();
+                let command = gc.widget().unwrap().tooltip_text().unwrap();
                 info!("Running command from clicked bookmark: {command}");
                 g.run_command_active(&command);
             });
@@ -307,7 +307,7 @@ impl Gui {
                 || g.shortcut_from_key(key, mods).is_some_and(|s| s == "Quit")
             {
                 e.widget()
-                    .downcast::<gtk::Window>()
+                    .and_downcast::<gtk::Window>()
                     .expect("Dialog was somehow not a window")
                     .close();
             }

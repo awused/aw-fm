@@ -32,7 +32,7 @@ impl TabElement {
         mouse.set_button(0);
         mouse.connect_pressed(move |c, n, x, y| {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-            let w = c.widget();
+            let w = c.widget().unwrap();
             if !w.contains(x, y) {
                 warn!("Workaround -- ignoring junk mouse event on {tab:?} element",);
                 return;
@@ -72,7 +72,7 @@ impl TabElement {
             Some(ContentProvider::for_value(&BoxedAnyObject::new(tab).into()))
         });
         drag_source.connect_drag_begin(|ds, _drag| {
-            let paintable = WidgetPaintable::new(Some(&ds.widget()));
+            let paintable = WidgetPaintable::new(Some(&ds.widget().unwrap()));
 
             ds.set_icon(Some(&paintable), 0, 0);
         });
@@ -87,7 +87,7 @@ impl TabElement {
             }
 
             // 2.5-3.0 feels more like half the target than 2.0 does
-            if y > dt.widget().height() as f64 / 2.5 {
+            if y > dt.widget().unwrap().height() as f64 / 2.5 {
                 debug!("Reordering {source:?} after {tab:?}");
                 tabs_run(|t| t.reorder(source, tab, true));
             } else {

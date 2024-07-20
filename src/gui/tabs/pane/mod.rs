@@ -146,9 +146,6 @@ pub(super) struct Pane {
 
 impl Drop for Pane {
     fn drop(&mut self) {
-        // Must drop these first, there's a gtk4 bug around get_widget() not being nullable.
-        self.completion_controllers.clear();
-
         if self.element.parent().is_none() {
             // If parent is None here, we've explicitly detached it to replace it with another
             // pane.
@@ -192,7 +189,7 @@ impl Pane {
                 return Propagation::Proceed;
             }
 
-            let w = c.widget().downcast::<gtk::Entry>().unwrap();
+            let w = c.widget().unwrap().downcast::<gtk::Entry>().unwrap();
             w.set_text(&weak.upgrade().unwrap().imp().original_text.borrow());
             w.set_position(-1);
             Propagation::Stop
@@ -205,7 +202,7 @@ impl Pane {
 
         click.connect_pressed(move |c, _n, x, y| {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-            let w = c.widget();
+            let w = c.widget().unwrap();
             if !w.contains(x, y) {
                 warn!("Workaround -- ignoring junk mouse event in {tab:?}");
                 return;
@@ -246,7 +243,7 @@ impl Pane {
                 return Propagation::Proceed;
             }
 
-            let entry = kc.widget().downcast::<gtk::Entry>().unwrap();
+            let entry = kc.widget().unwrap().downcast::<gtk::Entry>().unwrap();
 
             if key == Key::z {
                 if let Some(res) = existing.take() {
@@ -910,7 +907,7 @@ fn setup_view_controllers<W: IsA<Widget>>(tab: TabId, widget: &W, deny: Rc<Cell<
 
     click.set_button(0);
     click.connect_pressed(move |c, n, x, y| {
-        let w = c.widget();
+        let w = c.widget().unwrap();
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
         if !w.contains(x, y) {
             warn!("Workaround -- ignoring junk mouse event in {tab:?}");
@@ -974,7 +971,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
         let eo = b.upgrade().unwrap().bound_object().unwrap();
 
         // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
-        let w = c.widget();
+        let w = c.widget().unwrap();
         if !w.contains(x, y) {
             warn!(
                 "Workaround -- ignoring junk mouse event in {tab:?} on item {:?} {x} {y}",
@@ -995,8 +992,6 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
                 tabs_run(|t| t.create_tab(TabPosition::After(ActionTarget::Tab(tab)), nav, false));
             }
         } else if c.current_event().unwrap().triggers_context_menu() {
-            let w = c.widget();
-
             c.set_state(gtk::EventSequenceState::Claimed);
             let menu = tabs_run(|tlist| {
                 tlist.set_active(tab);
@@ -1081,7 +1076,7 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
     drop_target.connect_drop(move |_dta, dr, _x, _y| {
         // Workaround for https://gitlab.gnome.org/GNOME/gtk/-/issues/6086
         warn!("Manually clearing DROP_ACTIVE flag");
-        _dta.widget().unset_state_flags(gtk::StateFlags::DROP_ACTIVE);
+        _dta.widget().unwrap().unset_state_flags(gtk::StateFlags::DROP_ACTIVE);
 
         let bw = bound.upgrade().unwrap();
         let eo = bw.bound_object().unwrap();

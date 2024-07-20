@@ -169,7 +169,9 @@ pub struct ControllerDisconnector(EventController);
 
 impl Drop for ControllerDisconnector {
     fn drop(&mut self) {
-        self.0.widget().remove_controller(&self.0);
+        if let Some(w) = self.0.widget() {
+            w.remove_controller(&self.0);
+        }
     }
 }
 

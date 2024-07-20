@@ -232,8 +232,8 @@ impl PropDialog {
 
     fn set_image(&self, g: &Gui, eo: &EntryObject) {
         if let Some(tex) = eo.imp().thumbnail() {
-            self.imp().media_icon.set_from_paintable(Some(&tex));
-            self.imp().icon.set_from_paintable(Some(&tex));
+            self.imp().media_icon.set_paintable(Some(&tex));
+            self.imp().icon.set_paintable(Some(&tex));
             return;
         }
 
@@ -242,8 +242,8 @@ impl PropDialog {
             let tex = g.thumbnailer.sync_thumbnail(&e.abs_path, e.mime, e.mtime);
 
             if let Some(tex) = tex {
-                self.imp().media_icon.set_from_paintable(Some(&tex));
-                self.imp().icon.set_from_paintable(Some(&tex));
+                self.imp().media_icon.set_paintable(Some(&tex));
+                self.imp().icon.set_paintable(Some(&tex));
                 return;
             }
         }
@@ -255,7 +255,7 @@ impl PropDialog {
 
     fn default_image(&self) {
         // Media page won't be visible if this is called
-        self.imp().icon.set_from_icon_name(Some("text-x-generic"));
+        self.imp().icon.set_icon_name(Some("text-x-generic"));
     }
 
     fn update_text(&self) {
