@@ -209,6 +209,18 @@ normalize_names = true
 # Defaults to $XDG_DATA_HOME/aw-fm/settings.db or $HOME/.local/share/aw-fm/settings.db
 # database = ''
 
+# Whether to use polling for NFS directories or not.
+#
+# aw-fm defaults to inotify on Linux, which does not work in all cases on remote file systems.
+# Polling is slower and more resource intensive but will work for all changes, even changes
+# originating from other computers.
+#
+# This does not affect updates for child directories in searches.
+#
+# Valid settings are "off", "on", or "both" to enable both inotify and polling together for NFS.
+# Changing this is not recommended.
+nfs_polling = "off"
+
 # How deeply to recurse for searches.
 #
 # Set to 0 to only search the current directory. Max 255.

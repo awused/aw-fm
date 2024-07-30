@@ -41,7 +41,7 @@ serde = { version = "1.0.204", default-features = false, features = ["derive"] }
 serde_json = "1.0.120"
 strum = "0.26.3"
 strum_macros = "0.26"
-tokio = { version = "1.38.1", features = ["fs", "net", "macros", "process", "rt", "sync", "time"] }
+tokio = { version = "1.38.1", features = ["macros", "process", "rt", "sync", "time"] }
 toml = "0.8.15"
 unicode-normalization = "0.1.23"
 uzers = "0.12.0"

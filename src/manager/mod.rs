@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
@@ -8,7 +8,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use completion::complete;
-use notify::{Event, RecommendedWatcher};
+use notify::{Config, Event, PollWatcher, RecommendedWatcher};
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
@@ -17,6 +17,7 @@ use tokio::time::{sleep_until, timeout, Instant};
 
 use self::watcher::PendingUpdates;
 use crate::com::{CompletionResult, GuiAction, ManagerAction};
+use crate::config::{NfsPolling, CONFIG};
 use crate::manager::watcher::Sources;
 use crate::{closing, spawn_thread};
 
@@ -42,6 +43,8 @@ struct Manager {
     next_tick: Option<Instant>,
 
     watcher: RecommendedWatcher,
+    poll_watcher: Option<PollWatcher>,
+    nfs_keepalives: BTreeSet<Arc<Path>>,
 
     open_searches: Vec<(Arc<AtomicBool>, notify::RecommendedWatcher)>,
 
@@ -98,6 +101,27 @@ impl Manager {
         })
         .unwrap();
 
+        let poll_watcher = match CONFIG.nfs_polling {
+            NfsPolling::Off => None,
+            NfsPolling::On | NfsPolling::Both => {
+                let sender = notify_sender.clone();
+                Some(
+                    notify::PollWatcher::new(
+                        move |res| {
+                            if let Err(e) = sender.send((res, None)) {
+                                if !closing::closed() {
+                                    closing::fatal(format!("Error sending from poll watcher: {e}"));
+                                }
+                            }
+                        },
+                        // 30s default polling, but all options are very bad
+                        Config::default(),
+                    )
+                    .unwrap(),
+                )
+            }
+        };
+
         let (slow_searches_sender, slow_searches_receiver) = tokio::sync::mpsc::unbounded_channel();
 
         Self {
@@ -107,6 +131,9 @@ impl Manager {
             next_tick: None,
 
             watcher,
+            poll_watcher,
+            nfs_keepalives: BTreeSet::new(),
+
             open_searches: Vec::new(),
             slow_searches_sender,
             slow_searches_receiver,
@@ -119,6 +146,10 @@ impl Manager {
     }
 
     async fn run(mut self, mut receiver: UnboundedReceiver<ManagerAction>) {
+        // NFS times out after 5 minutes of idleness, so stat every 4.5 minutes
+        const NFS_KEEPALIVE_PERIOD: Duration = Duration::from_secs(60 * 9 / 2);
+        let mut next_keepalive = Instant::now() + NFS_KEEPALIVE_PERIOD;
+
         'main: loop {
             select! {
                 biased;
@@ -155,6 +186,22 @@ impl Manager {
                 _ = async { sleep_until(self.next_tick.unwrap()).await },
                         if self.next_tick.is_some() => {
                     self.handle_pending_updates();
+                }
+                _ = sleep_until(next_keepalive), if !self.nfs_keepalives.is_empty() => {
+                    next_keepalive = Instant::now() + NFS_KEEPALIVE_PERIOD;
+
+                    let keepalives: Vec<_> = self.nfs_keepalives.iter().cloned().collect();
+
+                    // Blocking in case NFS decides to hang, not sure it'll help though
+                    tokio::task::spawn_blocking(move || {
+                        trace!("Performing {} NFS keepalives", keepalives.len());
+
+                        for d in keepalives {
+                            if !d.is_dir() {
+                                warn!("{d:?} was not a directory during NFS keepalive")
+                            }
+                        }
+                    });
                 }
             };
         }

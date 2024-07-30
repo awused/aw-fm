@@ -1,5 +1,3 @@
-#![cfg_attr(not(feature = "windows-console"), windows_subsystem = "windows")]
-
 #[macro_use]
 extern crate log;
 

@@ -1,4 +1,6 @@
 use std::collections::btree_map;
+use std::ffi::CString;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -14,7 +16,7 @@ use super::read_dir::flat_dir_count;
 use super::{Manager, RecurseId};
 use crate::closing;
 use crate::com::{Entry, GuiAction, SearchUpdate, Update};
-use crate::config::CONFIG;
+use crate::config::{NfsPolling, CONFIG};
 
 // Use our own debouncer as the existing notify debouncers leave a lot to be desired.
 // Send the first event ~immediately and then at most one event per period.
@@ -63,6 +65,34 @@ pub struct PendingUpdates {
 
 impl Manager {
     pub(super) fn watch_dir(&mut self, path: &Arc<Path>) -> bool {
+        let nfs = unsafe {
+            let mut statfs: libc::statfs = std::mem::zeroed();
+            let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
+            let ret = libc::statfs(cpath.as_ptr(), &mut statfs);
+            ret == 0 && statfs.f_type == libc::NFS_SUPER_MAGIC
+        };
+
+        if nfs {
+            match CONFIG.nfs_polling {
+                NfsPolling::Off => {
+                    // Polling runs often enough to keep the connection alive, so this is only
+                    // necessary when only using inotify.
+                    trace!("Starting NFS keepalive for {path:?}");
+                    self.nfs_keepalives.insert(path.clone());
+                }
+                NfsPolling::On => return self.poll_watch(path),
+                NfsPolling::Both => {
+                    if !self.poll_watch(path) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        self.default_watch(path)
+    }
+
+    fn default_watch(&mut self, path: &Arc<Path>) -> bool {
         if let Err(e) = self.watcher.watch(path, NonRecursive) {
             // Treat like the directory was removed.
             // The tab only opened to this directory because it was a directory very recently.
@@ -81,9 +111,30 @@ impl Manager {
         }
     }
 
+    fn poll_watch(&mut self, path: &Arc<Path>) -> bool {
+        if let Err(e) = self.poll_watcher.as_mut().unwrap().watch(path, NonRecursive) {
+            // Treat like the directory was removed.
+            // The tab only opened to this directory because it was a directory very recently.
+            error!("Failed to open directory for polling {path:?}: {e}");
+            if let Err(e) =
+                self.gui_sender.send(GuiAction::DirectoryOpenError(path.clone(), e.to_string()))
+            {
+                if !closing::closed() {
+                    closing::fatal(format!("Gui channel unexpectedly closed: {e}"));
+                }
+            }
+            false
+        } else {
+            trace!("Started polling {path:?}");
+            true
+        }
+    }
+
     pub(super) fn unwatch_dir(&mut self, path: &Path) {
         trace!("Unwatching {path:?}");
-        if let Err(e) = self.watcher.unwatch(path) {
+        self.nfs_keepalives.remove(path);
+        let unpoll = self.poll_watcher.as_mut().map(|w| w.unwatch(path));
+        if let (Err(e), Some(Err(_)) | None) = (self.watcher.unwatch(path), unpoll) {
             warn!("Failed to unwatch {path:?}, removed or never started: {e}");
         }
     }
@@ -185,7 +236,8 @@ impl Manager {
 
         match event.kind {
             // Access events are worthless
-            // Other events are probably meaningless
+            // Other events are probably meaningless and the important unmount events aren't
+            // present.
             // For renames we use the single path events
             Access(_) | Other | Modify(ModifyKind::Name(RenameMode::Both)) => return,
             Create(_) | Modify(ModifyKind::Name(RenameMode::To)) => {

@@ -87,6 +87,15 @@ pub enum Selection {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum NfsPolling {
+    #[default]
+    Off,
+    On,
+    Both,
+}
+
+#[derive(Debug, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub unique: bool,
@@ -117,6 +126,9 @@ pub struct Config {
 
     #[serde(default, deserialize_with = "empty_path_is_none")]
     pub database: Option<PathBuf>,
+
+    #[serde(default)]
+    pub nfs_polling: NfsPolling,
 
     #[serde(default)]
     pub search_max_depth: Option<u8>,
