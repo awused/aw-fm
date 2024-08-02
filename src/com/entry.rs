@@ -353,6 +353,7 @@ impl Thumbnail {
 
 mod internal {
     use std::cell::{Ref, RefCell};
+    use std::path::Path;
     use std::sync::Arc;
 
     use gnome_desktop::DesktopThumbnailSize;
@@ -360,7 +361,10 @@ mod internal {
     use gtk::glib::subclass::Signal;
     use gtk::glib::{self, ControlFlow, Priority};
     use gtk::prelude::ObjectExt;
-    use gtk::subclass::prelude::{ObjectImpl, ObjectSubclass, ObjectSubclassExt};
+    use gtk::subclass::prelude::{
+        ObjectImpl, ObjectSubclass, ObjectSubclassExt, ObjectSubclassIsExt,
+    };
+    use hashlink::LinkedHashSet;
     use once_cell::sync::Lazy as SyncLazy;
     use once_cell::unsync::Lazy;
 
@@ -429,11 +433,16 @@ mod internal {
         }
     }
 
+
     // Might be worth redoing this and moving more logic down into EntryObject.
     // These should not be Entry methods since they don't make sense for a bare Entry.
     impl EntryWrapper {
+        // To avoid flapping reloads due to GTK weirdness
+        const LRU_THUMBNAIL_LIMIT: usize = 384;
+
         thread_local! {
             static UNLOAD_LOW: Lazy<bool> = Lazy::new(|| CONFIG.background_thumbnailers < 0);
+            static UNLOAD_QUEUE: RefCell<LinkedHashSet<Arc<Path>>> = RefCell::default();
         }
 
         pub(super) fn init(&self, entry: super::Entry) -> Option<ThumbPriority> {
@@ -532,25 +541,30 @@ mod internal {
             }
         }
 
-        fn unload_thumbnail(&self) {
+        fn unload_thumbnail(path: Arc<Path>) {
             // This, annoyingly, needs to happen after gtk has a chance to correct the
-            // widgets count, which can take a very small amount of time.
-            //
-            // This could instead use an LRU queue of pending unloads and a small buffer, to avoid
-            // wasting CPU and disk time for nothing, but there still needs to be a minimum time
-            // before unloading.
-            let mut weak = Some(self.downgrade());
+            // widgets count.
+            Self::UNLOAD_QUEUE.with_borrow_mut(|q| q.remove(&path));
+
+            let mut path = Some(path);
             glib::idle_add_local_full(Priority::LOW, move || {
-                let Some(s) = weak.take().unwrap().upgrade() else {
+                let Some(unload) = Self::UNLOAD_QUEUE.with_borrow_mut(|q| {
+                    q.insert(path.take().unwrap());
+                    if q.len() > Self::LRU_THUMBNAIL_LIMIT { q.pop_front() } else { None }
+                }) else {
                     return ControlFlow::Break;
                 };
 
-                let mut b = s.0.borrow_mut();
+                let Some(s) = super::EntryObject::lookup(&unload) else {
+                    return ControlFlow::Break;
+                };
+
+                let mut b = s.imp().0.borrow_mut();
                 let inner = &mut b.as_mut().unwrap();
                 if inner.widgets.priority() == ThumbPriority::Low {
                     // This is spammy because gtk changes the bound widgets a lot.
                     // That also means burning a lot of CPU time sometimes, but eh.
-                    // trace!("Unloaded thumbnail for {:?}", inner.entry.abs_path);
+                    trace!("Unloaded thumbnail for {:?}", inner.entry.abs_path);
                     inner.thumbnail = Thumbnail::Unloaded;
                 }
 
@@ -570,15 +584,21 @@ mod internal {
 
             let new_p = w.priority();
 
-            if new_p == ThumbPriority::Low && Self::UNLOAD_LOW.with(|u| **u) {
-                match &inner.thumbnail {
-                    Thumbnail::Unloaded
-                    | Thumbnail::Loading(_)
-                    | Thumbnail::Loaded(..)
-                    | Thumbnail::Outdated(..) => self.unload_thumbnail(),
-                    Thumbnail::Nothing | Thumbnail::Failed => {}
+            if Self::UNLOAD_LOW.with(|u| **u) {
+                if new_p == ThumbPriority::Low {
+                    match &inner.thumbnail {
+                        Thumbnail::Unloaded
+                        | Thumbnail::Loading(_)
+                        | Thumbnail::Loaded(..)
+                        | Thumbnail::Outdated(..) => {
+                            Self::unload_thumbnail(inner.entry.abs_path.clone())
+                        }
+                        Thumbnail::Nothing | Thumbnail::Failed => {}
+                    }
+                    return None;
                 }
-                return None;
+
+                Self::UNLOAD_QUEUE.with_borrow_mut(|q| q.remove(&inner.entry.abs_path));
             }
 
             if new_p != old_p && inner.thumbnail.needs_load(thumb_size()) {

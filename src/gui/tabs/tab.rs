@@ -277,7 +277,7 @@ impl Tab {
         self.dir.state().unloaded()
     }
 
-    fn loading(&self) -> bool {
+    pub fn loading(&self) -> bool {
         self.dir.state().loading() || self.search.as_ref().map_or(false, Search::loading)
     }
 

@@ -60,6 +60,8 @@ struct ScrollPosition {
     // TODO -- This should be a separate Path; focus target and scroll target should be
     // different
     focus: bool,
+    // TODO - precise scroll
+    // precise: f32,
 }
 
 // Not kept up to date, maybe an enum?

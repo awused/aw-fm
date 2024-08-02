@@ -260,6 +260,7 @@ impl Gui {
 
             g.database.destroy();
 
+            g.tabs.borrow_mut().cancel_loads();
             closing::close();
         });
 
@@ -355,6 +356,7 @@ impl Gui {
                 self.window.close();
                 closing::close();
                 self.cancel_operations();
+                self.tabs.borrow_mut().cancel_loads();
                 return ControlFlow::Break;
             }
         }

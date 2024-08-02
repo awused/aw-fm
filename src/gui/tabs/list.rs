@@ -686,6 +686,14 @@ impl TabsList {
         }
     }
 
+    pub fn cancel_loads(&mut self) {
+        for t in &mut self.tabs {
+            if t.loading() {
+                t.unload_unchecked();
+            }
+        }
+    }
+
     // Removes a tab from its group and moves its element out of the group.
     // Does not change the active tab directly, but does hide the pane
     fn remove_tab_from_group(&mut self, id: TabId) {
