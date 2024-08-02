@@ -165,7 +165,7 @@ fn read_dir_sync(
                         };
 
                         scope.spawn(move |_| {
-                            if cancel.load(Relaxed) {
+                            if cancel.load(Relaxed) || closing::closed() {
                                 return;
                             }
 
@@ -400,7 +400,7 @@ async fn consume_entries(
         _ = closing::closed_fut() => drop(receiver),
         success = async {
             while let Some(r) = receiver.recv().await {
-                if cancel.load(Relaxed) {
+                if cancel.load(Relaxed) || closing::closed() {
                     break;
                 }
 
@@ -424,7 +424,7 @@ async fn consume_entries(
                         gui_sender.send(GuiAction::EntryReadError(path.clone(), p, e.to_string()))),
                 }
             }
-            !cancel.load(Relaxed)
+            !cancel.load(Relaxed) && !closing::closed()
         } => {
             if !success {
                 return;
@@ -502,7 +502,7 @@ async fn read_slow_dir(
                         break Completed;
                     };
 
-                    if cancel.load(Relaxed) {
+                    if cancel.load(Relaxed) || closing::closed() {
                         break Failed;
                     }
 
@@ -598,7 +598,7 @@ async fn read_slow_dir(
                         Some(ReadResult::EntryError(p, e)) => drop(
                             sender.send(GuiAction::EntryReadError(path.clone(), p, e.to_string()))),
                     }
-                    !cancel.load(Relaxed)
+                    !cancel.load(Relaxed) && !closing::closed()
                 } => {
                     if done {
                         trace!(
