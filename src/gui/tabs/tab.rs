@@ -260,9 +260,7 @@ impl Tab {
             return;
         }
 
-        if group.borrow().parent == self.id() {
-            unreachable!()
-        }
+        assert_ne!(group.borrow().parent, self.id());
 
         group.borrow_mut().children.push(self.id());
         self.group = Some(group.clone());

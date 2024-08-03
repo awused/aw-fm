@@ -70,4 +70,6 @@ fn main() {
     if let Err(e) = man_handle.join() {
         closing::fatal(format!("Manager thread panicked unexpectedly: {e:?}"));
     }
+
+    info!("Exited normally");
 }

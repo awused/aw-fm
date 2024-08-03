@@ -368,35 +368,38 @@ mod internal {
     use once_cell::sync::Lazy as SyncLazy;
     use once_cell::unsync::Lazy;
 
-    use super::{FileTime, ThumbPriority, Thumbnail, ALL_ENTRY_OBJECTS};
+    use super::{Entry, FileTime, ThumbPriority, Thumbnail, ALL_ENTRY_OBJECTS};
     use crate::com::EntryKind;
     use crate::config::CONFIG;
     use crate::gui::thumb_size;
 
     // (bound, mapped)
     #[derive(Debug, Default, Clone)]
-    struct WidgetCounter(u16, u16);
+    struct WidgetCounter {
+        bound: u16,
+        mapped: u16,
+    }
 
     impl WidgetCounter {
         const fn priority(&self) -> ThumbPriority {
-            match (self.0, self.1) {
-                (0, 0) => ThumbPriority::Low,
-                (_, 0) => ThumbPriority::Medium,
-                (..) => ThumbPriority::High,
+            match self {
+                Self { bound: 0, mapped: 0 } => ThumbPriority::Low,
+                Self { bound: _, mapped: 0 } => ThumbPriority::Medium,
+                Self { .. } => ThumbPriority::High,
             }
         }
     }
 
     #[derive(Debug)]
-    struct Entry {
-        entry: super::Entry,
+    struct Wrapper {
+        entry: Entry,
         widgets: WidgetCounter,
         thumbnail: Thumbnail,
         updated: bool,
     }
 
     #[derive(Debug, Default)]
-    pub struct EntryWrapper(RefCell<Option<Entry>>);
+    pub struct EntryWrapper(RefCell<Option<Wrapper>>);
 
 
     #[glib::object_subclass]
@@ -418,9 +421,9 @@ mod internal {
             // Could check the load factor and shrink the map.
             // dispose can, technically, be called multiple times, so unsafe to assert here.
             // We also purge contents during refresh.
-            ALL_ENTRY_OBJECTS.with_borrow_mut(|m| {
+            let removed = ALL_ENTRY_OBJECTS.with_borrow_mut(|m| {
                 let Some((k, v)) = m.remove_entry(path) else {
-                    return;
+                    return false;
                 };
 
                 // Remove only if the key is the same Arc<path>.
@@ -428,8 +431,15 @@ mod internal {
                 if !Arc::ptr_eq(&k, path) {
                     trace!("Not removing newer EntryObject for {path:?} after purge");
                     m.insert(k, v);
+                    false
+                } else {
+                    true
                 }
             });
+
+            if removed && Self::UNLOAD_LOW.with(|u| **u) {
+                Self::UNLOAD_QUEUE.with_borrow_mut(|q| q.remove(path));
+            }
         }
     }
 
@@ -445,7 +455,7 @@ mod internal {
             static UNLOAD_QUEUE: RefCell<LinkedHashSet<Arc<Path>>> = RefCell::default();
         }
 
-        pub(super) fn init(&self, entry: super::Entry) -> Option<ThumbPriority> {
+        pub(super) fn init(&self, entry: Entry) -> Option<ThumbPriority> {
             let (thumbnail, p) = match entry.kind {
                 EntryKind::File { .. } => (Thumbnail::Unloaded, Some(ThumbPriority::Low)),
                 EntryKind::Directory { .. } => (Thumbnail::Nothing, None),
@@ -454,9 +464,9 @@ mod internal {
 
             // TODO -- other mechanisms to set thumbnails as Nothing, like mimetype or somesuch
 
-            let wrapped = Entry {
+            let wrapped = Wrapper {
                 entry,
-                widgets: WidgetCounter(0, 0),
+                widgets: WidgetCounter::default(),
                 thumbnail,
                 updated: false,
             };
@@ -464,10 +474,7 @@ mod internal {
             p
         }
 
-        pub(super) fn update_inner(
-            &self,
-            mut entry: super::Entry,
-        ) -> (super::Entry, Option<ThumbPriority>) {
+        pub(super) fn update_inner(&self, mut entry: Entry) -> (Entry, Option<ThumbPriority>) {
             // Every time there is an update, we have an opportunity to try the thumbnail again if
             // it failed.
 
@@ -497,20 +504,18 @@ mod internal {
             // double memory usage for no reason.
             // We also rely on Arc<Path> pointer equality after refreshes.
             {
-                let old = self.0.borrow();
-                let old_arc = old.as_ref().unwrap().entry.abs_path.clone();
-                entry.abs_path = old_arc;
+                entry.abs_path = self.get().abs_path.clone();
             }
 
 
-            let wrapped = Entry { entry, widgets, thumbnail, updated: true };
+            let wrapped = Wrapper { entry, widgets, thumbnail, updated: true };
             let old = self.0.replace(Some(wrapped)).unwrap();
             self.obj().emit_by_name::<()>("update", &[]);
 
             (old.entry, new_p)
         }
 
-        pub(super) fn get(&self) -> Ref<super::Entry> {
+        pub(super) fn get(&self) -> Ref<Entry> {
             let b = self.0.borrow();
             Ref::map(b, |o| &o.as_ref().unwrap().entry)
         }
@@ -542,32 +547,41 @@ mod internal {
         }
 
         fn unload_thumbnail(path: Arc<Path>) {
+            if !super::EntryObject::lookup(&path).is_some_and(|eo| {
+                eo.imp().0.borrow().as_ref().unwrap().widgets.priority() == ThumbPriority::Low
+            }) {
+                return;
+            }
+
+            let Some(unload) = Self::UNLOAD_QUEUE.with_borrow_mut(|q| {
+                q.insert(path);
+                if q.len() > Self::LRU_THUMBNAIL_LIMIT { q.pop_front() } else { None }
+            }) else {
+                return;
+            };
+
+            let Some(s) = super::EntryObject::lookup(&unload) else {
+                return;
+            };
+
+            let mut b = s.imp().0.borrow_mut();
+            let inner = &mut b.as_mut().unwrap();
+            if inner.widgets.priority() == ThumbPriority::Low {
+                // This is spammy because gtk changes the bound widgets a lot.
+                // That also means burning a lot of CPU time sometimes, but eh.
+                // trace!("Unloaded thumbnail for {:?}", inner.entry.abs_path);
+                inner.thumbnail = Thumbnail::Unloaded;
+            }
+        }
+
+        fn start_unload_thumbnail(path: Arc<Path>) {
             // This, annoyingly, needs to happen after gtk has a chance to correct the
-            // widgets count.
+            // widgets count, hence the idle unload.
             Self::UNLOAD_QUEUE.with_borrow_mut(|q| q.remove(&path));
 
             let mut path = Some(path);
             glib::idle_add_local_full(Priority::LOW, move || {
-                let Some(unload) = Self::UNLOAD_QUEUE.with_borrow_mut(|q| {
-                    q.insert(path.take().unwrap());
-                    if q.len() > Self::LRU_THUMBNAIL_LIMIT { q.pop_front() } else { None }
-                }) else {
-                    return ControlFlow::Break;
-                };
-
-                let Some(s) = super::EntryObject::lookup(&unload) else {
-                    return ControlFlow::Break;
-                };
-
-                let mut b = s.imp().0.borrow_mut();
-                let inner = &mut b.as_mut().unwrap();
-                if inner.widgets.priority() == ThumbPriority::Low {
-                    // This is spammy because gtk changes the bound widgets a lot.
-                    // That also means burning a lot of CPU time sometimes, but eh.
-                    trace!("Unloaded thumbnail for {:?}", inner.entry.abs_path);
-                    inner.thumbnail = Thumbnail::Unloaded;
-                }
-
+                Self::unload_thumbnail(path.take().unwrap());
                 ControlFlow::Break
             });
         }
@@ -579,26 +593,25 @@ mod internal {
             let old_p = w.priority();
 
             // Should never fail, but explicitly check
-            w.0 = w.0.checked_add_signed(bound).unwrap();
-            w.1 = w.1.checked_add_signed(mapped).unwrap();
+            w.bound = w.bound.checked_add_signed(bound).unwrap();
+            w.mapped = w.mapped.checked_add_signed(mapped).unwrap();
 
             let new_p = w.priority();
 
             if Self::UNLOAD_LOW.with(|u| **u) {
                 if new_p == ThumbPriority::Low {
                     match &inner.thumbnail {
-                        Thumbnail::Unloaded
-                        | Thumbnail::Loading(_)
-                        | Thumbnail::Loaded(..)
-                        | Thumbnail::Outdated(..) => {
-                            Self::unload_thumbnail(inner.entry.abs_path.clone())
+                        Thumbnail::Loading(_) | Thumbnail::Loaded(..) | Thumbnail::Outdated(..) => {
+                            Self::start_unload_thumbnail(inner.entry.abs_path.clone())
                         }
-                        Thumbnail::Nothing | Thumbnail::Failed => {}
+                        Thumbnail::Nothing | Thumbnail::Failed | Thumbnail::Unloaded => {}
                     }
                     return None;
                 }
 
-                Self::UNLOAD_QUEUE.with_borrow_mut(|q| q.remove(&inner.entry.abs_path));
+                if old_p == ThumbPriority::Low {
+                    Self::UNLOAD_QUEUE.with_borrow_mut(|q| q.remove(&inner.entry.abs_path));
+                }
             }
 
             if new_p != old_p && inner.thumbnail.needs_load(thumb_size()) {
@@ -887,23 +900,20 @@ static INTERNED_MIMETYPES: RwLock<BTreeSet<&'static str>> = RwLock::new(BTreeSet
 
 #[allow(clippy::significant_drop_tightening)]
 fn intern_mimetype(mime: GString) -> &'static str {
-    let ir = INTERNED_MIMETYPES.read().unwrap();
+    if let Some(existing) = INTERNED_MIMETYPES.read().unwrap().get(mime.as_str()) {
+        return existing;
+    }
 
-    let Some(existing) = ir.get(mime.as_str()) else {
-        drop(ir);
-        let mut iw = INTERNED_MIMETYPES.write().unwrap();
+    let mut iw = INTERNED_MIMETYPES.write().unwrap();
 
-        if let Some(existing) = iw.get(mime.as_str()) {
-            return existing;
-        }
+    if let Some(existing) = iw.get(mime.as_str()) {
+        return existing;
+    }
 
-        let leaked: &'static str = Box::leak(mime.to_string().into_boxed_str());
-        trace!("Interned mimetype {leaked}");
-        iw.insert(leaked);
-        return leaked;
-    };
-
-    existing
+    let leaked: &'static str = Box::leak(mime.to_string().into_boxed_str());
+    trace!("Interned mimetype {leaked}");
+    iw.insert(leaked);
+    leaked
 }
 
 // Same for icons, but variants are larger and have their own refcounting
@@ -915,21 +925,19 @@ static INTERNED_ICONS: RwLock<BTreeMap<Box<str>, Variant>> = RwLock::new(BTreeMa
 )]
 fn intern_icon(icon: Icon) -> Variant {
     let key = IconExt::to_string(&icon).unwrap().to_string().into_boxed_str();
-    let ir = INTERNED_ICONS.read().unwrap();
 
-    let Some(existing) = ir.get(&key) else {
-        drop(ir);
-        let mut iw = INTERNED_ICONS.write().unwrap();
+    if let Some(existing) = INTERNED_ICONS.read().unwrap().get(&key) {
+        return existing.clone();
+    }
+
+    let mut iw = INTERNED_ICONS.write().unwrap();
 
 
-        match iw.entry(key) {
-            btree_map::Entry::Occupied(o) => return o.get().clone(),
-            btree_map::Entry::Vacant(v) => {
-                let variant = icon.serialize().unwrap();
-                return v.insert(variant).clone();
-            }
+    match iw.entry(key) {
+        btree_map::Entry::Occupied(o) => o.get().clone(),
+        btree_map::Entry::Vacant(v) => {
+            let variant = icon.serialize().unwrap();
+            v.insert(variant).clone()
         }
-    };
-
-    existing.clone()
+    }
 }
