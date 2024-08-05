@@ -13,8 +13,8 @@ use crate::com::{ActionTarget, GuiAction};
 
 
 impl Manager {
-    pub(super) fn execute(&self, cmd: Arc<Path>, gui_env: Vec<(String, OsString)>) {
-        let cmd = match prep_command(cmd, gui_env, false) {
+    pub(super) fn execute(&self, executable: Arc<Path>, gui_env: Vec<(String, OsString)>) {
+        let cmd = match prep_command(&executable, gui_env, false) {
             Ok(cmd) => cmd,
             Err(e) => {
                 error!("{e}");
@@ -27,11 +27,11 @@ impl Manager {
 
     pub(super) fn script(
         &self,
-        cmd: Arc<Path>,
+        executable: Arc<Path>,
         target: ActionTarget,
         gui_env: Vec<(String, OsString)>,
     ) {
-        let cmd = match prep_command(cmd, gui_env, true) {
+        let cmd = match prep_command(&executable, gui_env, true) {
             Ok(cmd) => cmd,
             Err(e) => {
                 error!("{e}");
@@ -42,8 +42,8 @@ impl Manager {
         tokio::task::spawn_local(run_with_output(cmd, target, self.gui_sender.clone()));
     }
 
-    pub(super) fn launch(&self, cmd: Arc<Path>, gui_env: Vec<(String, OsString)>) {
-        let cmd = match prep_command(cmd, gui_env, false) {
+    pub(super) fn launch(&self, executable: Arc<Path>, gui_env: Vec<(String, OsString)>) {
+        let mut cmd = match prep_command(&executable, gui_env, false) {
             Ok(cmd) => cmd,
             Err(e) => {
                 error!("{e}");
@@ -51,12 +51,17 @@ impl Manager {
             }
         };
 
+
+        if let Some(parent) = executable.parent() {
+            cmd.current_dir(parent);
+        }
+
         tokio::task::spawn_local(run(cmd, self.gui_sender.clone(), false));
     }
 }
 
 fn prep_command(
-    cmd: Arc<Path>,
+    cmd: &Path,
     env: Vec<(String, OsString)>,
     kill_on_drop: bool,
 ) -> Result<Command, String> {

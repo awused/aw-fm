@@ -217,7 +217,8 @@ to navigate to a subdirectory inside the user's home directory.
 
 All of these variables may be empty or absent. They are not updated in response
 to actions taken by the script or the user while the script is running, so they
-may become stale.
+may become stale. The current working directory will not be set to anything
+specific and scripts should use `AWFM_CURRENT_TAB_PATH` when appropriate.
 
 Environment Variable | Explanation
 -------------------- | ----------
