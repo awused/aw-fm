@@ -8,8 +8,8 @@ use gtk::{GestureClick, GridView, ListScrollFlags, MultiSelection, ScrolledWindo
 use self::icon_tile::IconTile;
 use super::{get_last_visible_child, setup_item_controllers, setup_view_controllers, Bound};
 use crate::com::EntryObject;
-use crate::gui::applications;
 use crate::gui::tabs::id::TabId;
+use crate::gui::{applications, tabs_run};
 
 mod icon_tile;
 
@@ -92,7 +92,10 @@ impl IconView {
             let display = gv.display();
             let model = &gv.model().and_downcast::<MultiSelection>().unwrap();
 
-            applications::open(tab, &display, model.into(), true)
+            // It should be impossible for this to be missing.
+            let path = tabs_run(|list| list.find(tab).unwrap().dir());
+
+            applications::open(tab, &path, &display, model.into(), true)
         });
 
 

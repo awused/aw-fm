@@ -1,4 +1,6 @@
 use std::cell::RefCell;
+use std::env::{current_dir, set_current_dir};
+use std::path::Path;
 use std::rc::Rc;
 
 use ahash::AHashMap;
@@ -38,7 +40,7 @@ fn cached_lookup(mime: &'static str) -> Option<AppInfo> {
     })
 }
 
-fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
+fn partition_and_launch(tab_dir: &Path, display: &Display, entries: &[EntryObject]) {
     // Only error on the first one
     let mut sent_error = false;
 
@@ -67,6 +69,14 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
     let context = display.app_launch_context();
     context.set_timestamp(gtk::gdk::CURRENT_TIME);
 
+    if !current_dir().is_ok_and(|d| d == tab_dir) {
+        debug!("Changing working directory to {tab_dir:?}");
+
+        if let Err(e) = set_current_dir(tab_dir) {
+            show_warning(format!("Could not change to directory for application launch: {e}"));
+        }
+    }
+
     for (app, files) in apps {
         if let Err(e) = app.launch(&files, Some(&context)) {
             show_error(&format!("Application launch error: {app:?} {e:?}"));
@@ -76,7 +86,13 @@ fn partition_and_launch(display: &Display, entries: &[EntryObject]) {
 
 static BOTH_ERROR: &str = "Can't launch directories and files together";
 
-pub(super) fn open(tab: TabId, display: &Display, selected: Selected<'_>, execute: bool) {
+pub(super) fn open(
+    tab: TabId,
+    tab_dir: &Path,
+    display: &Display,
+    selected: Selected<'_>,
+    execute: bool,
+) {
     if selected.len() == 0 {
         warn!("Activated with no items");
     }
@@ -118,7 +134,7 @@ pub(super) fn open(tab: TabId, display: &Display, selected: Selected<'_>, execut
     }
 
     if !files.is_empty() {
-        return partition_and_launch(display, &files);
+        return partition_and_launch(tab_dir, display, &files);
     }
 
     if directories.len() > DIR_OPEN_LIMIT {

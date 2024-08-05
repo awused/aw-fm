@@ -85,7 +85,10 @@ impl DetailsView {
             let display = cv.display();
             let model = &cv.model().and_downcast::<MultiSelection>().unwrap();
 
-            applications::open(tab, &display, model.into(), true)
+            // It should be impossible for this to be missing.
+            let path = tabs_run(|list| list.find(tab).unwrap().dir());
+
+            applications::open(tab, &path, &display, model.into(), true)
         });
 
         setup_view_controllers(tab, &column_view, deny_view_click);

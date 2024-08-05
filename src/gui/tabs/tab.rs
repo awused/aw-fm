@@ -839,12 +839,24 @@ impl Tab {
 
     pub fn activate(&self) {
         let display = self.element.display();
-        applications::open(self.id(), &display, self.visible_selection().into(), true);
+        applications::open(
+            self.id(),
+            self.dir.path(),
+            &display,
+            self.visible_selection().into(),
+            true,
+        );
     }
 
     pub fn open_default(&self) {
         let display = self.element.display();
-        applications::open(self.id(), &display, self.visible_selection().into(), false);
+        applications::open(
+            self.id(),
+            self.dir.path(),
+            &display,
+            self.visible_selection().into(),
+            false,
+        );
     }
 
     pub fn open_with(&self) {
