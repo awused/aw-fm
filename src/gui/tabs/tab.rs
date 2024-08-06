@@ -875,7 +875,7 @@ impl Tab {
         }
     }
 
-    fn seek_inner(&mut self, fragment: &str, range: impl Iterator<Item = u32>) {
+    fn seek_inner(&mut self, fragment: &str, range: impl Iterator<Item = u32>) -> bool {
         // Smart case seeking?
         // Prefix instead?
         // This probably doesn't need to be normalized, but it might be helpful
@@ -907,8 +907,9 @@ impl Tab {
                 self.apply_pane_state();
             }
 
-            return;
+            return true;
         }
+        false
     }
 
     pub fn seek(&mut self, fragment: &str) {
@@ -922,7 +923,10 @@ impl Tab {
         // No real fallback if there's no selection
         let sel = contents.selection.selection();
         if !sel.is_empty() {
-            self.seek_inner(fragment, sel.nth(0) + 1..contents.selection.n_items());
+            let found = self.seek_inner(fragment, sel.nth(0) + 1..contents.selection.n_items());
+            if !found && CONFIG.seek_wraparound {
+                self.seek_inner(fragment, 0..sel.nth(0));
+            }
         } else {
             self.seek_inner(fragment, 0..contents.selection.n_items());
         }
@@ -934,7 +938,11 @@ impl Tab {
         // No real fallback if there's no selection
         let sel = contents.selection.selection();
         if !sel.is_empty() {
-            self.seek_inner(fragment, (0..sel.nth(0)).rev());
+            let n_items = contents.selection.n_items();
+            let found = self.seek_inner(fragment, (0..sel.nth(0)).rev());
+            if !found && CONFIG.seek_wraparound {
+                self.seek_inner(fragment, (sel.nth(0) + 1..n_items).rev());
+            }
         } else {
             self.seek_inner(fragment, 0..contents.selection.n_items());
         }

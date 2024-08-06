@@ -371,7 +371,9 @@ impl PaneElement {
         };
 
         // Allow ^ for prefix matching?
-        if !c.is_alphanumeric() {
+        // There are unicode spaces that could matter, but not for me
+        // is_whitespace() would not be appropriate
+        if c != ' ' && !c.is_alphanumeric() {
             return Propagation::Proceed;
         }
 

@@ -26,13 +26,16 @@ idle_timeout = 21600
 # Recommended: 1, 0, or -1
 background_thumbnailers = 1
 
-
 # Whether to limit aw-fm to a single window or not.
 #
 # If true, only one aw-fm window can be open at a time. Running "aw-fm directory" with an
 # open window will open "directory" in a tab in the existing window instead of a new window.
 unique = false
 
+# Whether seeking (tab/shift-tab) wraps around.
+#
+# This can be useful when trying to find the last matching file, but also disorientating.
+seek_wraparound = false
 
 # Shortcuts
 #

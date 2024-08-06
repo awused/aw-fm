@@ -107,6 +107,9 @@ pub struct Config {
     pub idle_timeout: Option<NonZeroU64>,
 
     #[serde(default)]
+    pub seek_wraparound: bool,
+
+    #[serde(default)]
     pub shortcuts: Vec<Shortcut>,
     #[serde(default)]
     pub bookmarks: Vec<Bookmark>,
