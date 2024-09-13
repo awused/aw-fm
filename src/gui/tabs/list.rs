@@ -282,7 +282,7 @@ impl TabsList {
                 i += j;
                 let (left, tab, right) = self.split_around_mut(i);
                 if !tab.handle_directory_deleted(left, right) {
-                    show_error(&format!(
+                    show_error(format!(
                         "Unexpected failure loading {path:?} and all parent directories"
                     ));
                     let id = tab.id();
@@ -335,7 +335,7 @@ impl TabsList {
             i += j;
             let (left, tab, right) = self.split_around_mut(i);
             if !tab.handle_directory_deleted(left, right) {
-                show_error(&format!(
+                show_error(format!(
                     "Unexpected failure loading {path:?} and all parent directories"
                 ));
                 let id = tab.id();
@@ -963,6 +963,8 @@ impl TabsList {
         if !self.tabs[pos].visible() {
             return warn!("HidePanes called with non-visible target tab");
         }
+
+        self.clear_active();
 
         let target_tab = &mut self.tabs[pos];
 
