@@ -5,17 +5,17 @@ use std::ops::{Deref, DerefMut};
 use std::os::linux::fs::MetadataExt;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
+use TabPane as TP;
 use ahash::{AHashMap, AHashSet};
 use gtk::gio::Cancellable;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{glib, AlertDialog, Bitset, MultiSelection, Orientation, PopoverMenu, Widget};
+use gtk::{AlertDialog, Bitset, MultiSelection, Orientation, PopoverMenu, Widget, glib};
 use tokio::sync::oneshot;
-use TabPane as TP;
 
 use self::flat_dir::FlatDir;
 use super::contents::{Contents, TotalPos};
@@ -31,11 +31,11 @@ use crate::com::{
 };
 use crate::config::CONFIG;
 use crate::database::SavedGroup;
-use crate::gui::clipboard::{handle_clipboard, handle_drop, ClipboardOp, SelectionProvider};
+use crate::gui::clipboard::{ClipboardOp, SelectionProvider, handle_clipboard, handle_drop};
 use crate::gui::operations::{self, Kind, Outcome};
 use crate::gui::tabs::{PartiallyAppliedUpdate, ScrollPosition};
 use crate::gui::{
-    applications, gui_run, show_error, show_warning, tabs_run, CompletionResult, Selected, Update,
+    CompletionResult, Selected, Update, applications, gui_run, show_error, show_warning, tabs_run,
 };
 
 /* This efficiently supports multiple tabs being open to the same directory with different
@@ -1590,6 +1590,14 @@ impl Tab {
         }
     }
 
+    pub fn unselect(&self) {
+        if self.unloaded() {
+            return;
+        }
+
+        self.clear_selection();
+    }
+
     pub fn create(&self, folder: bool) {
         gui_run(|g| g.create_dialog(self.id(), self.dir(), folder));
     }
@@ -1850,9 +1858,9 @@ mod flat_dir {
     use std::cell::{Ref, RefCell};
     use std::path::Path;
     use std::rc::Rc;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::Relaxed;
-    use std::sync::Arc;
     use std::time::Instant;
 
     use crate::com::{ManagerAction, SortSettings, Update};

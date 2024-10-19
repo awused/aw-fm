@@ -1,4 +1,4 @@
-use std::collections::{hash_map, VecDeque};
+use std::collections::{VecDeque, hash_map};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -17,7 +17,7 @@ use gtk::{Orientation, Widget, Window};
 
 use super::properties::dialog::PropDialog;
 use super::tabs::id::TabId;
-use super::{label_attributes, ActionTarget, Gui};
+use super::{ActionTarget, Gui, label_attributes};
 use crate::closing;
 use crate::com::{DisplayMode, EntryObject, ManagerAction, SortDir, SortMode};
 use crate::config::CONFIG;
@@ -505,6 +505,7 @@ impl Gui {
             "Properties" => return tabs.properties(target),
 
             "FocusLocation" => return tabs.focus_location_bar(target),
+            "Unselect" => return tabs.unselect(target),
 
             "NewFolder" => return tabs.create(target, true),
             "NewFile" => return tabs.create(target, false),

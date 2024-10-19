@@ -121,6 +121,8 @@ specify them.
   * Opens a fairly standard properties dialog for the current selection.
 * `FocusLocation`
   * Moves the focus to the location bar and selects the text.
+* `Unselect`
+  * Unselects everything in the current tab.
 
 ##### Navigation Commands
 

@@ -80,6 +80,8 @@ shortcuts = [
 
   {key = "L", modifiers = "Control", action = "FocusLocation"},
 
+  {key = "U", modifiers = "Control", action = "Unselect"},
+
   {key = "Up", modifiers = "Alt", action = "Parent"},
   {key = "Down", modifiers = "Alt", action = "Child"},
   {key = "Right", modifiers = "Alt", action = "Forward"},

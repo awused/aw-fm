@@ -3,8 +3,8 @@ use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsString;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use ahash::{AHashMap, AHashSet};
 use dirs::home_dir;
@@ -23,10 +23,10 @@ use crate::com::{
 use crate::database::{SavedSplit, Session, SplitChild};
 use crate::gui::clipboard::ClipboardOp;
 use crate::gui::main_window::MainWindow;
-use crate::gui::tabs::id::next_id;
 use crate::gui::tabs::NavTarget;
+use crate::gui::tabs::id::next_id;
 use crate::gui::{
-    gui_run, operations, show_error, show_warning, tabs_run, ActionTarget, CompletionResult,
+    ActionTarget, CompletionResult, gui_run, operations, show_error, show_warning, tabs_run,
 };
 
 // For event handlers which cannot be run with the tabs lock being held.
@@ -1062,6 +1062,10 @@ impl TabsList {
 
     pub fn focus_location_bar(&mut self, target: ActionTarget) {
         self.try_resolve(target, |t| t.focus_location_bar());
+    }
+
+    pub fn unselect(&mut self, target: ActionTarget) {
+        self.try_resolve(target, |t| t.unselect());
     }
 
     pub fn create(&mut self, target: ActionTarget, folder: bool) {
