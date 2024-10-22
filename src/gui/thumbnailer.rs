@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::cmp::min;
-use std::collections::{btree_map, BTreeMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque, btree_map};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,7 +15,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use self::send::{Factories, SendFactory};
-use super::{gui_run, ThumbPriority};
+use super::{ThumbPriority, gui_run};
 use crate::com::{EntryObject, FileTime};
 use crate::config::CONFIG;
 use crate::{closing, handle_panic};
@@ -359,13 +359,13 @@ impl Thumbnailer {
                         }
                     }
                 }
-            }
 
-            // aw-fm doesn't write failed thumbnails for operations from events,
-            // so this is most likely legitimate.
-            if job.has_failed(&uri) {
-                drop(guard);
-                return Self::fail_thumbnail(job);
+                // aw-fm doesn't write failed thumbnails for operations from events,
+                // so this is most likely legitimate and should be trusted.
+                if job.has_failed(&uri) {
+                    drop(guard);
+                    return Self::fail_thumbnail(job);
+                }
             }
 
             if !job.can_thumbnail(&uri) {
@@ -437,7 +437,7 @@ mod send {
     use gnome_desktop::{DesktopThumbnailFactory, DesktopThumbnailSize};
     use gtk::gdk::Texture;
     use gtk::gio::glib::GString;
-    use gtk::glib::ffi::{g_thread_self, GThread};
+    use gtk::glib::ffi::{GThread, g_thread_self};
 
     use super::Job;
 
