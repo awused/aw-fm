@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
-use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, btree_map, hash_map};
 use std::fmt::{self, Formatter};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -12,12 +12,12 @@ use gnome_desktop::DesktopThumbnailSize;
 use gtk::gdk::Texture;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
-    self, Cancellable, FileQueryInfoFlags, Icon, FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE,
-    FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE, FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
-    FILE_ATTRIBUTE_STANDARD_ICON, FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
+    self, Cancellable, FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE, FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE,
+    FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE, FILE_ATTRIBUTE_STANDARD_ICON,
+    FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
     FILE_ATTRIBUTE_STANDARD_SYMLINK_TARGET, FILE_ATTRIBUTE_STANDARD_TYPE,
     FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC, FILE_ATTRIBUTE_UNIX_INODE,
-    FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT,
+    FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT, FileQueryInfoFlags, Icon,
 };
 use gtk::glib::ffi::GVariant;
 use gtk::glib::{self, GStr, GString, Object, Variant, WeakRef};
@@ -26,7 +26,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use once_cell::sync::Lazy;
 
 use super::{SortDir, SortMode, SortSettings};
-use crate::gui::{queue_thumb, ThumbPriority};
+use crate::gui::{ThumbPriority, queue_thumb};
 use crate::natsort::{self, NatKey};
 
 
@@ -368,7 +368,7 @@ mod internal {
     use once_cell::sync::Lazy as SyncLazy;
     use once_cell::unsync::Lazy;
 
-    use super::{Entry, FileTime, ThumbPriority, Thumbnail, ALL_ENTRY_OBJECTS};
+    use super::{ALL_ENTRY_OBJECTS, Entry, FileTime, ThumbPriority, Thumbnail};
     use crate::com::EntryKind;
     use crate::config::CONFIG;
     use crate::gui::thumb_size;
@@ -455,7 +455,7 @@ mod internal {
             static UNLOAD_QUEUE: RefCell<LinkedHashSet<Arc<Path>>> = RefCell::default();
         }
 
-        pub(super) fn init(&self, entry: Entry) -> Option<ThumbPriority> {
+        pub(super) fn init(&self, entry: Entry, from_event: bool) -> Option<ThumbPriority> {
             let (thumbnail, p) = match entry.kind {
                 EntryKind::File { .. } => (Thumbnail::Unloaded, Some(ThumbPriority::Low)),
                 EntryKind::Directory { .. } => (Thumbnail::Nothing, None),
@@ -468,7 +468,7 @@ mod internal {
                 entry,
                 widgets: WidgetCounter::default(),
                 thumbnail,
-                updated: false,
+                updated: from_event,
             };
             assert!(self.0.replace(Some(wrapped)).is_none());
             p
@@ -747,7 +747,7 @@ impl EntryObject {
 
     fn create(entry: Entry, from_event: bool) -> Self {
         let obj: Self = Object::new();
-        let p = obj.imp().init(entry);
+        let p = obj.imp().init(entry, from_event);
         obj.queue_thumb(p, from_event);
 
         obj
