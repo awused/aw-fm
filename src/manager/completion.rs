@@ -1,9 +1,9 @@
 use std::cmp::min;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use once_cell::sync::Lazy;
@@ -176,9 +176,20 @@ pub(super) fn complete(
 
     let cancel = c.clone();
     let complete = move || {
-        let mut root = path.as_path();
+        let mut root = path.as_path().as_os_str().as_bytes();
 
         let mut fragments = Vec::new();
+
+        // TODO -- treat "/a/" as matching directories matching "a", not just all files in "/*a*/"
+        while let Some((last, head)) = root.split_last() {
+            if !last.is_ascii() || !std::path::is_separator(char::from_u32(*last as _).unwrap()) {
+                break;
+            }
+
+            root = head;
+        }
+
+        let mut root = Path::new(OsStr::from_bytes(root));
 
         // Must do this at least once so /exact/path can match /exact/path2 as well
         while {
@@ -199,6 +210,8 @@ pub(super) fn complete(
 
             !root.exists()
         } {}
+
+        debug!("Performing completion with root {root:?} and fragments {fragments:?}");
 
         if cancel.load(Ordering::Relaxed)
             || !root.is_dir()
