@@ -97,6 +97,7 @@ impl Contents {
         }
         assert!(!self.stale);
 
+        let inserted = snap.entries.len();
 
         let start = Instant::now();
         if self.list.n_items() == 0 {
@@ -111,7 +112,11 @@ impl Contents {
 
         // It can be marginally faster to detach, sort, and reattach the list when there is no
         // filter, but selection gets clobbered.
-        trace!("Inserted and sorted {:?} items in {:?}", self.list.n_items(), start.elapsed());
+        trace!(
+            "Inserted {inserted} and sorted {} items in {:?}",
+            self.list.n_items(),
+            start.elapsed()
+        );
     }
 
     pub fn re_sort_for_search(&mut self) {

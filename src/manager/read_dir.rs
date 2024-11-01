@@ -10,8 +10,8 @@ use std::time::Duration;
 use constants::*;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
 use gtk::gio::{
-    self, Cancellable, FileQueryInfoFlags, FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE,
-    FILE_ATTRIBUTE_STANDARD_SIZE, FILE_ATTRIBUTE_STANDARD_TYPE,
+    self, Cancellable, FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE, FILE_ATTRIBUTE_STANDARD_SIZE,
+    FILE_ATTRIBUTE_STANDARD_TYPE, FileQueryInfoFlags,
 };
 use gtk::glib::GStr;
 use gtk::prelude::FileExt;
@@ -20,10 +20,10 @@ use once_cell::sync::Lazy;
 use rayon::slice::ParallelSliceMut;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tokio::select;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::task::spawn_local;
-use tokio::time::{sleep, sleep_until, Instant};
+use tokio::time::{Instant, sleep, sleep_until};
 
 use super::Manager;
 use crate::com::{
@@ -47,6 +47,8 @@ mod constants {
     // May raise to 10k+ as in practice directories are either very fast or very large and very
     // slow.
     pub static INITIAL_BATCH: usize = 1000;
+    // How fast batches grow in size.
+    pub static BATCH_GROWTH_FACTOR: f64 = 1.1;
     // The timeout after which we send a completed batch as soon as no more items are immediately
     // available.
     pub static BATCH_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -59,6 +61,7 @@ mod constants {
 
     pub static FAST_TIMEOUT: Duration = Duration::from_millis(0);
     pub static INITIAL_BATCH: usize = 1;
+    pub static BATCH_GROWTH_FACTOR: f64 = 1.1;
     pub static BATCH_TIMEOUT: Duration = Duration::from_millis(2500);
 }
 
@@ -487,7 +490,7 @@ async fn read_slow_dir(
 
     let start = Instant::now();
     let mut batch_size = INITIAL_BATCH;
-    let mut next_size = INITIAL_BATCH;
+    let mut true_size = INITIAL_BATCH as f64;
 
     loop {
         let batch_start = Instant::now();
@@ -568,8 +571,8 @@ async fn read_slow_dir(
                 return;
             }
 
-            next_size += batch_size;
-            batch_size = next_size - batch_size;
+            true_size *= BATCH_GROWTH_FACTOR;
+            batch_size = true_size as usize;
             continue;
         }
 
@@ -659,8 +662,8 @@ async fn read_slow_dir(
         }
 
 
-        next_size += batch_size;
-        batch_size = next_size - batch_size;
+        true_size *= BATCH_GROWTH_FACTOR;
+        batch_size = true_size as usize;
     }
 }
 
@@ -836,10 +839,10 @@ fn recurse_children(
             Box::new(visitor)
         });
 
-        drop(sender.send(GuiAction::DirChildren(
-            cancel,
-            ChildInfo { done: true, ..ChildInfo::default() },
-        )));
+        drop(sender.send(GuiAction::DirChildren(cancel, ChildInfo {
+            done: true,
+            ..ChildInfo::default()
+        })));
 
         trace!(
             "Finished measuring children of {dir_count} directories in {:?}",
