@@ -2,13 +2,13 @@ use std::fmt::Write;
 use std::ops::Deref;
 use std::time::Duration;
 
+use StackChild::*;
 use gtk::gdk::{DragAction, Key, ModifierType};
 use gtk::glib::Propagation;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{glib, DropTargetAsync, EventControllerFocus, GestureClick, MultiSelection};
+use gtk::{DropTargetAsync, EventControllerFocus, GestureClick, MultiSelection, glib};
 use strum_macros::{AsRefStr, EnumString};
-use StackChild::*;
 
 use super::DRAGGING_TAB;
 use crate::com::SignalHolder;
@@ -16,7 +16,7 @@ use crate::gui::clipboard::URIS;
 use crate::gui::tabs::id::TabId;
 use crate::gui::tabs::list::event_run_tab;
 use crate::gui::tabs::tab::Tab;
-use crate::gui::{tabs_run, Selected};
+use crate::gui::{Selected, tabs_run};
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
@@ -85,7 +85,7 @@ impl PaneElement {
         imp.clipboard.set_text(text);
         imp.clipboard.set_tooltip_text(Some(text));
 
-        if imp.stack.visible_child_name().map_or(false, |n| n != *Seek) {
+        if imp.stack.visible_child_name().is_some_and(|n| n != *Seek) {
             imp.stack.set_visible_child_name(&Clipboard);
         }
     }
@@ -190,7 +190,7 @@ impl PaneElement {
         if len == 0 {
             imp.selection.set_text("");
 
-            if imp.stack.visible_child_name().map_or(false, |n| n != *Count && n != *Seek) {
+            if imp.stack.visible_child_name().is_some_and(|n| n != *Count && n != *Seek) {
                 imp.stack.set_visible_child_name(&Count);
             }
             return;
@@ -214,7 +214,7 @@ impl PaneElement {
         imp.selection.set_text(&text);
         imp.selection.set_tooltip_text(Some(&text));
 
-        if imp.stack.visible_child_name().map_or(false, |n| n != *Selection && n != *Seek) {
+        if imp.stack.visible_child_name().is_some_and(|n| n != *Selection && n != *Seek) {
             imp.stack.set_visible_child_name(&Selection);
         }
     }
@@ -320,7 +320,7 @@ impl PaneElement {
             return Propagation::Proceed;
         }
 
-        let seek_visible = stack.visible_child_name().map_or(false, |n| n == *Seek);
+        let seek_visible = stack.visible_child_name().is_some_and(|n| n == *Seek);
 
         if seek_visible {
             if key == Key::Tab || key == Key::ISO_Left_Tab {
@@ -399,7 +399,7 @@ mod imp {
 
     use gtk::glib::SourceId;
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
     use once_cell::unsync::OnceCell;
 
     use crate::gui::tabs::id::TabId;

@@ -4,10 +4,10 @@ use gtk::gdk::{ContentProvider, DragAction, ModifierType};
 use gtk::glib::{BoxedAnyObject, GString};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{glib, DragSource, DropTarget, GestureClick, Orientation, WidgetPaintable};
+use gtk::{DragSource, DropTarget, GestureClick, Orientation, WidgetPaintable, glib};
 
 use crate::gui::tabs::id::TabId;
-use crate::gui::{tabs_run, ActionTarget};
+use crate::gui::{ActionTarget, tabs_run};
 
 
 glib::wrapper! {
@@ -184,7 +184,7 @@ mod imp {
     use std::cell::Cell;
 
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate, ListItem};
+    use gtk::{CompositeTemplate, ListItem, glib};
     use once_cell::unsync::OnceCell;
 
     use crate::gui::tabs::id::TabId;

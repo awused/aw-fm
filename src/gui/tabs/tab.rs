@@ -276,7 +276,7 @@ impl Tab {
     }
 
     pub fn loading(&self) -> bool {
-        self.dir.state().loading() || self.search.as_ref().map_or(false, Search::loading)
+        self.dir.state().loading() || self.search.as_ref().is_some_and(Search::loading)
     }
 
     fn loaded(&self) -> bool {
@@ -308,11 +308,11 @@ impl Tab {
         }
     }
 
-    fn matching_mut<'a>(&'a self, other: &'a mut [Self]) -> impl Iterator<Item = &mut Self> {
+    fn matching_mut<'a>(&'a self, other: &'a mut [Self]) -> impl Iterator<Item = &'a mut Self> {
         other.iter_mut().filter(|t| self.matches_arc(t.dir.path()))
     }
 
-    fn matching<'a>(&'a self, other: &'a [Self]) -> impl Iterator<Item = &Self> {
+    fn matching<'a>(&'a self, other: &'a [Self]) -> impl Iterator<Item = &'a Self> {
         other.iter().filter(|t| self.matches_arc(t.dir.path()))
     }
 
@@ -536,7 +536,7 @@ impl Tab {
     // Only make this take &mut [Self] if truly necessary
     fn load(&mut self, left: &[Self], right: &[Self]) {
         let self_load = self.dir.start_load(self.settings.sort);
-        let search_load = self.search.as_mut().map_or(false, Search::start_load);
+        let search_load = self.search.as_mut().is_some_and(Search::start_load);
 
         if self_load || search_load {
             self.element.spin();
@@ -1847,7 +1847,7 @@ impl Tab {
         self.pane.workaround_enable_rubberband();
     }
 
-    pub fn workaround_scroll_to(&self) -> Option<&Pane> {
+    pub const fn workaround_scroll_to(&self) -> Option<&Pane> {
         self.pane.get_visible()
     }
 }

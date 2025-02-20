@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use derive_more::derive::{Deref, DerefMut, From};
+use derive_more::{Deref, DerefMut, From};
 use gtk::glib::{Object, SignalHandlerId};
 use gtk::prelude::{EventControllerExt, IsA, ObjectExt, WidgetExt};
 use gtk::EventController;

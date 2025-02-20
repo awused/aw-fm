@@ -26,11 +26,11 @@ use super::{Contents, PaneState};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
 use crate::database::{SavedSplit, SplitChild};
 use crate::gui::clipboard::{ClipboardOp, URIS};
-use crate::gui::tabs::list::TabPosition;
 use crate::gui::tabs::NavTarget;
+use crate::gui::tabs::list::TabPosition;
 use crate::gui::{
-    gui_run, tabs_run, ActionTarget, CompletionResult, ControllerDisconnector, DebugIgnore,
-    ManagerAction,
+    ActionTarget, CompletionResult, ControllerDisconnector, DebugIgnore, ManagerAction, gui_run,
+    tabs_run,
 };
 use crate::natsort::normalize_lowercase;
 
@@ -503,7 +503,7 @@ impl Pane {
                     .start_child()
                     .unwrap()
                     .downcast_ref::<gtk::Paned>()
-                    .map_or(false, |sc| sc.eq(paned));
+                    .is_some_and(|sc| sc.eq(paned));
 
                 if focus.is_some() {
                     grandpane.grab_focus();
