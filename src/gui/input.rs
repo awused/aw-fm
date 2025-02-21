@@ -260,7 +260,7 @@ impl Gui {
 
             let new_name = e.text();
             if new_name.is_empty() || new_name.contains('/') || new_name.contains('\\') {
-                return show_warning("Invalid name for file \"{new_name}\"");
+                return show_warning(format!("Invalid name for file \"{new_name}\""));
             }
 
             let path = dir.join(new_name);

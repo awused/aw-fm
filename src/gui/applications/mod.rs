@@ -12,7 +12,7 @@ use gtk::prelude::{AppInfoExt, DisplayExt, GdkAppLaunchContextExt};
 use self::open_with::OpenWith;
 use super::tabs::id::TabId;
 use super::tabs::list::TabPosition;
-use super::{show_error, show_warning, tabs_run, ActionTarget, Gui, Selected};
+use super::{ActionTarget, Gui, Selected, show_error, show_warning, tabs_run};
 use crate::com::{EntryKind, EntryObject, ManagerAction};
 use crate::gui::gui_run;
 
@@ -51,7 +51,7 @@ fn partition_and_launch(tab_dir: &Path, display: &Display, entries: &[EntryObjec
 
         let Some(app) = cached_lookup(entry.mime) else {
             if !sent_error {
-                show_warning(&format!("Couldn't find application for mimetype: {}", entry.mime));
+                show_warning(format!("Couldn't find application for mimetype: {}", entry.mime));
                 sent_error = true;
             }
             continue;
@@ -79,7 +79,7 @@ fn partition_and_launch(tab_dir: &Path, display: &Display, entries: &[EntryObjec
 
     for (app, files) in apps {
         if let Err(e) = app.launch(&files, Some(&context)) {
-            show_error(&format!("Application launch error: {app:?} {e:?}"));
+            show_error(format!("Application launch error: {app:?} {e:?}"));
         }
     }
 }

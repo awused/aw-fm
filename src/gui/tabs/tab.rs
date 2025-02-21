@@ -280,7 +280,7 @@ impl Tab {
     }
 
     fn loaded(&self) -> bool {
-        self.dir.state().loaded() && self.search.as_ref().map_or(true, Search::loaded)
+        self.dir.state().loaded() && self.search.as_ref().is_none_or(Search::loaded)
     }
 
     pub fn dir(&self) -> Arc<Path> {

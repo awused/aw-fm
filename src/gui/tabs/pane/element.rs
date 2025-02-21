@@ -222,7 +222,7 @@ impl PaneElement {
     fn defer_selected_text_update(&self, list: &MultiSelection) {
         let imp = self.imp();
 
-        if imp.stack.visible_child_name().map_or(true, |n| n != *Selection) {
+        if imp.stack.visible_child_name().is_none_or(|n| n != *Selection) {
             return;
         }
 
@@ -243,7 +243,7 @@ impl PaneElement {
                 };
                 s.imp().selection_text_update.take();
 
-                if s.imp().stack.visible_child_name().map_or(true, |n| n != *Selection) {
+                if s.imp().stack.visible_child_name().is_none_or(|n| n != *Selection) {
                     return;
                 }
 
@@ -292,7 +292,7 @@ impl PaneElement {
 
     fn maybe_close_seek(&self, list: &MultiSelection) {
         let imp = self.imp();
-        if imp.stack.visible_child_name().map_or(true, |n| n != *Seek) {
+        if imp.stack.visible_child_name().is_none_or(|n| n != *Seek) {
             return;
         }
 

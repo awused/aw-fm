@@ -15,7 +15,7 @@ use super::ask::{DirChoice, FileChoice};
 use super::{
     Conflict, ConflictKind, Directory, Fragment, NextCopyMove, NextRemove, Operation, Outcome,
 };
-use crate::config::{DirectoryCollision, FileCollision, CONFIG};
+use crate::config::{CONFIG, DirectoryCollision, FileCollision};
 use crate::gui::{gui_run, show_warning};
 
 #[derive(Debug)]
@@ -124,7 +124,7 @@ impl Progress {
                 let name = match next {
                     Ok(de) => de.file_name(),
                     Err(e) => {
-                        show_warning(&format!(
+                        show_warning(format!(
                             "Failed to read contents of directory {:?}: {e}",
                             dir.abs_path
                         ));
@@ -160,7 +160,7 @@ impl Progress {
                 let path = match next {
                     Ok(de) => de.path(),
                     Err(e) => {
-                        show_warning(&format!(
+                        show_warning(format!(
                             "Failed to read contents of directory {:?}: {e}",
                             dir.abs_path
                         ));
@@ -390,7 +390,7 @@ mod imp {
     use std::rc::Rc;
 
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
 
     use crate::gui::operations::Operation;
 

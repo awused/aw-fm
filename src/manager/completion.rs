@@ -82,7 +82,7 @@ fn next_candidates(
                 .into_par_iter()
                 .take_any_while(|_| !cancel.load(Ordering::Relaxed))
                 .filter(|de| {
-                    (hidden || !de.file_name().as_bytes().first().is_some_and(|b| *b == b'.'))
+                    (hidden || de.file_name().as_bytes().first().is_none_or(|b| *b != b'.'))
                         && (final_segment || de.file_type().is_ok_and(|ft| ft.is_dir()))
                 })
                 .filter_map(|de| {

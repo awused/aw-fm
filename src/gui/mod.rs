@@ -11,7 +11,7 @@ use gtk::glib::{ControlFlow, SourceId, WeakRef};
 use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{gdk, gio, glib, Bitset, MultiSelection};
+use gtk::{Bitset, MultiSelection, gdk, gio, glib};
 use path_clean::PathClean;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
@@ -24,7 +24,7 @@ use crate::closing;
 use crate::config::CONFIG;
 use crate::database::DBCon;
 use crate::gui::tabs::list::TabPosition;
-use crate::state_cache::{save_settings, State, STATE};
+use crate::state_cache::{STATE, State, save_settings};
 
 mod applications;
 mod clipboard;
@@ -435,7 +435,7 @@ impl<'a> From<&'a MultiSelection> for Selected<'a> {
     }
 }
 
-impl<'a> Iterator for Selected<'a> {
+impl Iterator for Selected<'_> {
     type Item = EntryObject;
 
     fn next(&mut self) -> Option<Self::Item> {
