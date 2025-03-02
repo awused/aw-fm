@@ -9,14 +9,6 @@
 # Leave empty to use your default GTK theme.
 # background_colour = '#000000be'
 
-# The timeout, in seconds, for detecting idleness.
-# When the application is idle for a long period of time tabs that aren't visible can be unloaded.
-# The default of 6 hours should not be disruptive.
-# Comment out or set to 0 to disable.
-#
-# This is not as beneficial if background_thumbnailers is negative (see below).
-idle_timeout = 21600
-
 # How many thumbnailers to run in the background.
 # This is used for files that aren't currently visible/near-visible.
 #
@@ -242,6 +234,15 @@ search_show_all = false
 #
 # This might cause confusing or surprising file operations.
 paste_into_search = false
+
+# The timeout, in seconds, for when we unload tabs due to idleness.
+# Tabs that aren't visible can be unloaded, this can greatly reduce memory usage
+# Comment out or set to 0 to disable.
+#
+# Setting background_thumbnailers to negative is the recommended way to lower memory usage.
+# This is not recommended if background_thumbnailers is negative
+unload_timeout = 0
+# unload_timeout = 21600 # 6 hours is an appropriate timeout
 
 
 # Thread Settings --------------------------------------------------------------------------------

@@ -61,8 +61,10 @@ impl Gui {
 
         self.window.add_controller(key);
 
-        if let Some(idle) = CONFIG.idle_timeout {
-            self.setup_idle_unload(Duration::from_secs(idle.get()));
+        self.setup_idle_trim();
+
+        if let Some(unload) = CONFIG.unload_timeout {
+            self.setup_idle_unload(Duration::from_secs(unload.get()));
         }
 
         self.setup_bookmarks();
@@ -73,7 +75,7 @@ impl Gui {
 
         let g = self.clone();
         focus.connect_enter(move |_| {
-            if let Some(timeout) = g.idle_timeout.take() {
+            if let Some(timeout) = g.unload_timeout.take() {
                 timeout.remove();
             }
         });
@@ -83,7 +85,7 @@ impl Gui {
             let gui = g.clone();
             let timeout = glib::timeout_add_local_once(idle, move || {
                 debug!("Performing idle unload");
-                gui.idle_timeout.take();
+                gui.unload_timeout.take();
                 gui.tabs.borrow_mut().idle_unload();
 
                 // Wait a bit for everything to be dropped. 5 seconds is way too much, but
@@ -96,7 +98,44 @@ impl Gui {
                 });
             });
 
-            if let Some(old) = g.idle_timeout.replace(Some(timeout)) {
+            if let Some(old) = g.unload_timeout.replace(Some(timeout)) {
+                old.remove();
+            }
+        });
+
+        self.window.add_controller(focus);
+    }
+
+    fn setup_idle_trim(self: &Rc<Self>) {
+        let focus = gtk::EventControllerFocus::new();
+
+        let g = self.clone();
+        focus.connect_enter(move |_| {
+            if let Some(timeout) = g.trim_timeout.take() {
+                timeout.remove();
+            }
+        });
+
+        let g = self.clone();
+        focus.connect_leave(move |_| {
+            let gui = g.clone();
+            let timeout = glib::timeout_add_local_once(Duration::from_secs(600), move || {
+                debug!("Performing idle trim");
+                gui.trim_timeout.take();
+
+                EntryObject::trigger_pending_unloads();
+
+                // Wait a bit for everything to be dropped. 5 seconds is way too much, but
+                // it can't really hurt anything.
+                glib::timeout_add_local_once(Duration::from_secs(5), || {
+                    trace!("Explicitly trimming unused memory");
+                    unsafe {
+                        libc::malloc_trim(0);
+                    }
+                });
+            });
+
+            if let Some(old) = g.trim_timeout.replace(Some(timeout)) {
                 old.remove();
             }
         });

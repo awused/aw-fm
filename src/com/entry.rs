@@ -553,24 +553,38 @@ mod internal {
                 return;
             }
 
-            let Some(unload) = Self::UNLOAD_QUEUE.with_borrow_mut(|q| {
+            Self::UNLOAD_QUEUE.with_borrow_mut(|q| {
                 q.insert(path);
-                if q.len() > Self::LRU_THUMBNAIL_LIMIT { q.pop_front() } else { None }
-            }) else {
-                return;
-            };
+                Self::unload_above_limit(Self::LRU_THUMBNAIL_LIMIT, q);
+            });
+        }
 
-            let Some(s) = super::EntryObject::lookup(&unload) else {
+        pub(super) fn purge_unload_queue() {
+            if !Self::UNLOAD_LOW.with(|u| **u) {
                 return;
-            };
+            }
 
-            let mut b = s.imp().0.borrow_mut();
-            let inner = &mut b.as_mut().unwrap();
-            if inner.widgets.priority() == ThumbPriority::Low {
-                // This is spammy because gtk changes the bound widgets a lot.
-                // That also means burning a lot of CPU time sometimes, but eh.
-                // trace!("Unloaded thumbnail for {:?}", inner.entry.abs_path);
-                inner.thumbnail = Thumbnail::Unloaded;
+            Self::UNLOAD_QUEUE.with_borrow_mut(|q| {
+                Self::unload_above_limit(0, q);
+            });
+        }
+
+        fn unload_above_limit(limit: usize, queue: &mut LinkedHashSet<Arc<Path>>) {
+            while queue.len() > limit {
+                let unload = queue.pop_front().unwrap();
+
+                let Some(s) = super::EntryObject::lookup(&unload) else {
+                    continue;
+                };
+
+                let mut b = s.imp().0.borrow_mut();
+                let inner = &mut b.as_mut().unwrap();
+                if inner.widgets.priority() == ThumbPriority::Low {
+                    // This is spammy because gtk changes the bound widgets a lot.
+                    // That also means burning a lot of CPU time sometimes, but eh.
+                    // trace!("Unloaded thumbnail for {:?}", inner.entry.abs_path);
+                    inner.thumbnail = Thumbnail::Unloaded;
+                }
             }
         }
 
@@ -743,6 +757,10 @@ impl EntryObject {
     // duplicate enties or stale values.
     pub unsafe fn purge() {
         ALL_ENTRY_OBJECTS.take();
+    }
+
+    pub fn trigger_pending_unloads() {
+        internal::EntryWrapper::purge_unload_queue();
     }
 
     fn create(entry: Entry, from_event: bool) -> Self {

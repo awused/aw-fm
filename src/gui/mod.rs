@@ -120,7 +120,8 @@ struct Gui {
     manager_sender: UnboundedSender<ManagerAction>,
 
     warning_timeout: DebugIgnore<Cell<Option<SourceId>>>,
-    idle_timeout: DebugIgnore<Cell<Option<SourceId>>>,
+    unload_timeout: DebugIgnore<Cell<Option<SourceId>>>,
+    trim_timeout: DebugIgnore<Cell<Option<SourceId>>>,
 }
 
 pub fn run(
@@ -245,7 +246,8 @@ impl Gui {
             manager_sender,
 
             warning_timeout: DebugIgnore::default(),
-            idle_timeout: DebugIgnore::default(),
+            unload_timeout: DebugIgnore::default(),
+            trim_timeout: DebugIgnore::default(),
         });
 
         let g = rc.clone();

@@ -9,7 +9,7 @@ use clap::Parser;
 use dirs::config_dir;
 use gtk::gdk;
 use once_cell::sync::Lazy;
-use serde::{de, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, de};
 use strum_macros::{AsRefStr, EnumString};
 
 
@@ -95,16 +95,13 @@ pub enum NfsPolling {
     Both,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub unique: bool,
 
     #[serde(default, deserialize_with = "empty_string_is_none")]
     pub background_colour: Option<gdk::RGBA>,
-
-    #[serde(default, deserialize_with = "zero_is_none")]
-    pub idle_timeout: Option<NonZeroU64>,
 
     #[serde(default)]
     pub seek_wraparound: bool,
@@ -139,6 +136,8 @@ pub struct Config {
     pub search_show_all: bool,
     #[serde(default)]
     pub paste_into_search: bool,
+    #[serde(default, deserialize_with = "zero_is_none")]
+    pub unload_timeout: Option<NonZeroU64>,
 
     #[serde(default)]
     pub max_thumbnailers: u8,
