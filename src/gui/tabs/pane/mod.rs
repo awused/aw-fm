@@ -329,31 +329,28 @@ impl Pane {
         &mut self,
         filter: CustomFilter,
         filtered: FilterListModel,
-        queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
+        (original_query, normalized_query): (Rc<RefCell<String>>, Rc<RefCell<String>>),
     ) {
-        let original = queries.0;
-        let query_rc = queries.1;
-
         gui_run(|g| g.send_manager(ManagerAction::CancelCompletion));
         self.connections.clear();
         self.completion_controllers.clear();
         self.completion_result.take();
 
         let tab = self.tab;
-        debug!("Creating new search pane for {tab:?}: {:?}", original.borrow());
+        debug!("Creating new search pane for {tab:?}: {:?}", original_query.borrow());
 
-        self.element.search_text(&original.borrow(), String::new());
+        self.element.search_text(&original_query.borrow(), String::new());
 
         // Decent opportunity for UnsafeCell if it benchmarks better.
-        let query = query_rc.clone();
+        let query = normalized_query.clone();
         let imp = self.element.imp();
 
         let filt = filter.clone();
         let signal = imp.text_entry.connect_changed(move |e| {
             let text = e.text();
-            original.replace(text.to_string());
+            original_query.replace(text.to_string());
 
-            let mut query = query_rc.borrow_mut();
+            let mut query = normalized_query.borrow_mut();
             let lower = text.to_lowercase();
             let new = match normalize_lowercase(&lower) {
                 Cow::Borrowed(_) => lower,

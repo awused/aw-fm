@@ -5,13 +5,13 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use derive_more::{Deref, DerefMut, From};
+use gtk::EventController;
 use gtk::glib::{Object, SignalHandlerId};
 use gtk::prelude::{EventControllerExt, IsA, ObjectExt, WidgetExt};
-use gtk::EventController;
 use tokio::sync::oneshot;
 
 pub use self::entry::*;
@@ -145,9 +145,12 @@ impl<T> fmt::Debug for DebugIgnore<T> {
     }
 }
 
-// Makes sure to disconnect a signal handler when the rust object drops.
-// This isn't necessary when connecting to widgets that will dispose of all their connectors when
-// they are disposed of.
+// Makes sure to disconnect a signal handler when this rust object drops.
+// Most useful for connecting signals temporarily to longer-lived widgets or to break circular
+// links.
+//
+// This isn't necessary when connecting to widgets that hold all of their connections until they're
+// disposed of, with no circular strong references.
 #[derive(Debug)]
 pub struct SignalHolder<T: IsA<Object>>(T, Option<SignalHandlerId>);
 

@@ -7,12 +7,12 @@ use gtk::gio::{AppInfo, AppInfoCreateFlags, File, ListStore};
 use gtk::glib::{shell_parse_argv, shell_unquote};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{glib, SingleSelection};
+use gtk::{SingleSelection, glib};
 
 use super::application::Application;
 use super::cached_lookup;
 use crate::gui::applications::DEFAULT_CACHE;
-use crate::gui::{show_error, show_warning, Gui, Selected};
+use crate::gui::{Gui, Selected, show_error, show_warning};
 
 glib::wrapper! {
     pub struct OpenWith(ObjectSubclass<imp::OpenWith>)
@@ -224,7 +224,7 @@ mod imp {
     use std::cell::Cell;
 
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
 
     use crate::gui::EntryObject;
 
@@ -292,10 +292,9 @@ fn partition_app_infos(mimetypes: &[&'static str]) -> PartitionedAppInfos {
     for mime in mimetypes {
         if let Some(app) = cached_lookup(mime) {
             if let Some(id) = app.id() {
-                if app_ids.contains(&id) {
+                if !app_ids.insert(id) {
                     continue;
                 }
-                app_ids.insert(id);
             } else if defaults.iter().any(|d| app.equal(d)) {
                 // This should almost never actually be hit
                 continue;

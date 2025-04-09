@@ -448,7 +448,7 @@ mod internal {
     // These should not be Entry methods since they don't make sense for a bare Entry.
     impl EntryWrapper {
         // To avoid flapping reloads due to GTK weirdness
-        const LRU_THUMBNAIL_LIMIT: usize = 384;
+        const LRU_THUMBNAIL_LIMIT: usize = 512;
 
         thread_local! {
             static UNLOAD_LOW: Lazy<bool> = Lazy::new(|| CONFIG.background_thumbnailers < 0);
