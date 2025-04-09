@@ -124,6 +124,9 @@ pub struct Config {
     #[serde(default)]
     pub normalize_names: bool,
 
+    #[serde(default, deserialize_with = "zero_is_none")]
+    pub max_undo_minutes: Option<NonZeroU64>,
+
     #[serde(default, deserialize_with = "empty_path_is_none")]
     pub database: Option<PathBuf>,
 

@@ -197,6 +197,12 @@ actions_directory = ""
 # Does not affect sorting.
 normalize_names = true
 
+# The maximum number of minutes after which operations can't be undone.
+# This is to prevent accidentally undoing something and not realizing what has happened.
+#
+# Set to 0 or comment out to disable.
+max_undo_minutes = 360
+
 # ------------------------------------------------------------------------------------------------
 # More advanced configuration options below. They probably do not need to be changed.
 # ------------------------------------------------------------------------------------------------

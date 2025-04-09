@@ -1,10 +1,10 @@
 use std::cell::{Ref, RefCell};
 use std::collections::VecDeque;
-use std::fs::{remove_dir, ReadDir};
+use std::fs::{ReadDir, remove_dir};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gtk::gio::{self, Cancellable, FileCopyFlags, FileInfo, FileQueryInfoFlags};
 use gtk::glib;
@@ -14,8 +14,8 @@ use regex::bytes::{Captures, Regex};
 
 use self::progress::Progress;
 use super::tabs::id::TabId;
-use super::{gui_run, Gui};
-use crate::config::{DirectoryCollision, FileCollision};
+use super::{Gui, gui_run};
+use crate::config::{CONFIG, DirectoryCollision, FileCollision};
 use crate::gui::operations::ask::AskDialog;
 use crate::gui::{show_error, show_warning, tabs_run};
 
@@ -987,6 +987,22 @@ impl Gui {
         let Some(op) = self.finished_operations.borrow_mut().pop_back() else {
             return info!("Undo called with no completed operations");
         };
+
+        if let Some(limit) = CONFIG.max_undo_minutes {
+            // This must be set by close()
+            if op.progress.borrow().done_time.unwrap().elapsed()
+                > Duration::from_secs(limit.get() * 60)
+            {
+                info!("Last operation {:?} was too old to undo", op.kind);
+                self.warning(format!(
+                    "All operations are too old to undo: last operation was {:?}",
+                    op.kind
+                ));
+                // All other operations are at least as old as the most recent
+                self.finished_operations.borrow_mut().clear();
+                return;
+            }
+        }
 
         if !op.progress.borrow().has_any_undoable() {
             info!("Last operation {:?} had nothing to undo", op.kind);

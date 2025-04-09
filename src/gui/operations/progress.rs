@@ -4,7 +4,7 @@ use std::os::unix::prelude::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ahash::AHashMap;
 use gtk::glib::{self, Object, SourceId};
@@ -43,6 +43,9 @@ pub struct Progress {
 
     update_timeout: Option<SourceId>,
     tracker: Option<Tracker>,
+
+    // Either finished or cancelled
+    pub(super) done_time: Option<Instant>,
 }
 
 impl Drop for Progress {
@@ -87,10 +90,14 @@ impl Progress {
 
             update_timeout: Some(update_timeout),
             tracker: None,
+
+            done_time: None,
         }
     }
 
     pub fn close(&mut self) {
+        self.done_time = Some(Instant::now());
+
         if let Some(ind) = self.tracker.take() {
             ind.parent().and_downcast::<gtk::Box>().unwrap().remove(&ind);
         }
@@ -300,7 +307,7 @@ impl Progress {
         self.directory_override_next.take().unwrap_or(self.directory_collisions)
     }
 
-    pub(super) fn set_directory_strat(&mut self, choice: DirChoice) {
+    pub(super) const fn set_directory_strat(&mut self, choice: DirChoice) {
         match choice {
             DirChoice::Skip(true) => {
                 self.directory_collisions = DirectoryCollision::Skip;
@@ -321,7 +328,7 @@ impl Progress {
         self.file_override_next.take().unwrap_or(self.file_collisions)
     }
 
-    pub(super) fn set_file_strat(&mut self, choice: FileChoice) {
+    pub(super) const fn set_file_strat(&mut self, choice: FileChoice) {
         match choice.collision() {
             (true, c) => self.file_collisions = c,
             (false, c) => self.file_override_next = Some(c),
