@@ -7,7 +7,7 @@ use gtk::gio::{AppInfo, AppInfoCreateFlags, File, ListStore};
 use gtk::glib::{shell_parse_argv, shell_unquote};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{SingleSelection, glib};
+use gtk::{Label, SingleSelection, glib};
 
 use super::application::Application;
 use super::cached_lookup;
@@ -36,6 +36,9 @@ impl OpenWith {
 
         let s: Self = glib::Object::new();
         let imp = s.imp();
+
+        // TODO -- show the filter bar
+        imp.name_filter.set_visible(false);
 
         gui.close_on_quit_or_esc(&s);
 
@@ -67,29 +70,20 @@ impl OpenWith {
             imp.set_default.set_visible(false);
         };
 
-        // TODO [gtk4.12] section headers
-        // let flatten_list = gtk::FlattenListModel::new(model);
         let apps = partition_app_infos(&mimetypes);
 
-        let list = ListStore::new::<AppInfo>();
-        for a in apps.defaults {
-            list.append(&a);
-        }
-        for a in apps.recommended {
-            list.append(&a);
-        }
-        for a in apps.normal {
-            list.append(&a);
-        }
-        for a in apps.hidden {
-            list.append(&a);
-        }
+        let lists = ListStore::new::<ListStore>();
+        lists.append(&ListStore::from_iter(apps.defaults.iter().cloned()));
+        lists.append(&ListStore::from_iter(apps.recommended.iter().cloned()));
+        lists.append(&ListStore::from_iter(apps.normal.iter().cloned()));
+        lists.append(&ListStore::from_iter(apps.hidden.iter().cloned()));
 
         imp.files.set(Some(entries));
         imp.mimetypes.set(Some(mimetypes));
 
+        let flatten_list = gtk::FlattenListModel::new(Some(lists));
 
-        let selection = SingleSelection::new(Some(list));
+        let selection = SingleSelection::new(Some(flatten_list));
         selection.set_autoselect(true);
 
         if selection.n_items() != 0 {
@@ -112,8 +106,36 @@ impl OpenWith {
             child.set_info(&info);
         });
 
+        let header_factory = gtk::SignalListItemFactory::new();
+        header_factory.connect_setup(|_factory, header| {
+            let header = header.downcast_ref::<gtk::ListHeader>().unwrap();
+            let row = Label::default();
+
+            header.set_child(Some(&row));
+        });
+
+        header_factory.connect_bind(move |_factory, header| {
+            let header = header.downcast_ref::<gtk::ListHeader>().unwrap();
+            let info = header.item().and_downcast::<AppInfo>().unwrap();
+
+            // The overall number of AppInfos should be low enough this isn't awful
+            let text = if apps.defaults.contains(&info) {
+                "Default"
+            } else if apps.recommended.contains(&info) {
+                "Recommended"
+            } else if apps.hidden.contains(&info) {
+                "Hidden"
+            } else {
+                "Normal"
+            };
+
+            let child = header.child().and_downcast::<Label>().unwrap();
+            child.set_text(text);
+        });
+
         imp.list.set_model(Some(&selection));
         imp.list.set_factory(Some(&factory));
+        imp.list.set_header_factory(Some(&header_factory));
 
 
         let w = s.downgrade();
@@ -122,10 +144,14 @@ impl OpenWith {
         });
 
         let w = s.downgrade();
+        let display = gui.window.display();
         imp.create.connect_clicked(move |_b| {
             let s = w.upgrade().unwrap();
 
-            s.create_application(&s.imp().command_line.get().text());
+            if let Some(app) = Self::create_application(&s.imp().command_line.get().text()) {
+                s.open_application(app, &display);
+                s.close();
+            }
         });
 
         let w = s.downgrade();
@@ -133,7 +159,13 @@ impl OpenWith {
         let activate = move || {
             let s = w.upgrade().unwrap();
 
-            s.open_application(&display);
+
+            let model = s.imp().list.model().and_downcast::<SingleSelection>().unwrap();
+            let Some(app) = model.selected_item().and_downcast::<AppInfo>() else {
+                return show_warning("No selected application");
+            };
+
+            s.open_application(app, &display);
             s.close();
         };
 
@@ -145,15 +177,10 @@ impl OpenWith {
         s.set_visible(true);
     }
 
-    fn open_application(&self, display: &Display) {
+    fn open_application(&self, app: AppInfo, display: &Display) {
         let imp = self.imp();
         let mimetypes = imp.mimetypes.take().unwrap();
         let files = imp.files.take().unwrap();
-
-        let model = imp.list.model().and_downcast::<SingleSelection>().unwrap();
-        let Some(app) = model.selected_item().and_downcast::<AppInfo>() else {
-            return show_warning("No selected application");
-        };
 
         debug!("Opening {} files with {:?}", files.len(), app.id());
 
@@ -183,14 +210,17 @@ impl OpenWith {
         }
     }
 
-    fn create_application(&self, command_line: &str) {
+    fn create_application(command_line: &str) -> Option<AppInfo> {
         let args = match shell_parse_argv(command_line) {
             Ok(a) => a,
-            Err(e) => return show_warning(format!("Couldn't parse command line: {e}")),
+            Err(e) => {
+                show_warning(format!("Couldn't parse command line: {e}"));
+                return None;
+            }
         };
 
         if args.is_empty() {
-            return;
+            return None;
         }
 
         let app_name = match shell_unquote(&args[0]) {
@@ -207,15 +237,11 @@ impl OpenWith {
             Some(&app_name),
             AppInfoCreateFlags::NONE,
         ) {
-            Ok(app) => {
-                let model = self.imp().list.model().and_downcast::<SingleSelection>().unwrap();
-                let list = model.model().and_downcast::<ListStore>().unwrap();
-                list.insert(0, &app);
-
-                model.set_selected(0);
-                // TODO [gtk4.12] scroll up
+            Ok(app) => Some(app),
+            Err(e) => {
+                show_error(format!("Couldn't create application: {e}"));
+                None
             }
-            Err(e) => show_error(format!("Couldn't create application: {e}")),
         }
     }
 }
@@ -236,6 +262,9 @@ mod imp {
 
         #[template_child]
         pub list: TemplateChild<gtk::ListView>,
+
+        #[template_child]
+        pub name_filter: TemplateChild<gtk::Entry>,
 
         #[template_child]
         pub command_line: TemplateChild<gtk::Entry>,
