@@ -21,13 +21,15 @@ impl Application {
         if let Some(icon) = info.icon() {
             imp.image.set_from_gicon(&icon);
         }
+
+        self.set_tooltip_text(info.description().as_deref());
     }
 }
 
 
 mod imp {
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
 
     #[derive(Debug, Default, CompositeTemplate)]
     #[template(file = "application.ui")]

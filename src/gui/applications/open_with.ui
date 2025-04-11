@@ -43,13 +43,13 @@
             <property name="spacing">8</property>
             <property name="halign">fill</property>
             <property name="hexpand">true</property>
-            <property name="margin-start">8</property>
-            <property name="margin-end">8</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
 
             <child>
               <object class="GtkEntry" id="name_filter">
                 <property name="hexpand">true</property>
-                <property name="placeholder-text">filter</property>
+                <property name="placeholder-text">Filter</property>
               </object>
             </child>
 

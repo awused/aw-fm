@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -7,7 +8,7 @@ use gtk::gio::{AppInfo, AppInfoCreateFlags, File, ListStore};
 use gtk::glib::{shell_parse_argv, shell_unquote};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{Label, SingleSelection, glib};
+use gtk::{CustomFilter, FilterChange, FilterListModel, Label, SingleSelection, glib};
 
 use super::application::Application;
 use super::cached_lookup;
@@ -26,8 +27,6 @@ struct PartitionedAppInfos {
     hidden: Vec<AppInfo>,
 }
 
-// TODO -- create from CLI command
-
 impl OpenWith {
     pub(super) fn open(gui: &Rc<Gui>, selected: Selected<'_>) {
         if selected.len() == 0 {
@@ -36,9 +35,6 @@ impl OpenWith {
 
         let s: Self = glib::Object::new();
         let imp = s.imp();
-
-        // TODO -- show the filter bar
-        imp.name_filter.set_visible(false);
 
         gui.close_on_quit_or_esc(&s);
 
@@ -70,7 +66,55 @@ impl OpenWith {
             imp.set_default.set_visible(false);
         };
 
-        let apps = partition_app_infos(&mimetypes);
+        s.setup_appinfo_list(&mimetypes);
+
+        imp.files.set(Some(entries));
+        imp.mimetypes.set(Some(mimetypes));
+
+
+        let w = s.downgrade();
+        imp.cancel.connect_clicked(move |_b| {
+            w.upgrade().unwrap().close();
+        });
+
+        let w = s.downgrade();
+        let display = gui.window.display();
+        imp.create.connect_clicked(move |_b| {
+            let s = w.upgrade().unwrap();
+
+            if let Some(app) = Self::create_application(&s.imp().command_line.get().text()) {
+                s.open_application(app, &display);
+                s.close();
+            }
+        });
+
+        let w = s.downgrade();
+        let display = gui.window.display();
+        let activate = move || {
+            let s = w.upgrade().unwrap();
+
+
+            let model = s.imp().list.model().and_downcast::<SingleSelection>().unwrap();
+            let Some(app) = model.selected_item().and_downcast::<AppInfo>() else {
+                return show_warning("No selected application");
+            };
+
+            s.open_application(app, &display);
+            s.close();
+        };
+
+        let act = activate.clone();
+        imp.list.connect_activate(move |_c, _a| act());
+        imp.open.connect_clicked(move |_b| activate());
+
+        s.set_transient_for(Some(&gui.window));
+        s.set_visible(true);
+    }
+
+    fn setup_appinfo_list(&self, mimetypes: &[&'static str]) {
+        let imp = self.imp();
+
+        let apps = partition_app_infos(mimetypes);
 
         let lists = ListStore::new::<ListStore>();
         lists.append(&ListStore::from_iter(apps.defaults.iter().cloned()));
@@ -78,12 +122,45 @@ impl OpenWith {
         lists.append(&ListStore::from_iter(apps.normal.iter().cloned()));
         lists.append(&ListStore::from_iter(apps.hidden.iter().cloned()));
 
-        imp.files.set(Some(entries));
-        imp.mimetypes.set(Some(mimetypes));
-
         let flatten_list = gtk::FlattenListModel::new(Some(lists));
 
-        let selection = SingleSelection::new(Some(flatten_list));
+        let filter_text = Rc::new(RefCell::new(String::new()));
+        let filter_clone = filter_text.clone();
+        let filter = CustomFilter::new(move |app| {
+            let app = app.downcast_ref::<AppInfo>().unwrap();
+
+            let text = filter_clone.borrow();
+            if text.is_empty() {
+                return true;
+            }
+
+            // Don't normalize here
+            app.name().to_lowercase().contains(&*text)
+        });
+
+        let filt = filter.clone();
+        imp.name_filter.connect_changed(move |e| {
+            let new = e.text().to_lowercase();
+
+            let mut filter_text = filter_text.borrow_mut();
+
+            let change = if filter_text.contains(&new) {
+                FilterChange::LessStrict
+            } else if new.contains(&*filter_text) {
+                FilterChange::MoreStrict
+            } else {
+                FilterChange::Different
+            };
+
+            *filter_text = new;
+            drop(filter_text);
+
+            filt.changed(change);
+        });
+
+        let filtered = FilterListModel::new(Some(flatten_list), Some(filter));
+
+        let selection = SingleSelection::new(Some(filtered));
         selection.set_autoselect(true);
 
         if selection.n_items() != 0 {
@@ -136,45 +213,6 @@ impl OpenWith {
         imp.list.set_model(Some(&selection));
         imp.list.set_factory(Some(&factory));
         imp.list.set_header_factory(Some(&header_factory));
-
-
-        let w = s.downgrade();
-        imp.cancel.connect_clicked(move |_b| {
-            w.upgrade().unwrap().close();
-        });
-
-        let w = s.downgrade();
-        let display = gui.window.display();
-        imp.create.connect_clicked(move |_b| {
-            let s = w.upgrade().unwrap();
-
-            if let Some(app) = Self::create_application(&s.imp().command_line.get().text()) {
-                s.open_application(app, &display);
-                s.close();
-            }
-        });
-
-        let w = s.downgrade();
-        let display = gui.window.display();
-        let activate = move || {
-            let s = w.upgrade().unwrap();
-
-
-            let model = s.imp().list.model().and_downcast::<SingleSelection>().unwrap();
-            let Some(app) = model.selected_item().and_downcast::<AppInfo>() else {
-                return show_warning("No selected application");
-            };
-
-            s.open_application(app, &display);
-            s.close();
-        };
-
-        let act = activate.clone();
-        imp.list.connect_activate(move |_c, _a| act());
-        imp.open.connect_clicked(move |_b| activate());
-
-        s.set_transient_for(Some(&gui.window));
-        s.set_visible(true);
     }
 
     fn open_application(&self, app: AppInfo, display: &Display) {
