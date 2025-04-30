@@ -7,7 +7,7 @@ use std::time::Duration;
 use ahash::AHashMap;
 use gnome_desktop::DesktopThumbnailSize;
 use gtk::gdk::{ModifierType, Surface};
-use gtk::glib::{ControlFlow, SourceId, WeakRef};
+use gtk::glib::{ControlFlow, ExitCode, SourceId, WeakRef};
 use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -20,7 +20,7 @@ use self::operations::Operation;
 use self::tabs::list::TabsList;
 use self::thumbnailer::Thumbnailer;
 use super::com::*;
-use crate::closing;
+use crate::closing::{self, close};
 use crate::config::CONFIG;
 use crate::database::DBCon;
 use crate::gui::tabs::list::TabPosition;
@@ -183,7 +183,11 @@ pub fn run(
     });
 
     let _cod = closing::CloseOnDrop::default();
-    application.run();
+    let ret = application.run();
+    if CONFIG.unique && ret == ExitCode::SUCCESS && GUI.with(|g| g.get().is_none()) {
+        info!("Exiting cleanly since this is not the primary instance.");
+        close();
+    }
 }
 
 impl Gui {
