@@ -346,4 +346,8 @@ impl Contents {
         self.sort = sort;
         self.stale = true;
     }
+
+    pub fn size(&self) -> u32 {
+        self.list.n_items()
+    }
 }

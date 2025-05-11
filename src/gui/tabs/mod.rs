@@ -6,7 +6,7 @@ use path_clean::PathClean;
 
 use self::contents::Contents;
 use self::list::TabsList;
-use crate::com::{Entry, EntryObject};
+use crate::com::{DisplayMode, Entry, EntryObject};
 use crate::config::OPTIONS;
 use crate::gui::show_warning;
 
@@ -50,25 +50,44 @@ struct HistoryEntry {
 }
 
 #[derive(Debug, Clone)]
+struct PrecisePosition {
+    position: f64,
+    view: DisplayMode,
+    res: (i32, i32),
+    count: u32,
+}
+
+
+#[derive(Debug, Clone)]
 struct ScrollPosition {
+    // If nothing meaningful has changed, we can restore to the exact same state.
+    precise: Option<PrecisePosition>,
     // Usually just cloned from an existing Entry.
     path: Arc<Path>,
     // Used as a backup if path has been removed.
     index: u32,
     // Only selects/focuses if there's a match by path
-    select: bool,
-    // TODO -- This should be a separate Path; focus target and scroll target should be
+    // select: bool,
+    // TODO -- This should be a separate Path; select/focus target and scroll target should be
     // different
-    focus: bool,
+    // focus: bool,
     // TODO - precise scroll
     // precise: f32,
+}
+
+#[derive(Debug, Clone)]
+struct FocusState {
+    path: Arc<Path>,
+    // If true, update the selection state to just this item, otherwise do nothing.
+    select: bool,
 }
 
 // Not kept up to date, maybe an enum?
 #[derive(Debug, Clone, Default)]
 struct PaneState {
     // If the directory has updated we just don't care, it'll be wrong.
-    pub scroll_pos: Option<ScrollPosition>,
+    pub scroll: Option<ScrollPosition>,
+    pub focus: Option<FocusState>,
     // Only selects if scroll_pos is some and there's a match by path, not index
     // pub select: bool,
 }
@@ -76,12 +95,8 @@ struct PaneState {
 impl PaneState {
     fn for_jump(jump: Option<Arc<Path>>) -> Self {
         Self {
-            scroll_pos: jump.map(|path| ScrollPosition {
-                path,
-                index: 0,
-                select: true,
-                focus: true,
-            }),
+            scroll: jump.clone().map(|path| ScrollPosition { precise: None, path, index: 0 }),
+            focus: jump.map(|path| FocusState { path, select: true }),
         }
     }
 }

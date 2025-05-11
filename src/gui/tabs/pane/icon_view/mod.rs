@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{GestureClick, GridView, ListScrollFlags, MultiSelection, ScrolledWindow};
+use gtk::{GestureClick, GridView, ListScrollFlags, MultiSelection, ScrolledWindow, Widget};
 
 use self::icon_tile::IconTile;
-use super::{get_last_visible_child, setup_item_controllers, setup_view_controllers, Bound};
+use super::{Bound, get_last_visible_child, setup_item_controllers, setup_view_controllers};
 use crate::com::EntryObject;
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, tabs_run};
@@ -136,8 +136,18 @@ impl IconView {
         self.grid.grab_focus();
     }
 
+    pub(super) fn focus_child(&self) -> Option<(Widget, EntryObject)> {
+        let child = self.grid.focus_child()?;
+
+        child
+            .first_child()
+            .and_downcast::<IconTile>()
+            .and_then(|c| c.bound_object())
+            .map(|eo| (child, eo))
+    }
+
     pub(super) fn fix_focus_before_delete(&self, eo: &EntryObject) {
-        let Some(child) = self.grid.focus_child() else {
+        let Some((child, focused)) = self.focus_child() else {
             return;
         };
 
@@ -145,14 +155,7 @@ impl IconView {
             return;
         }
 
-        let matches = child
-            .first_child()
-            .and_downcast::<IconTile>()
-            .and_then(|c| c.bound_object())
-            .map(|c| *c.get() == *eo.get())
-            .unwrap_or_default();
-
-        if !matches {
+        if *focused.get() != *eo.get() {
             return;
         }
 

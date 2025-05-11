@@ -33,7 +33,7 @@ use crate::config::CONFIG;
 use crate::database::SavedGroup;
 use crate::gui::clipboard::{ClipboardOp, SelectionProvider, handle_clipboard, handle_drop};
 use crate::gui::operations::{self, Kind, Outcome};
-use crate::gui::tabs::{PartiallyAppliedUpdate, ScrollPosition};
+use crate::gui::tabs::{FocusState, PartiallyAppliedUpdate, ScrollPosition};
 use crate::gui::{
     CompletionResult, Selected, Update, applications, gui_run, show_error, show_warning, tabs_run,
 };
@@ -175,17 +175,15 @@ impl TabPane {
         *self = Self::Pending(p, state);
     }
 
-    fn must_resolve_pending(&mut self) -> PaneState {
-        let Self::Pending(_p, _state) = self else {
-            unreachable!()
-        };
+    fn maybe_resolve_pending(&mut self) -> Option<(&mut Pane, PaneState)> {
         let old = std::mem::replace(self, Self::Empty);
-        let Self::Pending(pane, state) = old else {
-            unreachable!()
-        };
-
-        *self = Self::Pane(pane);
-        state
+        if let Self::Pending(pane, state) = old {
+            *self = Self::Pane(pane);
+            Some((self.get_visible_mut().unwrap(), state))
+        } else {
+            *self = old;
+            None
+        }
     }
 
     fn set_detached_pending_flag(&mut self) {
@@ -633,9 +631,11 @@ impl Tab {
             self.flat_update(left, right, u);
         }
 
-        self.maybe_finish_load();
+        let hide_scroll = s_id.kind.initial();
+        // If it's initial && finished, it's a complete snapshot
+        self.maybe_finish_load(hide_scroll);
         // there will be no exact matches to the left.
-        self.matching_mut(right).for_each(Self::maybe_finish_load);
+        self.matching_mut(right).for_each(|s| s.maybe_finish_load(hide_scroll));
         info!("Finished loading {:?} in {:?}", self.dir.path(), start.elapsed());
     }
 
@@ -651,7 +651,7 @@ impl Tab {
         let search = self.search.as_mut().unwrap();
         assert!(search.matches_snapshot(&snap));
         search.apply_search_snapshot(snap);
-        self.maybe_finish_load();
+        self.maybe_finish_load(false);
     }
 
     pub fn matches_flat_update(&self, update: &Update) -> bool {
@@ -896,15 +896,18 @@ impl Tab {
                 contents.selection.select_item(i, true);
 
                 let mut state = self.pane.clone_state(contents);
-                state.scroll_pos = Some(ScrollPosition {
+                state.scroll = Some(ScrollPosition {
+                    precise: None,
                     path: eo.get().abs_path.clone(),
                     index: i,
+                });
+                state.focus = Some(FocusState {
+                    path: eo.get().abs_path.clone(),
                     select: true,
-                    focus: true,
                 });
                 self.pane.overwrite_state(state);
 
-                self.apply_pane_state();
+                self.apply_pane_state(true);
             }
 
             return true;
@@ -973,15 +976,15 @@ impl Tab {
         // Location didn't change, treat this as a jump
         let mut state = self.pane.clone_state(&self.contents);
 
-        state.scroll_pos = Some(ScrollPosition {
-            path,
+        state.scroll = Some(ScrollPosition {
+            precise: None,
+            path: path.clone(),
             index: 0,
-            select: true,
-            focus: true,
         });
+        state.focus = Some(FocusState { path, select: true });
         self.pane.overwrite_state(state);
 
-        self.apply_pane_state();
+        self.apply_pane_state(false);
     }
 
     pub fn parent(&mut self, left: &[Self], right: &[Self]) {
@@ -1007,13 +1010,14 @@ impl Tab {
 
         // Shouldn't be a jump, could be a search starting/ending.
         if next.location == *self.dir.path() {
+            let hide_scroll = next.search.is_none();
             if let Some(query) = next.search {
                 self.open_search(query);
             } else {
                 self.close_search();
             }
             self.pane.overwrite_state(next.state);
-            self.apply_pane_state();
+            self.apply_pane_state(hide_scroll);
             return;
         }
 
@@ -1024,7 +1028,7 @@ impl Tab {
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
             self.pane.overwrite_state(next.state);
-            self.apply_pane_state();
+            self.apply_pane_state(false);
             return;
         }
 
@@ -1035,7 +1039,7 @@ impl Tab {
         }
 
         self.pane.overwrite_state(next.state);
-        self.apply_pane_state()
+        self.apply_pane_state(true)
     }
 
     pub(super) fn back(&mut self, left: &[Self], right: &[Self]) {
@@ -1051,13 +1055,14 @@ impl Tab {
 
         // Shouldn't be a jump, could be a search starting/ending.
         if prev.location == *self.dir.path() {
+            let hide_scroll = prev.search.is_none();
             if let Some(query) = prev.search {
                 self.open_search(query);
             } else {
                 self.close_search();
             }
             self.pane.overwrite_state(prev.state);
-            self.apply_pane_state();
+            self.apply_pane_state(hide_scroll);
             return;
         }
 
@@ -1068,7 +1073,7 @@ impl Tab {
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
             self.pane.overwrite_state(prev.state);
-            self.apply_pane_state();
+            self.apply_pane_state(false);
             return;
         }
 
@@ -1079,7 +1084,7 @@ impl Tab {
         }
 
         self.pane.overwrite_state(prev.state);
-        self.apply_pane_state()
+        self.apply_pane_state(true)
     }
 
     // Goes to the child directory if one was previously open or if there's only one.
@@ -1136,7 +1141,7 @@ impl Tab {
             );
         }
 
-        self.apply_pane_state()
+        self.apply_pane_state(true)
     }
 
     fn current_history(&self) -> HistoryEntry {
@@ -1149,24 +1154,24 @@ impl Tab {
         HistoryEntry { location: self.dir(), search, state }
     }
 
-    fn maybe_finish_load(&mut self) {
+    fn maybe_finish_load(&mut self, hide_scroll: bool) {
         // We can be done loading without being loaded (flat loaded + search unloaded)
         if !self.loading() {
             self.element.stop_spin()
         }
 
         if self.loaded() {
-            self.apply_pane_state();
+            self.apply_pane_state(hide_scroll);
         }
     }
 
-    fn apply_pane_state(&mut self) {
+    fn apply_pane_state(&mut self, hide_scroll: bool) {
         if !self.loaded() {
             trace!("Deferring applying pane state to flat pane until loading is done.");
             return;
         }
 
-        let TP::Pending(_pane, state) = &mut self.pane else {
+        let Some((pane, state)) = self.pane.maybe_resolve_pending() else {
             debug!(
                 "Ignoring apply_pane_state on tab {:?} without pending state and ready pane {:?}",
                 self.id,
@@ -1177,13 +1182,10 @@ impl Tab {
 
         info!("Applying {state:?} to tab {:?}", self.id);
 
-        let state = self.pane.must_resolve_pending();
-        let pane = self.pane.get_visible_mut().unwrap();
-
         if let Some(search) = &self.search {
-            pane.apply_state(state, search.contents());
+            pane.apply_state(state, search.contents(), hide_scroll);
         } else {
-            pane.apply_state(state, &self.contents);
+            pane.apply_state(state, &self.contents, hide_scroll);
         }
     }
 
@@ -1202,7 +1204,7 @@ impl Tab {
 
         self.load(left, right);
 
-        self.apply_pane_state()
+        self.apply_pane_state(true)
     }
 
     // TODO -- switching away from a tab group is a two-step process
@@ -1704,6 +1706,7 @@ impl Tab {
         // If a path is present in the global map and this tab is loaded, the file will be present
         // in the contents for this tab.
         // There should be pretty few of these.
+        // TODO -- there may be unflushed updates for matched paths
         let unmatched_paths: Vec<_> = new_paths
             .iter()
             .filter(|p| EntryObject::lookup(p).is_none())
@@ -1750,7 +1753,7 @@ impl Tab {
         let selection = self.visible_selection();
 
         // TODO [incremental] -- if incremental filtering, must disable it now.
-        let mut scroll_target = None;
+        let mut new_state = None;
 
         let select_set = Bitset::new_empty();
 
@@ -1769,13 +1772,25 @@ impl Tab {
 
             new_paths.remove(&*eo.get().abs_path);
 
-            if scroll_target.is_none() {
+            if new_state.is_none() {
                 selection.unselect_all();
-                scroll_target = Some(ScrollPosition {
-                    path: eo.get().abs_path.clone(),
-                    index: i,
-                    select: false,
-                    focus: true,
+
+                info!(
+                    "Scrolling to {:?} after completed operation in {:?}",
+                    eo.get().abs_path,
+                    self.id
+                );
+
+                new_state = Some(PaneState {
+                    scroll: Some(ScrollPosition {
+                        precise: None,
+                        path: eo.get().abs_path.clone(),
+                        index: i,
+                    }),
+                    focus: Some(FocusState {
+                        path: eo.get().abs_path.clone(),
+                        select: false,
+                    }),
                 });
             }
 
@@ -1784,18 +1799,14 @@ impl Tab {
 
         selection.set_selection(&select_set, &select_set);
 
-        let Some(pos) = scroll_target else {
+        let Some(state) = new_state else {
             info!("Could not find first new item to scroll to, giving up, in {:?}", self.id);
             return;
         };
 
-        info!("Scrolling to {pos:?} after completed operation in {:?}", self.id);
-
-        let mut state = self.pane.clone_state(self.visible_contents());
-        state.scroll_pos = Some(pos);
         self.pane.overwrite_state(state);
 
-        self.apply_pane_state();
+        self.apply_pane_state(false);
     }
 
     pub fn context_menu(&self) -> PopoverMenu {

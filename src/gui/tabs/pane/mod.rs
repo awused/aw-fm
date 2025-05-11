@@ -7,7 +7,7 @@ use std::time::Instant;
 use ahash::AHashMap;
 use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
 use gtk::gio::Icon;
-use gtk::glib::{self, Propagation, WeakRef};
+use gtk::glib::{self, Priority, Propagation, WeakRef};
 use gtk::graphene::Point;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -22,12 +22,12 @@ use self::element::{PaneElement, PaneSignals};
 use self::icon_view::IconView;
 use super::id::TabId;
 use super::tab::Tab;
-use super::{Contents, PaneState};
+use super::{Contents, PaneState, PrecisePosition};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
 use crate::database::{SavedSplit, SplitChild};
 use crate::gui::clipboard::{ClipboardOp, URIS};
-use crate::gui::tabs::NavTarget;
 use crate::gui::tabs::list::TabPosition;
+use crate::gui::tabs::{FocusState, NavTarget};
 use crate::gui::{
     ActionTarget, CompletionResult, ControllerDisconnector, DebugIgnore, ManagerAction, gui_run,
     tabs_run,
@@ -83,6 +83,34 @@ impl View {
         match self {
             Self::Icons(i) => i.grab_focus(),
             Self::Columns(d) => d.grab_focus(),
+        }
+    }
+
+    fn focus_child(&self) -> Option<(Widget, EntryObject)> {
+        match self {
+            Self::Icons(i) => i.focus_child(),
+            Self::Columns(d) => d.focus_child(),
+        }
+    }
+
+    fn get_scroll_target(&self) -> Option<EntryObject> {
+        match self {
+            Self::Icons(ic) => ic.get_scroll_target(),
+            Self::Columns(cv) => cv.get_scroll_target(),
+        }
+    }
+
+    fn scroll_to(&self, pos: u32, flags: ListScrollFlags) {
+        match self {
+            Self::Icons(icon_view) => icon_view.scroll_to(pos, flags),
+            Self::Columns(details_view) => details_view.scroll_to(pos, flags),
+        }
+    }
+
+    const fn current_display_mode(&self) -> DisplayMode {
+        match self {
+            Self::Icons(_icon_view) => DisplayMode::Icons,
+            Self::Columns(_details_view) => DisplayMode::Columns,
         }
     }
 }
@@ -603,7 +631,7 @@ impl Pane {
         };
 
         if let Some(vs) = vs {
-            self.apply_state(vs, list);
+            self.apply_state(vs, list, false);
         }
         true
     }
@@ -622,44 +650,76 @@ impl Pane {
     }
 
     pub fn get_state(&self, list: &Contents) -> PaneState {
-        let scroll_pos = if self.element.imp().scroller.vadjustment().value() > 0.0 {
-            let eo = match &self.view {
-                View::Icons(ic) => ic.get_scroll_target(),
-                View::Columns(cv) => cv.get_scroll_target(),
-            };
+        let sel = list.selection.selection();
+        let focus = self.view.focus_child().map(|(_child, eo)| {
+            // If exactly one item is selected, and it's the focused one, keep it focused.
+            // TODO -- there's an janky GTK bug here that can cause the selection state to be lost
+            // when using forwards/backwards.
+            let select = sel.size() == 1
+                && list.selection.item(sel.nth(0)).and_downcast::<EntryObject>().unwrap() == eo;
 
-            eo.map(|child| super::ScrollPosition {
+            FocusState { path: eo.get().abs_path.clone(), select }
+        });
+
+        let scroll = if self.element.imp().scroller.vadjustment().value() > 0.0 {
+            self.view.get_scroll_target().map(|child| super::ScrollPosition {
+                precise: Some(PrecisePosition {
+                    position: self.element.imp().scroller.vadjustment().value(),
+                    view: self.view.current_display_mode(),
+                    res: (self.element.width(), self.element.height()),
+                    count: list.size(),
+                }),
                 path: child.get().abs_path.clone(),
                 index: list.filtered_position_by_sorted(&child.get()).unwrap_or_default(),
-                // TODO -- if one item is selected, keep that selected?
-                select: false,
-                // If we don't do this, we end up focused on the first element even when it's not
-                // visible.
-                focus: true,
             })
         } else {
             None
         };
 
-        PaneState { scroll_pos }
+        PaneState { scroll, focus }
     }
 
-    pub fn apply_state(&mut self, state: PaneState, list: &Contents) {
+    pub fn apply_state(&mut self, state: PaneState, list: &Contents, hide_while_scrolling: bool) {
         self.deny_view_click.set(false);
 
-        let mut flags = ListScrollFlags::empty();
+        let mut scroll_flags = ListScrollFlags::empty();
+
+        let focus = state.focus.and_then(|fs| {
+            let eo = EntryObject::lookup(&fs.path)?;
+
+            if state.scroll.as_ref().is_some_and(|scroll| scroll.path == fs.path) {
+                scroll_flags |= ListScrollFlags::FOCUS;
+
+                if fs.select {
+                    scroll_flags |= ListScrollFlags::SELECT;
+                }
+
+                return None;
+            }
+
+            let pos = list.filtered_position_by_sorted(&eo.get())?;
+
+            if fs.select {
+                list.selection.select_item(pos, true);
+            }
+
+            Some(pos)
+        });
+
+
+        let mut precise = None;
 
         let pos = state
-            .scroll_pos
+            .scroll
             .and_then(|sp| {
+                precise = sp.precise.filter(|precise| precise.count == list.size());
+
                 if let Some(eo) = EntryObject::lookup(&sp.path) {
                     let pos = list.filtered_position_by_sorted(&eo.get());
                     debug!("Scrolling to position from element {pos:?}");
-                    if sp.select {
-                        flags |= ListScrollFlags::SELECT;
-                    }
-                    if sp.focus {
-                        flags |= ListScrollFlags::FOCUS;
+                    // If we have no focus state, move focus to some visible element.
+                    if focus.is_none() {
+                        scroll_flags |= ListScrollFlags::FOCUS;
                     }
                     pos
                 } else {
@@ -668,23 +728,45 @@ impl Pane {
             })
             .unwrap_or(0);
 
-        if flags.contains(ListScrollFlags::FOCUS) && self.element.focus_child().is_some() {
+        if scroll_flags.contains(ListScrollFlags::FOCUS) && self.element.focus_child().is_some() {
             self.view.grab_focus();
         }
 
         let id = self.tab;
-        glib::idle_add_local_once(move || {
+        if pos > 0 && hide_while_scrolling {
+            trace!("Hiding tab {id:?} during scrolling");
+            self.element.imp().scroller.child().unwrap().set_opacity(0.0);
+        }
+
+        let mut once = Some(move || {
             warn!("Working around buggy GTK scrolling by adding a delay");
             tabs_run(|list| {
                 let Some(p) = list.find(id).and_then(Tab::workaround_scroll_to) else {
                     return;
                 };
 
-                match &p.view {
-                    View::Icons(icons) => icons.scroll_to(pos, flags),
-                    View::Columns(details) => details.scroll_to(pos, flags),
+                if let Some(precise) = precise {
+                    if precise.view == p.view.current_display_mode()
+                        && precise.res == (p.element.width(), p.element.height())
+                    {
+                        trace!("Restoring precise scroll position for {id:?}");
+                        p.element.imp().scroller.vadjustment().set_value(precise.position);
+                    }
                 }
+
+                if let Some(focus) = focus {
+                    p.view.scroll_to(focus, ListScrollFlags::FOCUS);
+                }
+
+                p.view.scroll_to(pos, scroll_flags);
+
+                p.element.imp().scroller.child().unwrap().set_opacity(1.0);
             });
+        });
+
+        glib::idle_add_local_full(Priority::HIGH_IDLE, move || {
+            once.take().unwrap()();
+            glib::ControlFlow::Break
         });
 
         // match &self.view {

@@ -10,7 +10,7 @@ use gtk::{
 
 use self::icon_cell::IconCell;
 use self::string_cell::{EntryString, StringCell};
-use super::{get_last_visible_child, setup_item_controllers, setup_view_controllers, Bound};
+use super::{Bound, get_last_visible_child, setup_item_controllers, setup_view_controllers};
 use crate::com::{DirSettings, EntryObject, SortDir, SortMode, SortSettings};
 use crate::gui::tabs::id::TabId;
 use crate::gui::{applications, tabs_run};
@@ -141,6 +141,20 @@ impl DetailsView {
         }
 
         obj
+    }
+
+    pub(super) fn focus_child(&self) -> Option<(Widget, EntryObject)> {
+        let focus_row = self.column_view.focus_child()?.focus_child()?;
+
+
+        let eo = focus_row
+            .first_child()?
+            .first_child()?
+            .downcast::<IconCell>()
+            .ok()?
+            .bound_object()?;
+
+        Some((focus_row, eo))
     }
 
     pub(super) fn change_model(&mut self, selection: &MultiSelection) {
