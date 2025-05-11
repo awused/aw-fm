@@ -653,8 +653,8 @@ impl Pane {
         let sel = list.selection.selection();
         let focus = self.view.focus_child().map(|(_child, eo)| {
             // If exactly one item is selected, and it's the focused one, keep it focused.
-            // TODO -- there's an janky GTK bug here that can cause the selection state to be lost
-            // when using forwards/backwards.
+            // TODO -- there's an janky GTK bug here that can cause the selection state to
+            // be lost when using forwards/backwards.
             let select = sel.size() == 1
                 && list.selection.item(sel.nth(0)).and_downcast::<EntryObject>().unwrap() == eo;
 
@@ -764,7 +764,7 @@ impl Pane {
             });
         });
 
-        glib::idle_add_local_full(Priority::HIGH_IDLE, move || {
+        glib::idle_add_local_full(Priority::DEFAULT, move || {
             once.take().unwrap()();
             glib::ControlFlow::Break
         });
