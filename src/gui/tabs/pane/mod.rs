@@ -745,26 +745,26 @@ impl Pane {
                     return;
                 };
 
-                if let Some(precise) = precise {
-                    if precise.view == p.view.current_display_mode()
-                        && precise.res == (p.element.width(), p.element.height())
-                    {
-                        trace!("Restoring precise scroll position for {id:?}");
-                        p.element.imp().scroller.vadjustment().set_value(precise.position);
-                    }
-                }
-
                 if let Some(focus) = focus {
                     p.view.scroll_to(focus, ListScrollFlags::FOCUS);
                 }
 
                 p.view.scroll_to(pos, scroll_flags);
 
+                if let Some(precise) = precise {
+                    if precise.view == p.view.current_display_mode()
+                        && precise.res == (p.element.width(), p.element.height())
+                    {
+                        info!("Restoring precise scroll position for {id:?}");
+                        p.element.imp().scroller.vadjustment().set_value(precise.position);
+                    }
+                }
+
                 p.element.imp().scroller.child().unwrap().set_opacity(1.0);
             });
         });
 
-        glib::idle_add_local_full(Priority::DEFAULT, move || {
+        glib::idle_add_local_full(Priority::DEFAULT_IDLE, move || {
             once.take().unwrap()();
             glib::ControlFlow::Break
         });
