@@ -604,6 +604,7 @@ impl Pane {
         }
     }
 
+    // Returns true when the display mode has changed
     pub fn update_settings(&mut self, settings: DirSettings, list: &Contents) -> bool {
         self.deny_view_click.set(false);
 

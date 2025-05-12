@@ -49,17 +49,16 @@ use crate::gui::{
 
 #[derive(Debug)]
 enum TabPane {
-    Pane(Pane),
-    Pending(Pane, PaneState),
+    Displayed(Pane),
+    // The tab is displayed but the contents are loading, when loading finishes the PaneState will
+    // be applied.
+    Loading(Pane, PaneState),
     Detached {
         pane: Pane,
         state: PaneState,
-        // If res is present, it was in the "Pane" state.
-        // If res is present and matches the resolution on reattach, we don't need to apply the
-        // state.
-        // res: Option<(u32, u32)>,
         pending: bool,
     },
+    // Temporary state
     Empty,
 }
 
@@ -68,7 +67,7 @@ impl Deref for TabPane {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            Self::Pane(p) | Self::Pending(p, _) | Self::Detached { pane: p, .. } => p,
+            Self::Displayed(pane) | Self::Loading(pane, _) | Self::Detached { pane, .. } => pane,
             Self::Empty => unreachable!(),
         }
     }
@@ -77,7 +76,7 @@ impl Deref for TabPane {
 impl DerefMut for TabPane {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            Self::Pane(p) | Self::Pending(p, _) | Self::Detached { pane: p, .. } => p,
+            Self::Displayed(pane) | Self::Loading(pane, _) | Self::Detached { pane, .. } => pane,
             Self::Empty => unreachable!(),
         }
     }
@@ -86,7 +85,7 @@ impl DerefMut for TabPane {
 impl TabPane {
     const fn visible(&self) -> bool {
         match &self {
-            Self::Pane(_) | Self::Pending(..) => true,
+            Self::Displayed(_) | Self::Loading(..) => true,
             Self::Detached { .. } => false,
             Self::Empty => unreachable!(),
         }
@@ -94,7 +93,7 @@ impl TabPane {
 
     const fn get_visible(&self) -> Option<&Pane> {
         match self {
-            Self::Pane(p) | Self::Pending(p, _) => Some(p),
+            Self::Displayed(p) | Self::Loading(p, _) => Some(p),
             Self::Detached { .. } => None,
             Self::Empty => unreachable!(),
         }
@@ -102,7 +101,7 @@ impl TabPane {
 
     fn get_visible_mut(&mut self) -> Option<&mut Pane> {
         match self {
-            Self::Pane(p) | Self::Pending(p, _) => Some(p),
+            Self::Displayed(p) | Self::Loading(p, _) => Some(p),
             Self::Detached { .. } => None,
             Self::Empty => unreachable!(),
         }
@@ -110,23 +109,21 @@ impl TabPane {
 
     fn clone_state(&self, list: &Contents) -> PaneState {
         match self {
-            Self::Pane(p) => p.get_state(list),
-            Self::Detached { state, .. } | Self::Pending(_, state) => state.clone(),
+            Self::Displayed(p) => p.get_state(list),
+            Self::Detached { state, .. } | Self::Loading(_, state) => state.clone(),
             Self::Empty => unreachable!(),
         }
     }
 
     fn overwrite_state(&mut self, new_state: PaneState) {
         match self {
-            Self::Pane(_p) => {
-                let temp = Self::Empty;
-                let old = std::mem::replace(self, temp);
-                let Self::Pane(pane) = old else {
+            Self::Displayed(_p) => {
+                let Self::Displayed(pane) = std::mem::replace(self, Self::Empty) else {
                     unreachable!()
                 };
-                *self = Self::Pending(pane, new_state);
+                *self = Self::Loading(pane, new_state);
             }
-            Self::Pending(_, state) => *state = new_state,
+            Self::Loading(_, state) => *state = new_state,
             Self::Detached { state, pending, .. } => {
                 *state = new_state;
                 *pending = true;
@@ -136,49 +133,47 @@ impl TabPane {
     }
 
     fn make_visible(&mut self) {
-        match self {
-            Self::Detached { .. } => {
-                let old = std::mem::replace(self, Self::Empty);
-                let Self::Detached { pane, state, pending } = old else {
-                    unreachable!()
-                };
+        match std::mem::replace(self, Self::Empty) {
+            Self::Detached { pane, state, pending } => {
                 pane.set_visible(true);
-                *self = if pending { Self::Pending(pane, state) } else { Self::Pane(pane) };
+                *self = if pending { Self::Loading(pane, state) } else { Self::Displayed(pane) };
             }
-            Self::Pane(_) | Self::Pending(..) | Self::Empty => unreachable!(),
+            Self::Displayed(_) | Self::Loading(..) | Self::Empty => unreachable!(),
         }
     }
 
     fn mark_detached(&mut self, list: &Contents) {
         match std::mem::replace(self, Self::Empty) {
             Self::Detached { .. } | Self::Empty => unreachable!(),
-            Self::Pane(pane) => {
+            Self::Displayed(pane) => {
                 let state = pane.get_state(list);
                 *self = Self::Detached { pane, state, pending: false };
             }
-            Self::Pending(pane, state) => {
+            Self::Loading(pane, state) => {
                 *self = Self::Detached { pane, state, pending: true };
             }
         }
     }
 
-    fn snapshot_pane(&mut self, list: &Contents) {
+    fn prepare_for_unload(&mut self, list: &Contents) {
         let state = match self {
             Self::Detached { pending, .. } => return *pending = true,
-            Self::Pending(..) => return,
+            Self::Loading(..) => return,
             Self::Empty => unreachable!(),
-            Self::Pane(p) => p.get_state(list),
+            Self::Displayed(p) => p.get_state(list),
         };
-        let old = std::mem::replace(self, Self::Empty);
-        let Self::Pane(p) = old else { unreachable!() };
 
-        *self = Self::Pending(p, state);
+        let Self::Displayed(p) = std::mem::replace(self, Self::Empty) else {
+            unreachable!()
+        };
+
+        *self = Self::Loading(p, state);
     }
 
     fn maybe_resolve_pending(&mut self) -> Option<(&mut Pane, PaneState)> {
         let old = std::mem::replace(self, Self::Empty);
-        if let Self::Pending(pane, state) = old {
-            *self = Self::Pane(pane);
+        if let Self::Loading(pane, state) = old {
+            *self = Self::Displayed(pane);
             Some((self.get_visible_mut().unwrap(), state))
         } else {
             *self = old;
@@ -188,7 +183,7 @@ impl TabPane {
 
     fn set_detached_pending_flag(&mut self) {
         match self {
-            Self::Pane(_) | Self::Pending(..) => {}
+            Self::Displayed(_) | Self::Loading(..) => {}
             Self::Detached { pending, .. } => *pending = true,
             Self::Empty => unreachable!(),
         }
@@ -554,10 +549,10 @@ impl Tab {
         }
 
         if let Some(search) = &mut self.search {
-            self.pane.snapshot_pane(search.contents());
+            self.pane.prepare_for_unload(search.contents());
             search.unload(self.settings.sort);
         } else {
-            self.pane.snapshot_pane(&self.contents);
+            self.pane.prepare_for_unload(&self.contents);
         }
 
         self.contents.clear(self.settings.sort);
@@ -1402,7 +1397,7 @@ impl Tab {
                     self.pane.workaround_focus_before_delete(&obj);
                 }
                 self.contents.remove(i);
-                trace!("Removed {:?} from event", path);
+                trace!("Removed {path:?} from event");
                 PartiallyAppliedUpdate::Delete(obj)
             }
             (Update::Removed(path), None, Some(obj)) => {

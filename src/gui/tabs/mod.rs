@@ -52,6 +52,7 @@ struct HistoryEntry {
 #[derive(Debug, Clone)]
 struct PrecisePosition {
     position: f64,
+    // If the directory/mode has updated we ignore the precise positioning.
     view: DisplayMode,
     res: (i32, i32),
     count: u32,
@@ -66,13 +67,6 @@ struct ScrollPosition {
     path: Arc<Path>,
     // Used as a backup if path has been removed.
     index: u32,
-    // Only selects/focuses if there's a match by path
-    // select: bool,
-    // TODO -- This should be a separate Path; select/focus target and scroll target should be
-    // different
-    // focus: bool,
-    // TODO - precise scroll
-    // precise: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -85,11 +79,8 @@ struct FocusState {
 // Not kept up to date, maybe an enum?
 #[derive(Debug, Clone, Default)]
 struct PaneState {
-    // If the directory has updated we just don't care, it'll be wrong.
     pub scroll: Option<ScrollPosition>,
     pub focus: Option<FocusState>,
-    // Only selects if scroll_pos is some and there's a match by path, not index
-    // pub select: bool,
 }
 
 impl PaneState {

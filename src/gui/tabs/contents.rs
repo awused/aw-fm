@@ -203,6 +203,7 @@ impl Contents {
     // So using the old version of the entry we can search for the old location.
     pub fn filtered_position_by_sorted(&self, entry: &Entry) -> Option<u32> {
         assert!(!self.stale);
+
         if let Some(filtered) = &self.filtered {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5989
             // TODO [incremental]
@@ -223,8 +224,9 @@ impl Contents {
     }
 
     pub fn reinsert_updated(&mut self, pos: TotalPos, new: &EntryObject, old: &Entry) {
-        let t_pos = pos.0;
         assert!(!self.stale);
+
+        let t_pos = pos.0;
         let comp = self.sort.comparator();
 
         if (t_pos == 0
@@ -266,6 +268,7 @@ impl Contents {
     pub fn insert(&mut self, new: &EntryObject) {
         assert!(!self.stale);
         debug_assert!(self.total_position_by_sorted(&new.get()).is_none());
+
         self.list.insert_sorted(new, self.sort.comparator());
     }
 
