@@ -52,7 +52,9 @@ pub struct Thumbnailer {
     // It's fine if there's a properties window on a higher DPI monitor that is a bit blurry.
     pub size: Cell<DesktopThumbnailSize>,
 
+    // high >= medium >= low
     high: u16,
+    medium: u16,
     low: u16,
 
     sync_factory: Option<Factories>,
@@ -114,8 +116,14 @@ impl PendingThumbs {
 
 impl Thumbnailer {
     pub fn new() -> Self {
-        let high = CONFIG.max_thumbnailers as u16;
-        let low = min(CONFIG.background_thumbnailers.try_into().unwrap_or_default(), 255);
+        let high = min(CONFIG.max_thumbnailers as u16, 255);
+        let low = min(CONFIG.background_thumbnailers.try_into().unwrap_or_default(), high);
+
+        // If low priority tasks are enabled, use those tasks for medium priority thumbnails.
+        // Otherwise only use up to 2 tasks, which is more than enough for existing thumbnails.
+        // It actually helps if high > medium to reserve at least one task for visible items.
+        let medium = if low > 0 { low } else { min(high, 2) };
+
         let (sync_factory, factories) = SendFactory::make(high);
 
         let pending = PendingThumbs { factories, ..PendingThumbs::default() };
@@ -133,6 +141,7 @@ impl Thumbnailer {
             // TODO[thumbsize] read from surface size
             size: Cell::new(DesktopThumbnailSize::Normal),
             high,
+            medium,
             low,
             sync_factory,
         }
@@ -259,11 +268,7 @@ impl Thumbnailer {
                 }
             }
 
-            // If low priority tasks are enabled, use those tasks for medium priority thumbnails.
-            if self.low > 0
-                && self.high > self.low
-                && self.high - pending.factories.len() as u16 > self.low
-            {
+            if self.high - pending.factories.len() as u16 >= self.medium {
                 break 'find_job None;
             }
 
@@ -275,7 +280,7 @@ impl Thumbnailer {
                 }
             }
 
-            if self.high > self.low && self.high - pending.factories.len() as u16 > self.low {
+            if self.high - pending.factories.len() as u16 >= self.low {
                 break 'find_job None;
             }
 
