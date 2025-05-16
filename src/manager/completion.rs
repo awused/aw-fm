@@ -208,13 +208,14 @@ pub(super) fn complete(
 
             root = root.parent()?;
 
-            !root.exists()
+            // Check if this is a dir so that /dir/path can match /directory/path even if /dir is a
+            // file
+            !root.is_dir()
         } {}
 
         debug!("Performing completion with root {root:?} and fragments {fragments:?}");
 
         if cancel.load(Ordering::Relaxed)
-            || !root.is_dir()
             || fragments.len() > CONFIG.search_max_depth.unwrap_or(255) as usize
         {
             return None;
