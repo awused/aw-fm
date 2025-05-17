@@ -954,13 +954,22 @@ impl Tab {
     }
 
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: NavTarget) {
+        self.navigate_inner(left, right, target, true);
+    }
+
+    fn navigate_inner(&mut self, left: &[Self], right: &[Self], target: NavTarget, forward: bool) {
         info!("Navigating {:?} from {:?} to {target:?}", self.id, self.dir.path());
 
         let history = self.current_history();
 
         let Some(unconsumed) = self.change_location_flat(left, right, target) else {
-            self.past.push(history);
-            self.future.clear();
+            if forward {
+                self.past.push(history);
+                self.future.clear();
+            } else {
+                self.past.clear();
+                self.future.push(history);
+            }
             return;
         };
 
@@ -983,13 +992,17 @@ impl Tab {
     }
 
     pub fn parent(&mut self, left: &[Self], right: &[Self]) {
+        self.parent_inner(left, right, true);
+    }
+
+    fn parent_inner(&mut self, left: &[Self], right: &[Self], forward: bool) {
         let Some(parent) = self.dir.path().parent() else {
             warn!("No parent for {:?}", self.dir.path());
             return;
         };
 
         let target = NavTarget::assume_jump(parent, self.dir());
-        self.navigate(left, right, target);
+        self.navigate_inner(left, right, target, forward);
     }
 
     pub fn forward(&mut self, left: &[Self], right: &[Self]) {
@@ -1002,84 +1015,60 @@ impl Tab {
         let history = self.current_history();
 
         self.past.push(history);
-
-        // Shouldn't be a jump, could be a search starting/ending.
-        if next.location == *self.dir.path() {
-            let hide_scroll = next.search.is_none();
-            if let Some(query) = next.search {
-                self.open_search(query);
-            } else {
-                self.close_search();
-            }
-            self.pane.overwrite_state(next.state);
-            self.apply_pane_state(hide_scroll);
-            return;
-        }
-
-        let target = NavTarget::assume_dir(next.location);
-
-        if let Some(unconsumed) = self.change_location_flat(left, right, target) {
-            error!(
-                "Failed to change location {unconsumed:?} after already checking it was a change."
-            );
-            self.pane.overwrite_state(next.state);
-            self.apply_pane_state(false);
-            return;
-        }
-
-        if let Some(query) = next.search {
-            self.open_search(query);
-        } else {
-            self.close_search();
-        }
-
-        self.pane.overwrite_state(next.state);
-        self.apply_pane_state(true)
+        self.apply_history(left, right, next);
     }
 
-    pub(super) fn back(&mut self, left: &[Self], right: &[Self]) {
+    pub(super) fn back(&mut self, left: &[Self], right: &[Self]) -> bool {
         let Some(prev) = self.past.pop() else {
             warn!("No history for {:?} to go back to", self.id);
-            return;
+            return false;
         };
 
         info!("Back in tab {:?} to {prev:?}", self.id);
         let history = self.current_history();
 
         self.future.push(history);
+        self.apply_history(left, right, prev);
+        true
+    }
 
+    fn apply_history(&mut self, left: &[Self], right: &[Self], hist: HistoryEntry) {
         // Shouldn't be a jump, could be a search starting/ending.
-        if prev.location == *self.dir.path() {
-            let hide_scroll = prev.search.is_none();
-            if let Some(query) = prev.search {
+        if hist.location == *self.dir.path() {
+            let hide_scroll = hist.search.is_none();
+            if let Some(query) = hist.search {
                 self.open_search(query);
             } else {
                 self.close_search();
             }
-            self.pane.overwrite_state(prev.state);
-            self.apply_pane_state(hide_scroll);
-            return;
+            self.pane.overwrite_state(hist.state);
+            return self.apply_pane_state(hide_scroll);
         }
 
-        let target = NavTarget::assume_dir(prev.location);
+        let target = NavTarget::assume_dir(hist.location);
 
         if let Some(unconsumed) = self.change_location_flat(left, right, target) {
             error!(
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
-            self.pane.overwrite_state(prev.state);
-            self.apply_pane_state(false);
-            return;
+            self.pane.overwrite_state(hist.state);
+            return self.apply_pane_state(false);
         }
 
-        if let Some(query) = prev.search {
+        if let Some(query) = hist.search {
             self.open_search(query);
         } else {
             self.close_search();
         }
 
-        self.pane.overwrite_state(prev.state);
-        self.apply_pane_state(true)
+        self.pane.overwrite_state(hist.state);
+        self.apply_pane_state(true);
+    }
+
+    pub(super) fn back_or_parent(&mut self, left: &[Self], right: &[Self]) {
+        if !self.back(left, right) {
+            self.parent_inner(left, right, false);
+        }
     }
 
     // Goes to the child directory if one was previously open or if there's only one.
@@ -1092,7 +1081,8 @@ impl Tab {
         // Try the past and future first.
         if Some(&**self.dir.path()) == self.past.last().and_then(|h| h.location.parent()) {
             info!("Found past entry for child dir while handling Child in {:?}", self.id);
-            return self.back(left, right);
+            self.back(left, right);
+            return;
         }
         if Some(&**self.dir.path()) == self.future.last().and_then(|h| h.location.parent()) {
             info!("Found future entry for child dir while handling Child in {:?}", self.id);

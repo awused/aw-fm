@@ -52,15 +52,15 @@ On fedora all required dependencies can be installed with
 The defaults should make some level of sense. Hit `?` for a popup containing all
 current customizable keybinds.
 
-Mouse controls are not customizable but should work as expected. Middle clicking
-on a file or directory is the same as the `NewBackgroundTab` command below. Control
-clicking on a tab will open it in a horizontal split, shift clicking leads to a vertical
-split.
+Mouse controls are somewhat customizable but the defaults should work as expected.
+Middle clicking on a file or directory is the same as the `NewBackgroundTab`
+command below. Control clicking on a tab will open it in a horizontal split, shift
+clicking leads to a vertical split.
 
 Seeking can be done by typing some alphanumeric characters and hitting tab or shift-tab.
 
 Completion can be triggered with `ctrl+space` in the location bar. Currently this
-is hardcoded.
+is hardcoded. `ctrl+space` and `ctrl+shift+space` will cycle through matching paths.
 
 ### Customization
 
@@ -138,6 +138,9 @@ specify them.
   * Navigates through the history of the active tab.
 * `Parent`
   * Navigates to the parent of the current directory.
+* `BackOrParent`
+  * Equivalent to `Back` if there is history for the current tab, or `Parent` if
+  not.
 * `Child`
   * Navigates into a child directory of the current directory if there is only
   one or if you previously navigated from a subdirectory of the current directory.

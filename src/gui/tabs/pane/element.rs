@@ -11,12 +11,10 @@ use gtk::{DropTargetAsync, EventControllerFocus, GestureClick, MultiSelection, g
 use strum_macros::{AsRefStr, EnumString};
 
 use super::DRAGGING_TAB;
-use crate::com::SignalHolder;
+use crate::com::{ActionTarget, SignalHolder};
 use crate::gui::clipboard::URIS;
 use crate::gui::tabs::id::TabId;
-use crate::gui::tabs::list::event_run_tab;
-use crate::gui::tabs::tab::Tab;
-use crate::gui::{Selected, tabs_run};
+use crate::gui::{Selected, gui_run, tabs_run};
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
@@ -103,10 +101,10 @@ impl PaneElement {
         });
         self.add_controller(focus);
 
-        // Maps forward/back on a mouse to Forward/Backward
-        let forward_back_mouse = GestureClick::new();
-        forward_back_mouse.set_button(0);
-        forward_back_mouse.connect_pressed(move |c, _n, x, y| {
+        // Configurable mouse buttons
+        let config_actions = GestureClick::new();
+        config_actions.set_button(0);
+        config_actions.connect_pressed(move |c, _n, x, y| {
             // https://gitlab.gnome.org/GNOME/gtk/-/issues/5884
             let w = c.widget().unwrap();
             if !w.contains(x, y) {
@@ -114,13 +112,10 @@ impl PaneElement {
                 return;
             }
 
-            match c.current_button() {
-                8 => event_run_tab(tab, Tab::back),
-                9 => event_run_tab(tab, Tab::forward),
-                _ => {}
-            }
+            let target = ActionTarget::Tab(tab);
+            gui_run(|g| g.run_mouse_command(target, c.current_button(), c.current_event_state()));
         });
-        self.add_controller(forward_back_mouse);
+        self.add_controller(config_actions);
 
         let drop_target = DropTargetAsync::new(None, DragAction::all());
         drop_target.connect_accept(move |_dta, dr| {
@@ -133,7 +128,8 @@ impl PaneElement {
                 return false;
             }
 
-            let accepts_paste = tabs_run(|tlist| {
+
+            tabs_run(|tlist| {
                 let tab = tlist.find(tab).unwrap();
                 if let Some(dragging_tab) = DRAGGING_TAB.get() {
                     if let Some(dragging) = tlist.find(dragging_tab) {
@@ -144,13 +140,7 @@ impl PaneElement {
                     }
                 }
                 tab.accepts_paste()
-            });
-
-            if !accepts_paste {
-                return false;
-            }
-
-            true
+            })
         });
 
         drop_target.connect_drop(move |_dta, dr, _x, _y| {

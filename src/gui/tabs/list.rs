@@ -29,12 +29,6 @@ use crate::gui::{
     ActionTarget, CompletionResult, gui_run, operations, show_error, show_warning, tabs_run,
 };
 
-// For event handlers which cannot be run with the tabs lock being held.
-// Assumes the tab still exists since GTK notifies are run synchronously.
-pub(super) fn event_run_tab<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(id: TabId, f: F) -> T {
-    tabs_run(|t| t.must_run_tab(id, f))
-}
-
 #[derive(Debug)]
 pub(super) struct Group {
     // Only needed for restoring from closed tabs, for later
@@ -46,7 +40,7 @@ pub(super) struct Group {
 }
 
 impl Group {
-    pub fn size(&self) -> u32 {
+    pub const fn size(&self) -> u32 {
         self.children.len() as u32 + 1
     }
 }
@@ -929,6 +923,10 @@ impl TabsList {
 
     pub fn parent(&mut self, target: ActionTarget) {
         self.try_resolve_sliced(target, Tab::parent);
+    }
+
+    pub fn back_or_parent(&mut self, target: ActionTarget) {
+        self.try_resolve_sliced(target, Tab::back_or_parent);
     }
 
     pub fn child(&mut self, target: ActionTarget) {

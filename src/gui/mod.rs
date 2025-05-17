@@ -113,6 +113,7 @@ struct Gui {
 
     open_dialogs: RefCell<input::OpenDialogs>,
     shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, String>>,
+    mouse_actions: AHashMap<ModifierType, AHashMap<u32, String>>,
 
     ongoing_operations: RefCell<Vec<Rc<Operation>>>,
     finished_operations: RefCell<VecDeque<Rc<Operation>>>,
@@ -243,6 +244,7 @@ impl Gui {
 
             open_dialogs: RefCell::default(),
             shortcuts: Self::parse_shortcuts(),
+            mouse_actions: Self::parse_mouse_actions(),
 
             ongoing_operations: RefCell::default(),
             finished_operations: RefCell::default(),

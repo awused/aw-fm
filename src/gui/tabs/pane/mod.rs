@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
+use std::cmp::min;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
@@ -267,7 +268,8 @@ impl Pane {
         let completion = gtk::EventControllerKey::new();
         let existing = self.completion_result.clone();
         completion.connect_key_pressed(move |kc, key, _, mods| {
-            if mods != ModifierType::CONTROL_MASK {
+            let mods = mods & !ModifierType::LOCK_MASK;
+            if (mods & !ModifierType::SHIFT_MASK) != ModifierType::CONTROL_MASK {
                 return Propagation::Proceed;
             }
 
@@ -288,12 +290,24 @@ impl Pane {
 
             if let Some(mut res) = existing.take() {
                 if res.candidates[res.position].to_string_lossy() == initial {
-                    res.position = (res.position + 1) % res.candidates.len();
+                    if mods.contains(ModifierType::SHIFT_MASK) {
+                        res.position = min(
+                            res.position.wrapping_sub(1),
+                            res.candidates.len().saturating_sub(1),
+                        );
+                    } else {
+                        res.position = (res.position + 1) % res.candidates.len();
+                    }
+
                     entry.set_text(&res.candidates[res.position].to_string_lossy());
                     entry.set_position(-1);
                     existing.set(Some(res));
                     return Propagation::Proceed;
                 }
+            }
+
+            if mods != ModifierType::CONTROL_MASK {
+                return Propagation::Proceed;
             }
 
             let mut path: PathBuf = initial.trim_start().into();

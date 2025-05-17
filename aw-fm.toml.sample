@@ -21,7 +21,7 @@ background_thumbnailers = 1
 # Whether to limit aw-fm to a single window or not.
 #
 # If true, only one aw-fm window can be open at a time. Running "aw-fm directory" with an
-# open window will open "directory" in a tab in the existing window instead of a new window.
+# open window will open "directory" in a new tab in the existing window instead of a new window.
 unique = false
 
 # Whether seeking (tab/shift-tab) wraps around.
@@ -40,6 +40,9 @@ seek_wraparound = false
 # Some keybinds will be bound by the existing GTK components and will not work.
 #
 # Binding letters without modifiers is not recommended either.
+#
+# These shortcuts run against the active tab, even if the mouse is hovering over a
+# different tab.
 #
 # Use uppercase letters.
 # Defaults and Examples:
@@ -78,6 +81,7 @@ shortcuts = [
   {key = "Down", modifiers = "Alt", action = "Child"},
   {key = "Right", modifiers = "Alt", action = "Forward"},
   {key = "Left", modifiers = "Alt", action = "Back"},
+  # {key = "Left", modifiers = "Alt", action = "BackOrParent"},
 
   {key = "1", modifiers = "Control", action = "Display icons"},
   {key = "2", modifiers = "Control", action = "Display columns"},
@@ -153,7 +157,8 @@ context_menu = [
 
   {name = "Cut", action = "Cut", selection = "at_least_one" },
   {name = "Copy", action = "Copy", selection = "at_least_one" },
-  # Paste has special handling, if selection is not present
+  # Paste has special handling, if selection is not present it is enabled
+  # based on the contents of the clipboard.
   {name = "Paste", action = "Paste" },
   {name = "Rename", action = "Rename", selection = "one" },
 
@@ -168,6 +173,30 @@ context_menu = [
   {name = "Descending", submenu = "Sort", action = "SortDir descending"},
 
   {name = "Properties", action = "Properties", selection = "at_least_one"},
+]
+
+# Additional actions for mouse buttons in the file list
+#
+# The specific numbers used are somewhat non-standard across mice, so experimentation might be
+# necessary. This doesn't affect mouse buttons for the tabs list.
+#
+# Unlike "shortcuts", these run against the tab the mouse is hovering over, even if a different tab
+# is active.
+#
+# Configurations for buttons 1, 2, and 3 are discouraged and might break normal behaviour.
+#
+# CAUTION: middle-clicking on a single file is currently hardcoded and not configurable here.
+#
+# Example:
+# {button = 8, action = "Back"},
+# {button = 4, modifiers = "Shift", action = "Paste"},
+mouse_buttons = [
+  {button = 8, action = "Back"},
+  {button = 8, modifiers = "Shift", action = "BackOrParent"},
+  {button = 8, modifiers = "Alt", action = "Parent"},
+
+  {button = 9, action = "Forward"},
+  {button = 9, modifiers = "Alt", action = "Child"},
 ]
 
 # How to handle directory collisions during file operations.

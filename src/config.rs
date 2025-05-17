@@ -53,6 +53,13 @@ pub struct ContextMenuEntry {
     pub selection: Selection,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct MouseButtonAction {
+    pub action: String,
+    pub button: u32,
+    pub modifiers: Option<String>,
+}
+
 #[derive(Debug, Default, Deserialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum DirectoryCollision {
@@ -112,6 +119,8 @@ pub struct Config {
     pub bookmarks: Vec<Bookmark>,
     #[serde(default)]
     pub context_menu: Vec<ContextMenuEntry>,
+    #[serde(default)]
+    pub mouse_buttons: Vec<MouseButtonAction>,
 
     #[serde(default)]
     pub directory_collisions: DirectoryCollision,

@@ -399,9 +399,58 @@ impl Gui {
         shortcuts
     }
 
+    pub(super) fn parse_mouse_actions() -> AHashMap<ModifierType, AHashMap<u32, String>> {
+        let mut actions = AHashMap::new();
+
+        for s in &CONFIG.mouse_buttons {
+            let mut modifiers: ModifierType = ModifierType::from_bits(0).unwrap();
+            if let Some(m) = &s.modifiers {
+                let m = m.to_lowercase();
+                if m.contains("control") {
+                    modifiers |= ModifierType::CONTROL_MASK;
+                }
+                if m.contains("alt") {
+                    modifiers |= ModifierType::ALT_MASK;
+                }
+                if m.contains("shift") {
+                    modifiers |= ModifierType::SHIFT_MASK;
+                }
+                if m.contains("super") {
+                    modifiers |= ModifierType::SUPER_MASK;
+                }
+                if m.contains("command") {
+                    modifiers |= ModifierType::META_MASK;
+                }
+            };
+
+            let inner = match actions.entry(modifiers) {
+                hash_map::Entry::Occupied(inner) => inner.into_mut(),
+                hash_map::Entry::Vacant(vacant) => vacant.insert(AHashMap::new()),
+            };
+
+            inner.insert(s.button, s.action.clone());
+        }
+        actions
+    }
+
     pub(super) fn run_command_active(self: &Rc<Self>, cmd: &str) {
         let target = self.tabs.borrow().active_action_target();
         self.run_command(target, cmd)
+    }
+
+    pub(super) fn run_mouse_command(
+        self: &Rc<Self>,
+        target: ActionTarget,
+        button: u32,
+        mods: ModifierType,
+    ) {
+        let mods = mods & !ModifierType::LOCK_MASK;
+
+        let Some(cmd) = self.mouse_actions.get(&mods).and_then(|m| m.get(&button)) else {
+            return;
+        };
+
+        self.run_command(target, cmd);
     }
 
     pub(super) fn run_command(self: &Rc<Self>, target: ActionTarget, cmd: &str) {
@@ -536,6 +585,7 @@ impl Gui {
             "Back" => return tabs.back(target),
             "Parent" => return tabs.parent(target),
             "Child" => return tabs.child(target),
+            "BackOrParent" => return tabs.back_or_parent(target),
 
             "Trash" => return tabs.trash(target),
             "Delete" => return tabs.active_delete(target),
