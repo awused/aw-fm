@@ -4,11 +4,11 @@ use std::cmp::Ordering;
 use std::ffi::{OsStr, OsString};
 use std::ops::Deref;
 
+use Segment::*;
 use once_cell::unsync::Lazy;
 use ouroboros::self_referencing;
 use regex::Regex;
-use unicode_normalization::{is_nfkc_quick, IsNormalized, UnicodeNormalization};
-use Segment::*;
+use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
 use crate::config::CONFIG;
 
@@ -48,6 +48,8 @@ pub struct NatKey {
     #[borrows(original)]
     #[covariant]
     lowercase: Cow<str, 'this>,
+    // For now, at least, sort by lowercase, not normalized.
+    // This means FAUNA and 𝙁𝘼𝙐𝙉𝘼 will have a consistent ordering.
     #[borrows(lowercase)]
     #[covariant]
     segs: Vec<Segment<'this>>,

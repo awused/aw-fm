@@ -7,7 +7,9 @@ use gtk::gdk::{DragAction, Key, ModifierType};
 use gtk::glib::Propagation;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{DropTargetAsync, EventControllerFocus, GestureClick, MultiSelection, glib};
+use gtk::{
+    DropTargetAsync, EventControllerFocus, GestureClick, MultiSelection, PropagationPhase, glib,
+};
 use strum_macros::{AsRefStr, EnumString};
 
 use super::DRAGGING_TAB;
@@ -158,6 +160,7 @@ impl PaneElement {
         self.imp().scroller.add_controller(drop_target);
 
         let seek_controller = gtk::EventControllerKey::new();
+        seek_controller.set_propagation_phase(PropagationPhase::Capture);
         seek_controller.connect_key_pressed(move |kc, key, _, mods| {
             let pane = kc.widget().and_then(|w| w.parent()).and_downcast::<Self>().unwrap();
             pane.handle_seek(key, mods)

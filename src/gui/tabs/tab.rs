@@ -859,8 +859,7 @@ impl Tab {
     }
 
     pub fn select_if_not(&self, eo: EntryObject) {
-        let contents =
-            if let Some(search) = &self.search { search.contents() } else { &self.contents };
+        let contents = self.visible_contents();
 
         // Should not be possible to call this with an item not in this tab.
         let pos = contents.filtered_position_by_sorted(&eo.get()).unwrap();
@@ -947,10 +946,7 @@ impl Tab {
     }
 
     pub fn clear_selection(&self) {
-        let contents =
-            if let Some(search) = &self.search { search.contents() } else { &self.contents };
-
-        contents.selection.unselect_all();
+        self.visible_selection().unselect_all();
     }
 
     pub fn navigate(&mut self, left: &[Self], right: &[Self], target: NavTarget) {
