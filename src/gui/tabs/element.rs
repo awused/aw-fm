@@ -43,7 +43,8 @@ impl TabElement {
             }
             match c.current_button() {
                 1 => {
-                    let mods = c.current_event().unwrap().modifier_state();
+                    let mods =
+                        c.current_event().unwrap().modifier_state() & !ModifierType::LOCK_MASK;
                     let orient = if mods == ModifierType::SHIFT_MASK {
                         Orientation::Vertical
                     } else if mods == ModifierType::CONTROL_MASK {

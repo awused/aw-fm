@@ -309,6 +309,7 @@ impl PaneElement {
         let stack = &self.imp().stack;
         let tab = *self.imp().tab.get().unwrap();
 
+        let mods = mods & !ModifierType::LOCK_MASK;
         if !mods.difference(ModifierType::SHIFT_MASK).is_empty() {
             return Propagation::Proceed;
         }
@@ -366,7 +367,8 @@ impl PaneElement {
         // Allow ^ for prefix matching?
         // There are unicode spaces that could matter, but not for me
         // is_whitespace() would not be appropriate
-        if c != ' ' && !c.is_alphanumeric() {
+        // Don't allow seeking to start with a space
+        if !((c == ' ' && seek_visible) || c.is_alphanumeric()) {
             return Propagation::Proceed;
         }
 
