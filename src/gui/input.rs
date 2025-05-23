@@ -243,7 +243,9 @@ impl Gui {
                 return;
             }
 
-            gui_run(|g| g.start_operation(tab, Kind::Rename(new_path), vec![path.clone()].into()));
+            gui_run(|g| {
+                g.start_operation(tab, Kind::Rename(new_path.into()), vec![path.clone()].into())
+            });
         };
 
         // activates-default is slow, so clone this closure instead
@@ -302,7 +304,7 @@ impl Gui {
                 return show_warning(format!("Invalid name for file \"{new_name}\""));
             }
 
-            let path = dir.join(new_name);
+            let path = dir.join(new_name).into();
             gui_run(|g| {
                 g.start_operation(
                     tab,

@@ -1,7 +1,7 @@
 use std::cell::{Ref, RefCell};
 use std::collections::VecDeque;
 use std::fs::{ReadDir, remove_dir};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -65,19 +65,19 @@ impl Fragment {
 #[derive(Debug)]
 pub enum Outcome {
     // Includes overwrites, undo -> move back if no conflict
-    Move { source: Arc<Path>, dest: PathBuf },
+    Move { source: Arc<Path>, dest: Arc<Path> },
     // Does not include overwrite copies, undo -> delete with no confirmation
-    Copy(PathBuf),
+    Copy(Arc<Path>),
     // Only overwrites from copy, undo -> delete with confirmation??
-    CopyOverwrite(PathBuf),
+    CopyOverwrite(Arc<Path>),
     // Undo -> delete if still 0 sized
-    NewFile(PathBuf),
+    NewFile(Arc<Path>),
     // FileInfo needs to be restored after we populate the contents, which is awkward.
     // Could unconditionally store FileInfo to restore it, probably not worth it.
-    RemoveSourceDir(Arc<Path>, Option<FileInfo>),
-    CreateDestDir(PathBuf),
+    RemoveSourceDir(Arc<Path>, FileInfo),
+    CreateDestDir(Arc<Path>),
     // Nothing really happened here
-    MergeDestDir(PathBuf),
+    MergeDestDir(Arc<Path>),
     Skip,
     Delete,
     // Not undoable, while the directory could be recreated that's not terrible useful.
@@ -106,10 +106,10 @@ impl Outcome {
 pub enum Kind {
     Move(Arc<Path>),
     Copy(Arc<Path>),
-    Rename(PathBuf),
+    Rename(Arc<Path>),
 
-    MakeDir(PathBuf),
-    MakeFile(PathBuf),
+    MakeDir(Arc<Path>),
+    MakeFile(Arc<Path>),
 
     // In theory, at least, it should be possible to redo an undo.
     // Probably won't support this, but keep the skeleton intact.
@@ -152,8 +152,13 @@ impl Kind {
         }
 
         match s {
-            Self::Move(d) | Self::Copy(d) | Self::Trash(d) | Self::Delete(d) => d,
-            Self::Rename(p) | Self::MakeDir(p) | Self::MakeFile(p) => p,
+            Self::Move(d)
+            | Self::Copy(d)
+            | Self::Rename(d)
+            | Self::Trash(d)
+            | Self::Delete(d)
+            | Self::MakeDir(d)
+            | Self::MakeFile(d) => d,
             Self::Undo { .. } => unreachable!(),
         }
     }
@@ -173,33 +178,49 @@ impl Kind {
 }
 
 // Basic directory state machine, processing is depth-first.
-// Flow is:
+// Flow for copy/move is:
 // Encounter a source directory.
 // Create a destination directory or resolve collision.
 // Push the directory onto the stack.
 // Enter a directory-> process all its files -> exit a directory.
+// Apply original_info if the destination directory did not already exist.
+// Remove the source directory if it is a move and it is empty.
+//
+// For delete/trash:
+// Encounter a source directory.
+// Push the directory onto the stack.
+// Enter a directory-> process all its files -> exit a directory.
 #[derive(Debug)]
-struct Directory {
+struct SourceDirectory {
     abs_path: Arc<Path>,
-    // Only set for copy/move
-    dest: PathBuf,
     // We'll open at most one directory at a time for each level of depth.
     iter: ReadDir,
-    original_info: Option<FileInfo>,
 }
 
-impl Directory {
+#[derive(Debug)]
+struct DestinationDirectory {
+    source: SourceDirectory,
+    dest: Arc<Path>,
+    // If we allow restores for deletions, move this to SourceDirectory
+    //
+    // This is currently useless if copying to an existing directory, but not worth optimizing out
+    // because it could be used for restoring attributes when undoing a Copy in the future.
+    original_info: FileInfo,
+    already_existed: bool,
+}
+
+impl DestinationDirectory {
     fn apply_info(&self) {
-        let Some(info) = &self.original_info else {
+        if self.already_existed {
             return;
-        };
+        }
 
         trace!("Setting saved attributes on destination directory {:?}", self.dest);
         // Synchronous is good enough here.
 
         let dest = gio::File::for_path(&self.dest);
         if let Err(e) = dest.set_attributes_from_info(
-            info,
+            &self.original_info,
             FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
             Cancellable::NONE,
         ) {
@@ -229,19 +250,19 @@ impl ConflictKind {
 struct Conflict {
     kind: ConflictKind,
     src: Arc<Path>,
-    dst: PathBuf,
+    dst: Arc<Path>,
 }
 
 
 #[derive(Debug)]
 enum NextCopyMove {
-    FinishedDir(Directory),
-    Files(Arc<Path>, PathBuf),
+    FinishedDir(DestinationDirectory),
+    Files(Arc<Path>, Arc<Path>),
 }
 
 #[derive(Debug)]
 enum NextRemove {
-    FinishedDir(Directory),
+    FinishedDir(SourceDirectory),
     File(Arc<Path>),
 }
 
@@ -258,7 +279,7 @@ pub struct Operation {
 
 struct ReadyCopyMove {
     src: Arc<Path>,
-    dst: PathBuf,
+    dst: Arc<Path>,
     overwrite: bool,
 }
 
@@ -365,7 +386,7 @@ impl Operation {
         }
     }
 
-    fn process_next_move(self: &Rc<Self>, dest: &Path) -> Status {
+    fn process_next_move(self: &Rc<Self>, dest: &Arc<Path>) -> Status {
         let (src, dst) = loop {
             let mut progress = self.progress.borrow_mut();
 
@@ -375,9 +396,9 @@ impl Operation {
                     dir.apply_info();
 
                     info!("Removing source directory {dir:?}");
-                    match remove_dir(&dir.abs_path) {
+                    match remove_dir(&dir.source.abs_path) {
                         Ok(_) => progress.push_outcome(Outcome::RemoveSourceDir(
-                            dir.abs_path,
+                            dir.source.abs_path,
                             dir.original_info,
                         )),
                         Err(e) => error!("Failed to remove source directory {dir:?}: {e}"),
@@ -509,7 +530,7 @@ impl Operation {
             }
 
             if !src.exists() {
-                error!("Could not copy {:?} as it no longer exists", src);
+                error!("Could not copy {src:?} as it no longer exists");
                 // Doesn't count as a skip for now.
                 continue;
             }
@@ -542,9 +563,7 @@ impl Operation {
         Status::AsyncScheduled
     }
 
-    fn do_copy(self: &Rc<Self>, prep: ReadyCopyMove) {
-        let ReadyCopyMove { dst, src, overwrite } = prep;
-
+    fn do_copy(self: &Rc<Self>, ReadyCopyMove { dst, src, overwrite }: ReadyCopyMove) {
         let source = gio::File::for_path(&src);
         let dest = gio::File::for_path(&dst);
         let s = self.clone();
@@ -580,7 +599,7 @@ impl Operation {
         );
     }
 
-    fn prepare_copymove(self: &Rc<Self>, src: Arc<Path>, mut dst: PathBuf) -> CopyMovePrep {
+    fn prepare_copymove(self: &Rc<Self>, src: Arc<Path>, mut dst: Arc<Path>) -> CopyMovePrep {
         if src.is_dir() && !src.is_symlink() {
             return self.prepare_dest_dir(src, dst);
         }
@@ -650,10 +669,13 @@ impl Operation {
         CopyMovePrep::Ready(ReadyCopyMove { src, dst, overwrite })
     }
 
-    fn prepare_dest_dir(self: &Rc<Self>, src: Arc<Path>, dst: PathBuf) -> CopyMovePrep {
+    fn prepare_dest_dir(self: &Rc<Self>, src: Arc<Path>, dst: Arc<Path>) -> CopyMovePrep {
         let mut progress = self.progress.borrow_mut();
 
-        let original_info = if dst.exists() {
+
+        let already_existed = dst.exists();
+
+        if already_existed {
             if !dst.is_dir() {
                 // Could potentially allow more nuance here.
                 return CopyMovePrep::Abort(format!(
@@ -681,39 +703,10 @@ impl Operation {
                     return CopyMovePrep::CallAgain;
                 }
             }
-
-            None
         } else {
             // Just do all this synchronously, it'll be fine.
             trace!("Creating destination directory {dst:?}");
 
-            let source = gio::File::for_path(&src);
-
-            // Should only fail if cancelled, which we aren't doing.
-            let attributes = match source.build_attribute_list_for_copy(
-                FileCopyFlags::NOFOLLOW_SYMLINKS | FileCopyFlags::ALL_METADATA,
-                Cancellable::NONE,
-            ) {
-                Ok(attr) => attr,
-                Err(e) => {
-                    return CopyMovePrep::Abort(format!(
-                        "Failed to read source directory {src:?}: {e}"
-                    ));
-                }
-            };
-
-            let info = match source.query_info(
-                &attributes,
-                FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
-                Cancellable::NONE,
-            ) {
-                Ok(info) => info,
-                Err(e) => {
-                    return CopyMovePrep::Abort(format!(
-                        "Failed to create destination directory {dst:?}: {e}"
-                    ));
-                }
-            };
 
             if let Err(e) = std::fs::create_dir(&dst) {
                 show_error(format!("Failed to create destination directory {dst:?}: {e}"));
@@ -721,8 +714,35 @@ impl Operation {
             }
 
             progress.push_outcome(Outcome::CreateDestDir(dst.clone()));
+        }
 
-            Some(info)
+
+        let source = gio::File::for_path(&src);
+
+        // Should only fail if cancelled, which we aren't doing.
+        let attributes = match source.build_attribute_list_for_copy(
+            FileCopyFlags::NOFOLLOW_SYMLINKS | FileCopyFlags::ALL_METADATA,
+            Cancellable::NONE,
+        ) {
+            Ok(attr) => attr,
+            Err(e) => {
+                return CopyMovePrep::Abort(format!(
+                    "Failed to read source directory {src:?}: {e}"
+                ));
+            }
+        };
+
+        let original_info = match source.query_info(
+            &attributes,
+            FileQueryInfoFlags::NOFOLLOW_SYMLINKS,
+            Cancellable::NONE,
+        ) {
+            Ok(info) => info,
+            Err(e) => {
+                return CopyMovePrep::Abort(format!(
+                    "Failed to read source directory {source:?}: {e}"
+                ));
+            }
         };
 
         trace!("Entering source directory {src:?}, destination: {dst:?}");
@@ -736,11 +756,12 @@ impl Operation {
             }
         };
 
-        progress.push_dir(Directory {
-            abs_path: src,
+
+        progress.push_dest_dir(DestinationDirectory {
+            source: SourceDirectory { abs_path: src, iter: read_dir },
             dest: dst,
-            iter: read_dir,
             original_info,
+            already_existed,
         });
         CopyMovePrep::CallAgain
     }
@@ -801,12 +822,7 @@ impl Operation {
                             return Status::Done;
                         }
                     };
-                    progress.push_dir(Directory {
-                        abs_path: p,
-                        dest: PathBuf::new(),
-                        iter,
-                        original_info: None,
-                    });
+                    progress.push_removal_dir(SourceDirectory { abs_path: p, iter });
                     return Status::CallAgain;
                 }
 
@@ -868,7 +884,7 @@ impl Operation {
         );
     }
 
-    fn process_rename(self: &Rc<Self>, new_path: &Path) -> Status {
+    fn process_rename(self: &Rc<Self>, new_path: &Arc<Path>) -> Status {
         if new_path.exists() {
             show_warning(format!("{new_path:?} already exists"));
             self.progress.borrow_mut().push_outcome(Outcome::Skip);
@@ -876,7 +892,7 @@ impl Operation {
         }
 
         let source = self.progress.borrow_mut().pop_source().unwrap();
-        let dest = new_path.to_path_buf();
+        let dest = new_path.clone();
 
         let s = self.clone();
         gio::File::for_path(&source).move_async(
@@ -903,7 +919,7 @@ impl Operation {
         Status::AsyncScheduled
     }
 
-    fn process_make_dir(self: &Rc<Self>, new_path: &Path) -> Status {
+    fn process_make_dir(self: &Rc<Self>, new_path: &Arc<Path>) -> Status {
         if new_path.exists() {
             show_warning(format!("{new_path:?} already exists"));
             self.progress.borrow_mut().push_outcome(Outcome::Skip);
@@ -915,7 +931,7 @@ impl Operation {
                 trace!("Created directory {new_path:?}");
                 self.progress
                     .borrow_mut()
-                    .push_outcome(Outcome::CreateDestDir(new_path.to_path_buf()));
+                    .push_outcome(Outcome::CreateDestDir(new_path.clone()));
             }
             Err(e) => {
                 show_warning(format!("Failed to create {new_path:?}: {e}"));
@@ -926,7 +942,7 @@ impl Operation {
         Status::Done
     }
 
-    fn process_make_file(self: &Rc<Self>, new_path: &Path) -> Status {
+    fn process_make_file(self: &Rc<Self>, new_path: &Arc<Path>) -> Status {
         if new_path.exists() {
             show_warning(format!("{new_path:?} already exists"));
             self.progress.borrow_mut().push_outcome(Outcome::Skip);
@@ -936,9 +952,7 @@ impl Operation {
         match std::fs::File::create(new_path) {
             Ok(_) => {
                 trace!("Created file {new_path:?}");
-                self.progress
-                    .borrow_mut()
-                    .push_outcome(Outcome::NewFile(new_path.to_path_buf()));
+                self.progress.borrow_mut().push_outcome(Outcome::NewFile(new_path.clone()));
             }
             Err(e) => {
                 show_warning(format!("Failed to create {new_path:?}: {e}"));

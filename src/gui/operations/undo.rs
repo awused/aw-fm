@@ -34,11 +34,7 @@ impl Operation {
 
         match next {
             Outcome::Move { source, dest } => {
-                let ready = ReadyCopyMove {
-                    src: dest.into(),
-                    dst: source.to_path_buf(),
-                    overwrite: false,
-                };
+                let ready = ReadyCopyMove { src: dest, dst: source, overwrite: false };
 
                 // This allows for fallbacks for move, but will try a rename first, so we don't
                 // explicitly need to handle optimistic renames.
@@ -47,7 +43,7 @@ impl Operation {
             }
             Outcome::Copy(path) | Outcome::CopyOverwrite(path) => {
                 // TODO -- ask for confirmation on deletion?
-                self.do_delete(path.into(), false);
+                self.do_delete(path, false);
                 Status::AsyncScheduled
             }
             Outcome::NewFile(path) => {
@@ -61,7 +57,7 @@ impl Operation {
                     return Status::CallAgain;
                 }
 
-                self.do_delete(path.into(), false);
+                self.do_delete(path, false);
                 Status::AsyncScheduled
             }
             Outcome::RemoveSourceDir(path, file_info) => {
@@ -76,11 +72,9 @@ impl Operation {
 
                         self.progress
                             .borrow_mut()
-                            .push_outcome(Outcome::CreateDestDir(path.to_path_buf()));
+                            .push_outcome(Outcome::CreateDestDir(path.clone()));
 
-                        if let Some(info) = file_info {
-                            pending_dirs.borrow_mut().push((path, info));
-                        }
+                        pending_dirs.borrow_mut().push((path, file_info));
                     }
                     Err(e) => {
                         let msg = format!("Failed to recreate directory {path:?}: {e}");
@@ -91,9 +85,9 @@ impl Operation {
                 Status::CallAgain
             }
             Outcome::CreateDestDir(path) => {
-                // TODO -- save file_info?
+                // TODO -- save file_info for a redo?
                 // This will only delete empty directories
-                self.do_delete(path.into(), true);
+                self.do_delete(path, true);
                 Status::AsyncScheduled
             }
             Outcome::MergeDestDir(_)

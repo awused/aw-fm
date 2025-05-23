@@ -1646,7 +1646,7 @@ impl Tab {
         }
     }
 
-    fn paths_for_op<'a>(&self, outcomes: &'a [Outcome]) -> AHashSet<&'a Path> {
+    fn new_paths_for_op<'a>(&self, outcomes: &'a [Outcome]) -> AHashSet<&'a Path> {
         let tab_dir = &**self.dir.path();
         outcomes
             .iter()
@@ -1677,7 +1677,7 @@ impl Tab {
         }
 
         let outcomes = op.outcomes();
-        let new_paths = self.paths_for_op(&outcomes);
+        let new_paths = self.new_paths_for_op(&outcomes);
 
         if new_paths.is_empty() {
             return info!("No new paths to scroll to after operation in {:?}", self.id);
@@ -1722,7 +1722,7 @@ impl Tab {
                 }
 
                 let outcomes = op.outcomes();
-                let new_paths = tab.paths_for_op(&outcomes);
+                let new_paths = tab.new_paths_for_op(&outcomes);
                 tab.scroll_to_completed_inner(new_paths);
             });
         });

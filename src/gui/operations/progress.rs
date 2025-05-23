@@ -13,16 +13,21 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 
 use super::ask::{DirChoice, FileChoice};
 use super::{
-    Conflict, ConflictKind, Directory, Fragment, NextCopyMove, NextRemove, Operation, Outcome,
+    Conflict, ConflictKind, DestinationDirectory, Fragment, NextCopyMove, NextRemove, Operation,
+    Outcome, SourceDirectory,
 };
 use crate::config::{CONFIG, DirectoryCollision, FileCollision};
 use crate::gui::{gui_run, show_warning};
 
 #[derive(Debug)]
 pub struct Progress {
-    dirs: Vec<Directory>,
     // Set for every operation except undo, which plays back outcomes instead.
     source_files: VecDeque<Arc<Path>>,
+
+    // A stack of directories being processed for copying/moving
+    destination_dir_stack: Vec<DestinationDirectory>,
+    // A stack of directories being processed for deletion/trash
+    removal_dir_stack: Vec<SourceDirectory>,
 
     log: Vec<Outcome>,
 
@@ -73,7 +78,8 @@ impl Progress {
 
         Self {
             source_files,
-            dirs: Vec::new(),
+            destination_dir_stack: Vec::new(),
+            removal_dir_stack: Vec::new(),
 
             log: Vec::new(),
 
@@ -113,8 +119,12 @@ impl Progress {
         &self.log
     }
 
-    pub(super) fn push_dir(&mut self, dir: Directory) {
-        self.dirs.push(dir);
+    pub(super) fn push_dest_dir(&mut self, dir: DestinationDirectory) {
+        self.destination_dir_stack.push(dir);
+    }
+
+    pub(super) fn push_removal_dir(&mut self, dir: SourceDirectory) {
+        self.removal_dir_stack.push(dir);
     }
 
     pub fn pop_source(&mut self) -> Option<Arc<Path>> {
@@ -126,26 +136,26 @@ impl Progress {
             return Some(NextCopyMove::Files(src, dst));
         }
 
-        if let Some(dir) = &mut self.dirs.last_mut() {
-            for next in dir.iter.by_ref() {
+        if let Some(dir) = &mut self.destination_dir_stack.last_mut() {
+            for next in dir.source.iter.by_ref() {
                 let name = match next {
                     Ok(de) => de.file_name(),
                     Err(e) => {
                         show_warning(format!(
                             "Failed to read contents of directory {:?}: {e}",
-                            dir.abs_path
+                            dir.source.abs_path
                         ));
                         continue;
                     }
                 };
 
                 return Some(NextCopyMove::Files(
-                    dir.abs_path.join(&name).into(),
-                    dir.dest.join(name),
+                    dir.source.abs_path.join(&name).into(),
+                    dir.dest.join(name).into(),
                 ));
             }
 
-            return Some(NextCopyMove::FinishedDir(self.dirs.pop().unwrap()));
+            return Some(NextCopyMove::FinishedDir(self.destination_dir_stack.pop().unwrap()));
         }
 
         let mut src = self.source_files.pop_front()?;
@@ -156,13 +166,13 @@ impl Progress {
         }
 
         let name = src.file_name().unwrap();
-        let dest = dest_root.to_path_buf().join(name);
+        let dest = dest_root.to_path_buf().join(name).into();
 
         Some(NextCopyMove::Files(src, dest))
     }
 
     pub(super) fn next_remove(&mut self) -> Option<NextRemove> {
-        if let Some(dir) = &mut self.dirs.last_mut() {
+        if let Some(dir) = &mut self.removal_dir_stack.last_mut() {
             for next in dir.iter.by_ref() {
                 let path = match next {
                     Ok(de) => de.path(),
@@ -178,7 +188,7 @@ impl Progress {
                 return Some(NextRemove::File(path.into()));
             }
 
-            return Some(NextRemove::FinishedDir(self.dirs.pop().unwrap()));
+            return Some(NextRemove::FinishedDir(self.removal_dir_stack.pop().unwrap()));
         }
 
         Some(NextRemove::File(self.source_files.pop_front()?))
@@ -205,7 +215,7 @@ impl Progress {
         self.log.push(action);
     }
 
-    pub(super) fn new_name_for(&mut self, path: &Path, fragment: Fragment) -> Option<PathBuf> {
+    pub(super) fn new_name_for(&mut self, path: &Path, fragment: Fragment) -> Option<Arc<Path>> {
         trace!("Finding new name for copy onto self for {path:?}");
 
         let Some(name) = path.file_name() else {
@@ -269,9 +279,9 @@ impl Progress {
             if n_available(n) {
                 self.collision_cache
                     .insert((OsStr::from_bytes(&target[0..length]).into(), suffix.into()), n);
-                let new_path = OsString::from_vec(target).into();
+                let new_path = OsString::from_vec(target);
                 debug!("Found new name {new_path:?} for {path:?}");
-                return Some(new_path);
+                return Some(PathBuf::from(new_path).into());
             }
         }
 
@@ -295,9 +305,9 @@ impl Progress {
         if n_available(start) {
             self.collision_cache
                 .insert((OsStr::from_bytes(&target[0..length]).into(), suffix.into()), start);
-            let new_path = OsString::from_vec(target).into();
+            let new_path = OsString::from_vec(target);
             debug!("Found new name {new_path:?} for {path:?}");
-            Some(new_path)
+            Some(PathBuf::from(new_path).into())
         } else {
             None
         }
@@ -349,7 +359,7 @@ impl Progress {
             return;
         };
 
-        c.dst = parent.join(name);
+        c.dst = parent.join(name).into();
     }
 
     pub fn has_any_undoable(&self) -> bool {
