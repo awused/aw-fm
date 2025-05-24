@@ -1,23 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use ahash::AHashSet;
 use completion::complete;
 use notify::{Config, Event, PollWatcher, RecommendedWatcher};
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
 use tokio::task::LocalSet;
-use tokio::time::{sleep_until, timeout, Instant};
+use tokio::time::{Instant, sleep_until, timeout};
 
 use self::watcher::PendingUpdates;
 use crate::com::{CompletionResult, GuiAction, ManagerAction};
-use crate::config::{NfsPolling, CONFIG};
+use crate::config::{CONFIG, NfsPolling};
 use crate::manager::watcher::Sources;
 use crate::{closing, spawn_thread};
 
@@ -217,7 +218,8 @@ impl Manager {
                 // This will process any pending removals immediately, but can't handle updates
                 // that haven't yet reached this process. Those are rare enough in practice that it
                 // is unlikely to be worth fixing.
-                self.flush_updates(Vec::new());
+                // TODO -- this is no longer true, since removals are no longer sent immediately
+                self.flush_updates(&AHashSet::new(), AHashSet::new());
 
                 if self.watch_dir(&path) {
                     self.send(GuiAction::Watching(cancel.clone()));
@@ -238,8 +240,8 @@ impl Manager {
 
             GetChildren(dirs, cancel) => self.get_children(dirs, cancel),
 
-            Flush(paths, resp) => {
-                let remainder = self.flush_updates(paths);
+            Flush { all_paths, unmatched_paths, finished } => {
+                let remainder = self.flush_updates(&all_paths, unmatched_paths);
 
                 // We, most likely, just wrote these files, so reading them should be very fast and
                 // very few of them should not have pending notifications.
@@ -250,7 +252,7 @@ impl Manager {
                     Self::send_update(&self.gui_sender, p.into(), Sources::new_flat());
                 }
 
-                let _ignored = resp.send(());
+                let _ignored = finished.send(all_paths);
             }
 
             Complete(path, initial, tab) => {

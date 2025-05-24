@@ -1,11 +1,12 @@
 use std::collections::btree_map;
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
-use notify::event::{ModifyKind, RenameMode};
+use ahash::AHashSet;
 use notify::RecursiveMode::NonRecursive;
+use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, Watcher};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedSender;
@@ -16,13 +17,14 @@ use super::read_dir::flat_dir_count;
 use super::{Manager, RecurseId};
 use crate::closing;
 use crate::com::{Entry, GuiAction, SearchUpdate, Update};
-use crate::config::{NfsPolling, CONFIG};
+use crate::config::{CONFIG, NfsPolling};
 
 // Use our own debouncer as the existing notify debouncers leave a lot to be desired.
 // Send the first event ~immediately and then at most one event per period.
 const DEBOUNCE_DURATION: Duration = Duration::from_millis(1000);
 // Used to optimize the common case where a bunch of notifies arrive basically instantly for one
-// file. Especially after creation.
+// file. Especially after creation. Ideally we only need to send one update unless the file is
+// actively being written to.
 const DEDUPE_DELAY: Duration = Duration::from_millis(3);
 
 // Used so we tick less often and handle events as batches more.
@@ -374,7 +376,11 @@ impl Manager {
         }
     }
 
-    pub(super) fn flush_updates(&mut self, mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    pub(super) fn flush_updates(
+        &mut self,
+        all_paths: &AHashSet<Arc<Path>>,
+        mut unmatched_paths: AHashSet<Arc<Path>>,
+    ) -> AHashSet<Arc<Path>> {
         // Grab any pending updates waiting in the channel.
         // A more robust option would be to wait for ~1ms up to ~5ms, but this is always going to
         // be best-effort.
@@ -382,36 +388,29 @@ impl Manager {
             self.handle_event(ev, id);
         }
 
-        paths.retain_mut(|path| {
+        for path in all_paths {
             let Some(p) = self.recent_mutations.get_mut(&**path) else {
-                return true;
+                continue;
             };
 
+            let old = unmatched_paths.take(path);
+
             if p.state == State::Expiring {
-                return false;
+                continue;
             }
 
-            p.state = State::Expiring;
+            let path = old.unwrap_or_else(|| path.clone());
 
             if p.removal {
                 debug!("Flushing removal for {path:?} and {:?}", p.sources);
-                Self::send_removal(
-                    &self.gui_sender,
-                    std::mem::take(path).into(),
-                    std::mem::take(&mut p.sources),
-                );
+                Self::send_removal(&self.gui_sender, path, std::mem::take(&mut p.sources));
             } else {
                 debug!("Flushing update for {path:?} and {:?}", p.sources);
-                Self::send_update(
-                    &self.gui_sender,
-                    std::mem::take(path).into(),
-                    std::mem::take(&mut p.sources),
-                );
+                Self::send_update(&self.gui_sender, path, std::mem::take(&mut p.sources));
             }
-            false
-        });
+        }
 
-        paths
+        unmatched_paths
     }
 
     pub(super) async fn watch_search(&mut self, path: Arc<Path>, cancel: RecurseId) {

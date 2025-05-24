@@ -42,7 +42,7 @@ impl Operation {
                 Status::AsyncScheduled
             }
             Outcome::Copy(path) | Outcome::CopyOverwrite(path) => {
-                // TODO -- ask for confirmation on deletion?
+                // Should this even delete CopyOverwrites? Or ask for confirmation?
                 self.do_delete(path, false);
                 Status::AsyncScheduled
             }

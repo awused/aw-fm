@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use ahash::AHashSet;
 use derive_more::{Deref, DerefMut, From};
 use gtk::EventController;
 use gtk::glib::{Object, SignalHandlerId};
@@ -93,7 +94,11 @@ pub enum ManagerAction {
 
     GetChildren(Vec<Arc<Path>>, Arc<AtomicBool>),
 
-    Flush(Vec<PathBuf>, oneshot::Sender<()>),
+    Flush {
+        all_paths: AHashSet<Arc<Path>>,
+        unmatched_paths: AHashSet<Arc<Path>>,
+        finished: oneshot::Sender<AHashSet<Arc<Path>>>,
+    },
 
     Complete(PathBuf, String, TabId),
     CancelCompletion,

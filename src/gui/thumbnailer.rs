@@ -138,7 +138,7 @@ impl Thumbnailer {
         Self {
             pending: pending.into(),
             pool,
-            // TODO[thumbsize] read from surface size
+            // This is updated once the surface is made visible
             size: Cell::new(DesktopThumbnailSize::Normal),
             high,
             medium,

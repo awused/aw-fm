@@ -117,7 +117,6 @@ pub enum Kind {
         prev: Rc<Operation>,
         // These should be processed FILO, just like outcomes from progress.log
         pending_dir_info: RefCell<Vec<(Arc<Path>, FileInfo)>>,
-        // TODO
         // destroy_overwrites: Cell<bool>,
     },
     Trash(Arc<Path>),
@@ -861,8 +860,7 @@ impl Operation {
                     }
                 } else {
                     trace!("Finished deleting {path:?}");
-                    // TODO -- remove this comment once I'm confident in the other silly rename
-                    // handling.
+                    // Backup handling for silly renames. Probably not necessary.
                     //
                     // Just deleted something, if it's on NFS a silly rename could happen.
                     // There's a tiny chance this is wrong but it's unlikely for a deletion to be

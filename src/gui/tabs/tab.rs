@@ -1646,7 +1646,8 @@ impl Tab {
         }
     }
 
-    fn new_paths_for_op<'a>(&self, outcomes: &'a [Outcome]) -> AHashSet<&'a Path> {
+    // TODO -- handle operations inside a dir during search?
+    fn new_paths_for_op(&self, outcomes: &[Outcome]) -> AHashSet<Arc<Path>> {
         let tab_dir = &**self.dir.path();
         outcomes
             .iter()
@@ -1658,7 +1659,7 @@ impl Tab {
                 | Outcome::CreateDestDir(dest)
                 | Outcome::MergeDestDir(dest) => {
                     if Some(tab_dir) == dest.parent() {
-                        return Some(&**dest);
+                        return Some(dest.clone());
                     }
                     None
                 }
@@ -1671,32 +1672,30 @@ impl Tab {
             .collect()
     }
 
-    pub fn scroll_to_completed(&mut self, op: &Rc<operations::Operation>) {
+    pub fn scroll_to_completed(&self, op: &Rc<operations::Operation>) {
         if !self.matches_completed_op(op) {
             return;
         }
 
         let outcomes = op.outcomes();
-        let new_paths = self.new_paths_for_op(&outcomes);
+        let all_paths = self.new_paths_for_op(&outcomes);
 
-        if new_paths.is_empty() {
+        if all_paths.is_empty() {
             return info!("No new paths to scroll to after operation in {:?}", self.id);
         }
 
-        // Look up all file paths. If any are missing, flush notifications or read them.
+        // Look up all file paths. We'll flush updates for all paths, but if any are missing, we
+        // need to also read them from the disk. There should be pretty few of those.
+        //
         // If a path is present in the global map and this tab is loaded, the file will be present
         // in the contents for this tab.
-        // There should be pretty few of these.
-        // TODO -- there may be unflushed updates for matched paths
-        let unmatched_paths: Vec<_> = new_paths
-            .iter()
-            .filter(|p| EntryObject::lookup(p).is_none())
-            .map(|p| p.to_path_buf())
-            .collect();
+        //
+        // There is still a potential race where a pending update for a known file could be
+        // missed. The fix is to also read any files with recent updates, but that seems very
+        // wasteful.
+        let unmatched_paths: AHashSet<_> =
+            all_paths.iter().filter(|p| EntryObject::lookup(p).is_none()).cloned().collect();
 
-        if unmatched_paths.is_empty() {
-            return self.scroll_to_completed_inner(new_paths);
-        }
         drop(outcomes);
 
         info!("Found {} unmatched paths after file operation.", unmatched_paths.len());
@@ -1708,7 +1707,7 @@ impl Tab {
         let ctx = glib::MainContext::ref_thread_default();
         let op = op.clone();
         ctx.spawn_local_with_priority(glib::Priority::DEFAULT_IDLE, async move {
-            if r.await.is_err() {
+            let Ok(all_paths) = r.await else {
                 return;
             };
 
@@ -1721,16 +1720,16 @@ impl Tab {
                     return;
                 }
 
-                let outcomes = op.outcomes();
-                let new_paths = tab.new_paths_for_op(&outcomes);
-                tab.scroll_to_completed_inner(new_paths);
+                tab.scroll_to_completed_inner(all_paths);
             });
         });
 
-        gui_run(|g| g.send_manager(ManagerAction::Flush(unmatched_paths, s)));
+        gui_run(|g| {
+            g.send_manager(ManagerAction::Flush { all_paths, unmatched_paths, finished: s })
+        });
     }
 
-    fn scroll_to_completed_inner(&mut self, mut new_paths: AHashSet<&Path>) {
+    fn scroll_to_completed_inner(&mut self, mut new_paths: AHashSet<Arc<Path>>) {
         let selection = self.visible_selection();
 
         // TODO [incremental] -- if incremental filtering, must disable it now.

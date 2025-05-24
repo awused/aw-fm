@@ -32,11 +32,11 @@ static COMPLETION_POOL: Lazy<ThreadPool> = Lazy::new(|| {
 
 // Priorities:
 // 0 - exact match
-// 1 - starts with the fragment (TODO -- consider smart case here?)
+// 1 - starts with the fragment (consider smart case here??)
 // 2 - first occurence is a word boundary
 //
 // 3 - anywhere else
-// TODO (4+) fuzzy matches?
+// If we allow fuzzy matches or similar at 4+, the SHIFT needs to be increased
 type Candidate = (u64, PathBuf);
 // Later path segments get more significant bits in the final priority
 // Bigger numbers -> lower priority
