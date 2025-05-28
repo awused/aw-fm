@@ -612,8 +612,14 @@ impl TabsList {
 
             debug!("Unloading tab {:?}", t.id());
             unloaded.insert(t.id());
+            // TODO -- If this is a search tab, this can leave search Entries alive and
+            // stale in callbacks that could be revived by new search Snapshots.
+            // Search contents should be dropped synchronously, but that could cause unacceptably
+            // long pauses.
+            // Probably need to do something where we find all the search Entries that are not used
+            // in any flat tabs and purge those.
+            // t.unload_unchecked(purge_search = true)
             t.unload_unchecked();
-            // TODO -- Should be (path, is_search)
             unload_paths.insert(t.dir());
         }
 
@@ -627,9 +633,7 @@ impl TabsList {
                     if t.overlaps(p) {
                         debug!("Unloading tab {:?} that overlaps with {p:?}", t.id());
                         unloaded.insert(t.id());
-                        // TODO -- If this is a search tab, this can leave search Entries alive and
-                        // stale in callbacks. Search contents should be dropped synchronously.
-                        // t.unload_unchecked(purge_search = true)
+                        // TODO -- t.unload_unchecked(purge_search = true)
                         t.unload_unchecked();
 
                         if unload_paths.insert(t.dir()) {

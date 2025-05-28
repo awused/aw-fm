@@ -332,7 +332,9 @@ impl Entry {
 
 #[derive(Debug)]
 pub enum Thumbnail {
-    Nothing,
+    // For now, we do not thumbnail directories.
+    // If we ever add thumbnails to directories, this can be removed.
+    Never,
     Unloaded,
     Loading(DesktopThumbnailSize),
     Loaded(Texture, DesktopThumbnailSize),
@@ -344,7 +346,7 @@ impl Thumbnail {
     fn needs_load(&self, size: DesktopThumbnailSize) -> bool {
         match self {
             Self::Loading(sz) | Self::Loaded(_, sz) | Self::Outdated(_, Some(sz)) => *sz != size,
-            Self::Nothing | Self::Failed => false,
+            Self::Never | Self::Failed => false,
             Self::Unloaded | Self::Outdated(_, None) => true,
         }
     }
@@ -395,7 +397,7 @@ mod internal {
         entry: Entry,
         widgets: WidgetCounter,
         thumbnail: Thumbnail,
-        updated: bool,
+        updated_from_event: bool,
     }
 
     #[derive(Debug, Default)]
@@ -453,22 +455,31 @@ mod internal {
         thread_local! {
             static UNLOAD_LOW: Lazy<bool> = Lazy::new(|| CONFIG.background_thumbnailers < 0);
             static UNLOAD_QUEUE: RefCell<LinkedHashSet<Arc<Path>>> = RefCell::default();
+            static INITIAL_PRIORITY: Lazy<ThumbPriority> = Lazy::new(||
+                if CONFIG.background_thumbnailers >= 0 {
+                    ThumbPriority::Low
+                } else {
+                    ThumbPriority::Generate
+                });
         }
 
         pub(super) fn init(&self, entry: Entry, from_event: bool) -> Option<ThumbPriority> {
             let (thumbnail, p) = match entry.kind {
-                EntryKind::File { .. } => (Thumbnail::Unloaded, Some(ThumbPriority::Low)),
-                EntryKind::Directory { .. } => (Thumbnail::Nothing, None),
+                EntryKind::File { .. } => {
+                    (Thumbnail::Unloaded, Some(Self::INITIAL_PRIORITY.with(|p| **p)))
+                }
+                EntryKind::Directory { .. } => (Thumbnail::Never, None),
                 EntryKind::Uninitialized => unreachable!(),
             };
 
-            // TODO -- other mechanisms to set thumbnails as Nothing, like mimetype or somesuch
+            // TODO -- other mechanisms to set thumbnails as Never, like mimetype or somesuch
+            // Though it'd need an audit of the rest of the code
 
             let wrapped = Wrapper {
                 entry,
                 widgets: WidgetCounter::default(),
                 thumbnail,
-                updated: from_event,
+                updated_from_event: from_event,
             };
             assert!(self.0.replace(Some(wrapped)).is_none());
             p
@@ -485,7 +496,7 @@ mod internal {
                     let wrapped = self.0.borrow();
                     let inner = wrapped.as_ref().unwrap();
                     let new_thumb = match &inner.thumbnail {
-                        Thumbnail::Nothing
+                        Thumbnail::Never
                         | Thumbnail::Unloaded
                         | Thumbnail::Loading(_)
                         | Thumbnail::Failed => Thumbnail::Unloaded,
@@ -496,7 +507,7 @@ mod internal {
 
                     (new_thumb, Some(widgets.priority()))
                 }
-                EntryKind::Directory { .. } => (Thumbnail::Nothing, None),
+                EntryKind::Directory { .. } => (Thumbnail::Never, None),
                 EntryKind::Uninitialized => unreachable!(),
             };
 
@@ -508,7 +519,12 @@ mod internal {
             }
 
 
-            let wrapped = Wrapper { entry, widgets, thumbnail, updated: true };
+            let wrapped = Wrapper {
+                entry,
+                widgets,
+                thumbnail,
+                updated_from_event: true,
+            };
             let old = self.0.replace(Some(wrapped)).unwrap();
             self.obj().emit_by_name::<()>("update", &[]);
 
@@ -529,9 +545,16 @@ mod internal {
                 return false;
             }
 
-            if inner.widgets.priority() == p {
+            if p == ThumbPriority::Generate {
+                // Only generate a thumbnail if nothing has changed since this object was created,
+                // and don't actually move this thumbnail into the Loading state.
+                // The generated thumbnail can still be used to satisfy a later Loading state if
+                // that does change.
+                inner.widgets.priority() == ThumbPriority::Low
+                    && matches!(&inner.thumbnail, Thumbnail::Unloaded)
+            } else if inner.widgets.priority() == p {
                 match &mut inner.thumbnail {
-                    Thumbnail::Nothing
+                    Thumbnail::Never
                     | Thumbnail::Unloaded
                     | Thumbnail::Loading(..)
                     | Thumbnail::Failed => inner.thumbnail = Thumbnail::Loading(size),
@@ -618,7 +641,7 @@ mod internal {
                         Thumbnail::Loading(_) | Thumbnail::Loaded(..) | Thumbnail::Outdated(..) => {
                             Self::start_unload_thumbnail(inner.entry.abs_path.clone())
                         }
-                        Thumbnail::Nothing | Thumbnail::Failed | Thumbnail::Unloaded => {}
+                        Thumbnail::Never | Thumbnail::Failed | Thumbnail::Unloaded => {}
                     }
                     return None;
                 }
@@ -661,12 +684,12 @@ mod internal {
                 return;
             }
 
-            inner.updated = false;
+            inner.updated_from_event = false;
 
             match thumb {
                 Thumbnail::Loaded(_, sz) if *sz != size => {}
                 Thumbnail::Loading(sz) | Thumbnail::Outdated(_, Some(sz)) if *sz == size => {}
-                Thumbnail::Nothing
+                Thumbnail::Never
                 | Thumbnail::Unloaded
                 | Thumbnail::Failed
                 | Thumbnail::Loading(..)
@@ -688,10 +711,10 @@ mod internal {
                 return;
             }
 
-            inner.updated = false;
+            inner.updated_from_event = false;
 
             match thumb {
-                Thumbnail::Nothing | Thumbnail::Unloaded | Thumbnail::Failed => (),
+                Thumbnail::Never | Thumbnail::Unloaded | Thumbnail::Failed => (),
                 Thumbnail::Loading(_) => *thumb = Thumbnail::Failed,
                 Thumbnail::Outdated(..) | Thumbnail::Loaded(..) => {
                     *thumb = Thumbnail::Failed;
@@ -724,7 +747,7 @@ mod internal {
         // wrong size.
         pub fn can_sync_thumbnail(&self) -> bool {
             match self.0.borrow().as_ref().unwrap().thumbnail {
-                Thumbnail::Nothing | Thumbnail::Loaded(..) | Thumbnail::Failed => false,
+                Thumbnail::Never | Thumbnail::Loaded(..) | Thumbnail::Failed => false,
                 Thumbnail::Unloaded | Thumbnail::Loading(_) => true,
                 Thumbnail::Outdated(..) => {
                     // This is a really niche edge case, but really it should be handled.
@@ -733,8 +756,8 @@ mod internal {
             }
         }
 
-        pub fn was_updated(&self) -> bool {
-            self.0.borrow().as_ref().unwrap().updated
+        pub fn was_updated_from_event(&self) -> bool {
+            self.0.borrow().as_ref().unwrap().updated_from_event
         }
     }
 }
@@ -748,6 +771,7 @@ thread_local! {
 }
 
 glib::wrapper! {
+    // This is a terrible name, everything in this file is named poorly.
     pub struct EntryObject(ObjectSubclass<internal::EntryWrapper>);
 }
 
@@ -859,20 +883,23 @@ impl EntryObject {
 
     // mapped is whether the widget was mapped at the time of binding.
     pub fn mark_bound(&self, mapped: bool) {
-        self.queue_thumb(self.imp().change_widgets(1, mapped.into()), self.imp().was_updated());
+        self.queue_thumb(
+            self.imp().change_widgets(1, mapped.into()),
+            self.imp().was_updated_from_event(),
+        );
     }
 
     pub fn mark_unbound(&self, mapped: bool) {
         self.queue_thumb(
             self.imp().change_widgets(-1, -i16::from(mapped)),
-            self.imp().was_updated(),
+            self.imp().was_updated_from_event(),
         );
     }
 
     pub fn mark_mapped_changed(&self, mapped: bool) {
         self.queue_thumb(
             self.imp().change_widgets(0, if mapped { 1 } else { -1 }),
-            self.imp().was_updated(),
+            self.imp().was_updated_from_event(),
         );
     }
 
@@ -886,7 +913,10 @@ impl EntryObject {
                         eo.get().abs_path
                     );
                 }
-                eo.queue_thumb(eo.imp().needs_reload_for_size(size), eo.imp().was_updated());
+                eo.queue_thumb(
+                    eo.imp().needs_reload_for_size(size),
+                    eo.imp().was_updated_from_event(),
+                );
             })
         });
     }

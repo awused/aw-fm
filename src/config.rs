@@ -104,8 +104,9 @@ pub enum NfsPolling {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    #[serde(default)]
-    pub unique: bool,
+    // Renamed from "unique"
+    #[serde(default, alias = "unique")]
+    pub single_window: bool,
 
     #[serde(default, deserialize_with = "empty_string_is_none")]
     pub background_colour: Option<gdk::RGBA>,

@@ -9,20 +9,41 @@
 # Leave empty to use your default GTK theme.
 # background_colour = '#000000be'
 
+# How many concurrent thumbnail processes to allow.
+# There are tradeoffs between how fast thumbnails are generated and how responsive the UI remains.
+# Thumbnailing is done in separate threads but GTK still limits performance.
+#
+# The slower the thumbnail process, the less choppy this is even at higher values. Too high and
+# directories with many cheap thumbnails cause the process to slow down. Too low and expensive
+# thumbnails take forever.
+#
+# Experimentally, 8 is a bit past the acceptable limit in pathologically bad cases like many tiny
+# images, while in directories with many videos up to 16 is beneficial.
+#
+# Max 255 (bad idea), 0 entirely disables thumbnail loading.
+# Recommended: 2-8
+max_thumbnailers = 6
+
 # How many thumbnailers to run in the background.
 # This is used for files that aren't currently visible/near-visible.
 #
-# Max 255, 0 disables background thumbnailing.
-# Negative values cause thumbnails to be unloaded, greatly reducing memory usage.
+# Max 255
+# A value of -1 will still generate low priority thumbnails in the background, but will not keep
+# them loaded.
+# -2 or lower will cause thumbnails to be unloaded without actively generating them.
+#
+# Use 0 to disable all handling of background thumbnails (loading, unloading, generating).
+# Not recommended.
+#
 # No effect if larger than max_thumbnailers.
-# Recommended: 1, 0, or -1
-background_thumbnailers = 1
+# Recommended: -1, 1, or -2
+background_thumbnailers = -1
 
 # Whether to limit aw-fm to a single window or not.
 #
 # If true, only one aw-fm window can be open at a time. Running "aw-fm directory" with an
 # open window will open "directory" in a new tab in the existing window instead of a new window.
-unique = false
+single_window = false
 
 # Whether seeking (tab/shift-tab) wraps around.
 #
@@ -279,25 +300,6 @@ paste_into_search = false
 unload_timeout = 0
 # unload_timeout = 21600 # 6 hours is an appropriate timeout
 
-
-# Thread Settings --------------------------------------------------------------------------------
-
-# How many concurrent thumbnail processes to allow.
-# There are tradeoffs between how fast thumbnails are generated and how responsive the UI remains.
-# Thumbnailing is done in separate threads but GTK still limits performance.
-#
-# The slower the thumbnail process, the less choppy this is even at higher values. Too high and
-# directories with many cheap thumbnails cause the process to slow down. Too low and expensive
-# thumbnails take forever.
-#
-# Experimentally, 8 is a bit past the acceptable limit in pathologically bad cases like many tiny
-# images, while in directories with many videos up to 16 is beneficial.
-#
-# Max 255 (bad idea), 0 entirely disables thumbnail loading.
-# Recommended: 2-8
-max_thumbnailers = 6
-
-
 # Whether or not to force the use of normal 128px thumbnails even at high DPIs.
 #
 # When false, aw-fm will generate and use 256px thumbnails when the DPI scaling is above 1.
@@ -305,7 +307,4 @@ max_thumbnailers = 6
 #
 # No effect if you do not have any high DPI monitors or don't otherwise trigger UI scaling.
 force_small_thumbnails = false
-
-
-# ------------------------------------------------------------------------------------------------
 

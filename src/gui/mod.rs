@@ -84,6 +84,10 @@ fn tabs_run<R, F: FnOnce(&mut TabsList) -> R>(f: F) -> R {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThumbPriority {
+    // Generate but do not load the thumbnail, only set on initial creation
+    // If we skip over it due to some Generate -> Medum/High -> Low path, it doesn't matter, and
+    // it'll be generated when necessary.
+    Generate,
     Low,
     // Bound, but not mapped (visible)
     Medium,
@@ -129,7 +133,7 @@ pub fn run(
     manager_sender: UnboundedSender<ManagerAction>,
     gui_receiver: UnboundedReceiver<GuiAction>,
 ) {
-    let flags = if CONFIG.unique {
+    let flags = if CONFIG.single_window {
         gio::ApplicationFlags::HANDLES_COMMAND_LINE
     } else {
         gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::NON_UNIQUE
@@ -185,7 +189,7 @@ pub fn run(
 
     let _cod = closing::CloseOnDrop::default();
     let ret = application.run();
-    if CONFIG.unique && ret == ExitCode::SUCCESS && GUI.with(|g| g.get().is_none()) {
+    if CONFIG.single_window && ret == ExitCode::SUCCESS && GUI.with(|g| g.get().is_none()) {
         info!("Exiting cleanly since this is not the primary instance.");
         close();
     }

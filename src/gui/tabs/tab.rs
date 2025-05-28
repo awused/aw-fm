@@ -1188,8 +1188,6 @@ impl Tab {
         self.apply_pane_state(true)
     }
 
-    // TODO -- switching away from a tab group is a two-step process
-    // We need to save the state before we start mucking around with visibility
     pub fn start_hide(&mut self) {
         if !self.visible() {
             return warn!("Pane {:?} already hidden", self.id);
@@ -1597,7 +1595,7 @@ impl Tab {
         pane.handle_completion(completed);
     }
 
-    // TODO -- handle operations inside a dir during search? (annoying edge case)
+    // TODO -- handle operations inside a subdir during search? (annoying edge case)
     fn matches_completed_op(&self, op: &operations::Operation) -> bool {
         if !self.loaded() || !self.visible() {
             info!(
@@ -1646,7 +1644,7 @@ impl Tab {
         }
     }
 
-    // TODO -- handle operations inside a dir during search?
+    // TODO -- handle operations inside a subdir during search?
     fn new_paths_for_op(&self, outcomes: &[Outcome]) -> AHashSet<Arc<Path>> {
         let tab_dir = &**self.dir.path();
         outcomes

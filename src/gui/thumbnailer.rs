@@ -27,9 +27,12 @@ type Ongoing = (Arc<AtomicBool>, Arc<Mutex<()>>);
 struct PendingThumbs {
     // Currently visible.
     high_priority: VecDeque<(WeakRef<EntryObject>, bool)>,
-    // Bound but not visible. Uses the same number of threads as low but runs earlier.
+    // Bound but not visible. Uses the same number of threads as low but runs earlier, or uses
+    // min(high, 2) when low priority thumbnails are unloaded.
     med_priority: VecDeque<(WeakRef<EntryObject>, bool)>,
     low_priority: Vec<(WeakRef<EntryObject>, bool)>,
+    // Only used when low priorty thumbails are unloaded, used to ensure thumbnails are generated.
+    generate_only: Vec<(WeakRef<EntryObject>, bool)>,
 
     // Never bother cloning these, it's a waste, just pass them around.
     // It's marginally more efficient (2-3 seconds worth over 100k items) to not clone and drop
@@ -56,6 +59,7 @@ pub struct Thumbnailer {
     high: u16,
     medium: u16,
     low: u16,
+    generate: u16,
 
     sync_factory: Option<Factories>,
 }
@@ -118,6 +122,12 @@ impl Thumbnailer {
     pub fn new() -> Self {
         let high = min(CONFIG.max_thumbnailers as u16, 255);
         let low = min(CONFIG.background_thumbnailers.try_into().unwrap_or_default(), high);
+        let generate = if CONFIG.background_thumbnailers == -1 && high != 0 {
+            // Only ever use one thread for background thumbnailing.
+            1
+        } else {
+            0
+        };
 
         // If low priority tasks are enabled, use those tasks for medium priority thumbnails.
         // Otherwise only use up to 2 tasks, which is more than enough for existing thumbnails.
@@ -143,6 +153,7 @@ impl Thumbnailer {
             high,
             medium,
             low,
+            generate,
             sync_factory,
         }
     }
@@ -153,6 +164,12 @@ impl Thumbnailer {
         }
 
         match p {
+            ThumbPriority::Generate => {
+                if self.generate == 0 {
+                    return;
+                }
+                self.pending.borrow_mut().generate_only.push((weak, from_event));
+            }
             ThumbPriority::Low => {
                 if self.low == 0 {
                     return;
@@ -198,7 +215,7 @@ impl Thumbnailer {
 
     fn finish_thumbnail(job: Job, tex: Texture) {
         let priority = match job.priority {
-            ThumbPriority::Low | ThumbPriority::Medium => Priority::LOW,
+            ThumbPriority::Generate | ThumbPriority::Low | ThumbPriority::Medium => Priority::LOW,
             ThumbPriority::High => Priority::DEFAULT_IDLE,
         };
 
@@ -210,6 +227,8 @@ impl Thumbnailer {
         gtk::glib::idle_add_full(priority, move || {
             let path = path.take().unwrap();
             if let Some(obj) = EntryObject::lookup(&path) {
+                // It's safe to do this even if the priority is Generate, even if it ends up being
+                // wasted.
                 obj.imp().update_thumbnail(tex.take().unwrap(), job.mtime, job.size);
             }
 
@@ -238,7 +257,8 @@ impl Thumbnailer {
         });
     }
 
-    // Only happens when a later queued thumbnail has superseded this one
+    // Only happens when a later queued thumbnail has superseded this one or we were asked to only
+    // generate a thumbnail and it already exists.
     fn abandon_thumbnail(job: Job) {
         let mut factory = Some(job.factory);
         let mut path = Some(job.path);
@@ -268,7 +288,8 @@ impl Thumbnailer {
                 }
             }
 
-            if self.high - pending.factories.len() as u16 >= self.medium {
+            let currently_processing = self.high - pending.factories.len() as u16;
+            if currently_processing >= self.medium {
                 break 'find_job None;
             }
 
@@ -280,7 +301,7 @@ impl Thumbnailer {
                 }
             }
 
-            if self.high - pending.factories.len() as u16 >= self.low {
+            if currently_processing >= self.low && currently_processing >= self.generate {
                 break 'find_job None;
             }
 
@@ -288,6 +309,14 @@ impl Thumbnailer {
                 if let Some(strong) = weak.upgrade() {
                     if strong.imp().mark_thumbnail_loading(ThumbPriority::Low, size) {
                         break 'find_job Some((strong, ThumbPriority::Low, from_event));
+                    }
+                }
+            }
+
+            while let Some((weak, from_event)) = pending.generate_only.pop() {
+                if let Some(strong) = weak.upgrade() {
+                    if strong.imp().mark_thumbnail_loading(ThumbPriority::Generate, size) {
+                        break 'find_job Some((strong, ThumbPriority::Generate, from_event));
                     }
                 }
             }
@@ -308,7 +337,10 @@ impl Thumbnailer {
 
         if pending.processed > 32 {
             // Don't spam this if it's only for only a few updates.
-            debug!("Finished loading all thumbnails (none pending).");
+            debug!(
+                "Finished loading all thumbnails ({} processed, none pending).",
+                pending.processed
+            );
         }
 
         assert!(pending.ongoing.is_empty());
@@ -316,6 +348,11 @@ impl Thumbnailer {
         pending.high_priority.shrink_to_fit();
         pending.med_priority.shrink_to_fit();
         pending.low_priority.shrink_to_fit();
+        pending.generate_only.shrink_to_fit();
+        debug_assert!(pending.high_priority.is_empty());
+        debug_assert!(pending.med_priority.is_empty());
+        debug_assert!(pending.low_priority.is_empty());
+        debug_assert!(pending.generate_only.is_empty());
 
         None
     }
@@ -349,6 +386,12 @@ impl Thumbnailer {
             // Also can't trust mtime to make sense according to wall time or UTC time.
             if !job.from_event {
                 if let Some(existing) = job.lookup(&uri) {
+                    if job.priority == ThumbPriority::Generate {
+                        // Thumbnail already exists, do not waste effort loading it
+                        drop(guard);
+                        return Self::abandon_thumbnail(job);
+                    }
+
                     let gfile = gtk::gio::File::for_path(existing);
                     match Texture::from_file(&gfile) {
                         Ok(tex) => {
