@@ -783,7 +783,8 @@ impl EntryObject {
         ALL_ENTRY_OBJECTS.take();
     }
 
-    pub fn trigger_pending_unloads() {
+    pub fn idle_trim() {
+        ALL_ENTRY_OBJECTS.with_borrow_mut(|m| m.shrink_to_fit());
         internal::EntryWrapper::purge_unload_queue();
     }
 

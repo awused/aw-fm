@@ -123,7 +123,7 @@ impl Gui {
                 debug!("Performing idle trim");
                 gui.trim_timeout.take();
 
-                EntryObject::trigger_pending_unloads();
+                EntryObject::idle_trim();
 
                 // Wait a bit for everything to be dropped. 5 seconds is way too much, but
                 // it can't really hurt anything.
