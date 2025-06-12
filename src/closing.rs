@@ -1,13 +1,13 @@
 use std::env::temp_dir;
 use std::io::Write;
 use std::marker::PhantomData;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{process, thread};
 
-use async_channel::{bounded, Receiver, Sender};
+use async_channel::{Receiver, Sender, bounded};
 use once_cell::sync::{Lazy, OnceCell};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -100,8 +100,8 @@ pub fn init(gui_sender: UnboundedSender<GuiAction>) {
         use std::os::raw::c_int;
 
         use signal_hook::consts::TERM_SIGNALS;
-        use signal_hook::iterator::exfiltrator::SignalOnly;
         use signal_hook::iterator::SignalsInfo;
+        use signal_hook::iterator::exfiltrator::SignalOnly;
 
         let _cod = CloseOnDrop::default();
 

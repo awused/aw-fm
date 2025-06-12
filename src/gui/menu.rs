@@ -21,7 +21,7 @@ use regex::bytes::Regex;
 
 use super::{ActionTarget, Gui, TabId};
 use crate::com::{DirSettings, Entry, EntryObject, ManagerAction};
-use crate::config::{ContextMenuEntry, ContextMenuGroup, Selection, ACTIONS_DIR, CONFIG};
+use crate::config::{ACTIONS_DIR, CONFIG, ContextMenuEntry, ContextMenuGroup, Selection};
 use crate::gui::clipboard;
 
 
@@ -736,7 +736,6 @@ impl GuiMenu {
         self.menu.clone()
     }
 
-    // TODO -- should this only trigger when the target tab stops being visible?
     pub fn handle_active_change(&self, active: Option<TabId>) {
         if !self.menu.is_visible() {
             return;

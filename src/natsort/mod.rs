@@ -159,16 +159,6 @@ impl Deref for NatKey {
 }
 
 impl NatKey {
-    pub fn empty() -> Self {
-        NatKeyBuilder {
-            original: Box::default(),
-            lowercase_builder: |_s| Cow::default(),
-            segs_builder: |_s| Vec::new(),
-            normalized_builder: |_s| Cow::default(),
-        }
-        .build()
-    }
-
     pub fn normalized(&self) -> &str {
         self.borrow_normalized()
     }

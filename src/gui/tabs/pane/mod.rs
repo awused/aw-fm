@@ -8,7 +8,7 @@ use std::time::Instant;
 use ahash::AHashMap;
 use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
 use gtk::gio::Icon;
-use gtk::glib::{self, Priority, Propagation, WeakRef};
+use gtk::glib::{self, Propagation, WeakRef};
 use gtk::graphene::Point;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -171,6 +171,10 @@ pub(super) struct Pane {
 
     completion_controllers: Vec<ControllerDisconnector>,
     completion_result: DebugIgnore<Rc<Cell<Option<CompletionResult>>>>,
+
+    // For storing the pane state while we're in the process of applying it.
+    // To guard against the user navigating away while we're applying the state.
+    workaround_temp_state: Option<PaneState>,
 }
 
 impl Drop for Pane {
@@ -258,6 +262,8 @@ impl Pane {
 
             completion_controllers: Vec::new(),
             completion_result: DebugIgnore::default(),
+
+            workaround_temp_state: None,
         }
     }
 
@@ -665,6 +671,11 @@ impl Pane {
     }
 
     pub fn get_state(&self, list: &Contents) -> PaneState {
+        if let Some(state) = self.workaround_temp_state.as_ref() {
+            info!("get_state called for Pane {:?} during pane state application delay", self.tab);
+            return state.clone();
+        }
+
         let sel = list.selection.selection();
         let focus = self.view.focus_child().map(|(_child, eo)| {
             // If exactly one item is selected, and it's the focused one, keep it focused.
@@ -699,7 +710,7 @@ impl Pane {
 
         let mut scroll_flags = ListScrollFlags::empty();
 
-        let focus = state.focus.and_then(|fs| {
+        let focus = state.focus.as_ref().and_then(|fs| {
             let eo = EntryObject::lookup(&fs.path)?;
 
             if state.scroll.as_ref().is_some_and(|scroll| scroll.path == fs.path) {
@@ -726,8 +737,10 @@ impl Pane {
 
         let pos = state
             .scroll
+            .as_ref()
             .and_then(|sp| {
-                precise = sp.precise.filter(|precise| precise.count == list.size());
+                precise =
+                    sp.precise.as_ref().filter(|precise| precise.count == list.size()).cloned();
 
                 if let Some(eo) = EntryObject::lookup(&sp.path) {
                     let pos = list.filtered_position_by_sorted(&eo.get());
@@ -753,10 +766,12 @@ impl Pane {
             self.element.imp().scroller.child().unwrap().set_opacity(0.0);
         }
 
-        let mut once = Some(move || {
+        self.workaround_temp_state = Some(state);
+
+        glib::idle_add_local_once(move || {
             warn!("Working around buggy GTK scrolling by adding a delay");
             tabs_run(|list| {
-                let Some(p) = list.find(id).and_then(Tab::workaround_scroll_to) else {
+                let Some(p) = list.find_mut(id).and_then(Tab::workaround_scroll_to) else {
                     return;
                 };
 
@@ -776,12 +791,8 @@ impl Pane {
                 }
 
                 p.element.imp().scroller.child().unwrap().set_opacity(1.0);
+                p.workaround_temp_state = None;
             });
-        });
-
-        glib::idle_add_local_full(Priority::DEFAULT_IDLE, move || {
-            once.take().unwrap()();
-            glib::ControlFlow::Break
         });
 
         // match &self.view {

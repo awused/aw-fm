@@ -99,7 +99,7 @@ impl TabPane {
         }
     }
 
-    fn get_visible_mut(&mut self) -> Option<&mut Pane> {
+    const fn get_visible_mut(&mut self) -> Option<&mut Pane> {
         match self {
             Self::Displayed(p) | Self::Loading(p, _) => Some(p),
             Self::Detached { .. } => None,
@@ -1836,8 +1836,8 @@ impl Tab {
         self.pane.workaround_enable_rubberband();
     }
 
-    pub const fn workaround_scroll_to(&self) -> Option<&Pane> {
-        self.pane.get_visible()
+    pub const fn workaround_scroll_to(&mut self) -> Option<&mut Pane> {
+        self.pane.get_visible_mut()
     }
 }
 
