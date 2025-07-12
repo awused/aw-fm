@@ -158,30 +158,29 @@ bookmarks = [
 # Sub-menus and sections can be specified by name.
 # All commands sharing the same named sub-menu or section will be grouped together in order.
 #
-# For selection the allowed options are: any/zero/maybe_one/one/at_least_one/multiple
-# 'any' will impose no requirements.
-# 'zero' will require that no items are selected.
-# 'maybe_one' will allow one or zero items to be selected.
-# 'one' will require exactly one item to be selected.
-# 'at_least_one' will require one or more items to be selected.
-# 'multiple' will require at least two items to be selected.
+# For selection the allowed options are:
+## 'any' will impose no requirements, and is the default.
+## 'exactly_n' will require exactly n items selected (example: exactly_5 is exactly 5)
+## 'at_least_n' will require at most n items (count >= n)
+## 'at_most_n' will require at most n items, including zero (count <= n)
+## 'n_to_m' will require at least n items and at most m (n <= count <= m)
 #
 # For more control over when actions appear, use custom action scripts which allow for
 # fine-grained filtering on mimetypes or paths.
 #
 # Example:
 # {name = "Do Something", action = "Execute /path/to/do-something.sh"},
-# {name = "Sample Script", action = "Script /path/to/sample-script.sh"},
+# {name = "Sample Script", action = "Script /path/to/sample-script.sh", selection="2_to_3"},
 context_menu = [
-  {name = "Open", action = "OpenDefault", selection = "at_least_one"},
-  {name = "Open With", action = "OpenWith", selection = "at_least_one"},
+  {name = "Open", action = "OpenDefault", selection = "at_least_1"},
+  {name = "Open With", action = "OpenWith", selection = "at_least_1"},
 
-  {name = "Cut", action = "Cut", selection = "at_least_one" },
-  {name = "Copy", action = "Copy", selection = "at_least_one" },
+  {name = "Cut", action = "Cut", selection = "at_least_1" },
+  {name = "Copy", action = "Copy", selection = "at_least_1" },
   # Paste has special handling, if selection is not present it is enabled
   # based on the contents of the clipboard.
   {name = "Paste", action = "Paste" },
-  {name = "Rename", action = "Rename", selection = "one" },
+  {name = "Rename", action = "Rename", selection = "exactly_1" },
 
   {name = "Icons", submenu = "Display", action = "Display icons"},
   {name = "Columns", submenu = "Display", action = "Display columns"},
@@ -193,7 +192,7 @@ context_menu = [
   {name = "Ascending", submenu = "Sort", action = "SortDir ascending"},
   {name = "Descending", submenu = "Sort", action = "SortDir descending"},
 
-  {name = "Properties", action = "Properties", selection = "at_least_one"},
+  {name = "Properties", action = "Properties", selection = "at_least_1"},
 ]
 
 # Additional actions for mouse buttons in the file list

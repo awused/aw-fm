@@ -62,6 +62,7 @@ pub struct PendingUpdates {
     expiry: Instant,
     state: State,
     sources: Sources,
+    // The only two categories we care about are any kind of update or a removal.
     removal: bool,
 }
 

@@ -59,17 +59,22 @@
 ## Whether this can run on multiple files or not.
 ## This includes directories.
 ## Only runs if all files pass the above filters.
-## If "any", "zero", or "maybe_one" are specified and no items are selected, the current directory
-## will need to pass the above regex and 'directories' must be set to true. The script will be
-## called with an empty "AWFM_SELECTION" variable.
+## If "any", "at_most_n", or "exactly_0" are specified and no items are selected, the current
+## directory will need to pass the above regex and 'directories' must be set
+## to true. The script will be called with an empty "AWFM_SELECTION" variable.
 ##
-## any/zero/maybe_one/one/at_least_one/multiple
-## 'any' will impose no requirements.
-## 'zero' will require that no items are selected.
-## 'maybe_one' will allow one or zero items to be selected.
-## 'one' will require exactly one item to be selected.
-## 'at_least_one' will require one or more items to be selected.
-## 'multiple' will require at least two matching items to be selected.
+## 'any' will impose no requirements, and is the default.
+## 'exactly_n' will require exactly n items (example: exactly_5 is exactly 5)
+## 'at_least_n' will require at most n items (count >= n)
+## 'at_most_n' will require at most n items, including zero (count <= n)
+## 'n_to_m' will require at least n items and at most m (n <= count <= m)
+##
+## There are some legacy names that are still supported:
+## 'zero' -> 'exactly_0'
+## 'one' -> 'exactly_1'
+## 'at_least_one' -> 'at_least_1'
+## 'multiple' -> 'at_least_2'
+## 'maybe_one' -> 'at_most_1'
 #
 # selection=any
 #
@@ -96,7 +101,7 @@
 #**aw-fm-settings-begin**
 # name=Directories
 # files=false
-# selection=maybe_one
+# selection=at_most_1
 # parse_output=true
 #**aw-fm-settings-end**
 
@@ -116,7 +121,7 @@
 # directories=false
 # mimetypes=video/;image/png
 # extensions=abc;abcd
-# selection=multiple
+# selection=at_least_2
 #**aw-fm-settings-end**
 
 # A script that can run on anything inside a user's Downloads folder.

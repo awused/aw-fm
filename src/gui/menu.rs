@@ -7,7 +7,6 @@ use std::io::Read;
 use std::os::unix::prelude::{OsStrExt, PermissionsExt};
 use std::path::Path;
 use std::rc::Rc;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -227,7 +226,7 @@ impl ActionSettings {
                     regex = Some(re);
                 }
                 "selection" => {
-                    selection = Selection::from_str(rest)
+                    selection = Selection::try_from(rest)
                         .map_err(|_e| error!("Invalid settings block in {path:?}: got \"{line}\""))
                         .ok()?
                 }
@@ -281,11 +280,10 @@ impl ActionSettings {
     const fn rejects_count(&self, count: usize) -> bool {
         match self.selection {
             Selection::Any => false,
-            Selection::Zero => count != 0,
-            Selection::MaybeOne => count > 1,
-            Selection::One => count != 1,
-            Selection::AtLeastOne => count == 0,
-            Selection::Multiple => count < 2,
+            Selection::AtLeast(n) => count < n,
+            Selection::AtMost(n) => count > n,
+            Selection::NToM(n, m) => count < n || count > m,
+            Selection::Exactly(n) => count != n,
         }
     }
 
@@ -535,6 +533,8 @@ impl GuiMenu {
             }
         };
 
+        // For now this doesn't seem to be worth parallelizing and dealing with !Send GTK types.
+        // ~1.5ms total with cold caches and a reasonable number of actions
         let mut actions: Vec<_> = iter
             .filter_map(|r| match r {
                 Ok(de) => {

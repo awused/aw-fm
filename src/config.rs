@@ -10,7 +10,6 @@ use dirs::config_dir;
 use gtk::gdk;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Deserializer, de};
-use strum_macros::{AsRefStr, EnumString};
 
 
 #[derive(Debug, Parser)]
@@ -80,17 +79,64 @@ pub enum FileCollision {
     Skip,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, EnumString, AsRefStr, Deserialize)]
-#[strum(serialize_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
 pub enum Selection {
     #[default]
     Any,
-    Zero,
-    MaybeOne,
-    One,
-    AtLeastOne,
-    Multiple,
+    AtLeast(usize),
+    AtMost(usize),
+    NToM(usize, usize),
+    Exactly(usize),
+}
+
+impl TryFrom<&str> for Selection {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        'block: {
+            return Ok(match value {
+                "any" => Self::AtLeast(0),
+                // These names are functionally legacy now, but "any" can stay
+                "zero" => Self::Exactly(0),
+                "maybe_one" => Self::AtMost(1),
+                "one" => Self::Exactly(1),
+                "at_least_one" => Self::AtLeast(1),
+                "multiple" => Self::AtLeast(2),
+                _ => break 'block,
+            });
+        }
+
+        let split: Vec<_> = value.splitn(3, '_').collect();
+        let error = || format!("Unable to parse selection: {value}");
+
+        let (variant, num): (fn(_) -> _, _) = match &split[..] {
+            ["at", "least", n] => (Self::AtLeast, n),
+            ["at", "most", n] => (Self::AtMost, n),
+            ["exactly", n] => (Self::Exactly, n),
+            [n, "to", m] => {
+                let n = n.parse().map_err(|_| error())?;
+                let m = m.parse().map_err(|_| error())?;
+                if n > m {
+                    return Err(format!("Invalid selection specified: {value}, {n} > {m}"));
+                }
+                return Ok(Self::NToM(n, m));
+            }
+            _ => return Err(error()),
+        };
+
+        let num = num.parse().map_err(|_| error())?;
+
+        Ok(variant(num))
+    }
+}
+
+impl TryFrom<String> for Selection {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(&*value)
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]

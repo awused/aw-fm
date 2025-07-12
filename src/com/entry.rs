@@ -466,7 +466,13 @@ mod internal {
         pub(super) fn init(&self, entry: Entry, from_event: bool) -> Option<ThumbPriority> {
             let (thumbnail, p) = match entry.kind {
                 EntryKind::File { .. } => {
-                    (Thumbnail::Unloaded, Some(Self::INITIAL_PRIORITY.with(|p| **p)))
+                    let p = if from_event {
+                        // Use Low if it came from an event to avoid slowing down everything.
+                        ThumbPriority::Low
+                    } else {
+                        Self::INITIAL_PRIORITY.with(|p| **p)
+                    };
+                    (Thumbnail::Unloaded, Some(p))
                 }
                 EntryKind::Directory { .. } => (Thumbnail::Never, None),
                 EntryKind::Uninitialized => unreachable!(),
