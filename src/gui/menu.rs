@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::hash_map;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -474,9 +474,12 @@ pub(super) struct GuiMenu {
     // Special handling
     paste: SimpleAction,
 
-    menu: PopoverMenu,
-    custom: Vec<CustomAction>,
-    custom_context: Vec<CustomAction>,
+    action_group: SimpleActionGroup,
+
+    menu: Menu,
+    popover: PopoverMenu,
+    custom: RefCell<Vec<CustomAction>>,
+    custom_context: RefCell<Vec<CustomAction>>,
     action_target: Cell<ActionTarget>,
 }
 
@@ -507,24 +510,57 @@ impl GuiMenu {
 
         gui.window.insert_action_group("context-menu", Some(&action_group));
 
-        let custom = Self::parse_custom_actions(gui, &action_group);
+        let menu = Menu::new();
+        let popover = PopoverMenu::from_model_full(&menu, gtk::PopoverMenuFlags::NESTED);
+        popover.set_has_arrow(false);
+        popover.set_position(PositionType::Right);
+        popover.set_valign(gtk::Align::Start);
+        popover.set_parent(&gui.window);
 
-        let (custom_context, menu) = Self::rebuild_menu(gui, &custom, &action_group);
+        // When this dies, return focus to where it was before, or just anything.
+        // TODO -- do a better hack
+        if let Some(fc) = gui.window.focus() {
+            let g = gui.clone();
+            popover.connect_closed(move |_| {
+                // Hack around GTK PopoverMenus taking focus to the grave with them.
+                g.window.set_focus(Some(&fc));
+            });
+        }
 
-        Self {
+        let s = Self {
             display,
             sort_mode,
             sort_dir,
             paste,
 
+            action_group,
+
             menu,
-            custom,
-            custom_context,
+            popover,
+            custom: RefCell::default(),
+            custom_context: RefCell::default(),
             action_target: Cell::new(ActionTarget::Active),
-        }
+        };
+
+        s.rebuild_menu(gui);
+
+        s
     }
 
-    fn parse_custom_actions(g: &Rc<Gui>, group: &SimpleActionGroup) -> Vec<CustomAction> {
+    pub(super) fn rebuild_menu(&self, gui: &Rc<Gui>) {
+        if self.popover.is_visible() {
+            self.popover.popdown();
+        }
+        self.menu.remove_all();
+
+        let custom = self.parse_custom_actions(gui);
+
+        self.build_menu(gui, &custom);
+
+        self.custom.replace(custom);
+    }
+
+    fn parse_custom_actions(&self, g: &Rc<Gui>) -> Vec<CustomAction> {
         let iter = match ACTIONS_DIR.read_dir() {
             Ok(rd) => rd,
             Err(e) => {
@@ -547,28 +583,22 @@ impl GuiMenu {
                 }
             })
             .enumerate()
-            .filter_map(|(n, f)| CustomAction::create_script(f.into(), g, group, n))
+            .filter_map(|(n, f)| CustomAction::create_script(f.into(), g, &self.action_group, n))
             .collect();
 
         actions.sort();
         actions
     }
 
-    fn rebuild_menu(
-        gui: &Rc<Gui>,
-        actions: &[CustomAction],
-        group: &SimpleActionGroup,
-    ) -> (Vec<CustomAction>, PopoverMenu) {
+    fn build_menu(&self, gui: &Rc<Gui>, actions: &[CustomAction]) {
         let mut custom = actions.iter().fuse().peekable();
-
-        let menu = Menu::new();
 
         while let Some(peeked) = custom.peek() {
             if peeked.settings.priority >= 0 {
                 break;
             }
 
-            menu.append_item(&custom.next().unwrap().menuitem())
+            self.menu.append_item(&custom.next().unwrap().menuitem())
         }
 
         let mut submenus = AHashMap::new();
@@ -577,8 +607,13 @@ impl GuiMenu {
 
         for c_entry in &CONFIG.context_menu {
             let menuitem = if c_entry.selection != Selection::Any {
-                let action =
-                    CustomAction::create_action(c_entry, gui, group, filterable_entries.len());
+                // TODO -- recreating these is wasteful
+                let action = CustomAction::create_action(
+                    c_entry,
+                    gui,
+                    &self.action_group,
+                    filterable_entries.len(),
+                );
                 let menuitem = action.menuitem();
 
                 filterable_entries.push(action);
@@ -606,7 +641,7 @@ impl GuiMenu {
                     hash_map::Entry::Occupied(e) => e.into_mut(),
                     hash_map::Entry::Vacant(e) => {
                         let submenu = Menu::new();
-                        menu.append_submenu(Some(sm), &submenu);
+                        self.menu.append_submenu(Some(sm), &submenu);
                         e.insert(submenu)
                     }
                 },
@@ -614,37 +649,22 @@ impl GuiMenu {
                     hash_map::Entry::Occupied(e) => e.into_mut(),
                     hash_map::Entry::Vacant(e) => {
                         let section = Menu::new();
-                        menu.append_section(Some(sc), &section);
+                        self.menu.append_section(Some(sc), &section);
                         e.insert(section)
                     }
                 },
-                None => &menu,
+                None => &self.menu,
             };
 
             menu.append_item(&menuitem);
         }
 
         for a in custom {
-            menu.append_item(&a.menuitem());
+            self.menu.append_item(&a.menuitem());
         }
 
 
-        let menu = PopoverMenu::from_model_full(&menu, gtk::PopoverMenuFlags::NESTED);
-        menu.set_has_arrow(false);
-        menu.set_position(PositionType::Right);
-        menu.set_valign(gtk::Align::Start);
-        menu.set_parent(&gui.window);
-
-        // When this dies, return focus to where it was before.
-        if let Some(fc) = gui.window.focus() {
-            let g = gui.clone();
-            menu.connect_closed(move |_| {
-                // Hack around GTK PopoverMenus taking focus to the grave with them.
-                g.window.set_focus(Some(&fc));
-            });
-        }
-
-        (filterable_entries, menu)
+        self.custom_context.replace(filterable_entries);
     }
 
     pub fn prepare(
@@ -663,7 +683,7 @@ impl GuiMenu {
         self.sort_dir.change_state(&settings.sort.direction.as_ref().to_variant());
         self.paste.set_enabled(clipboard::contains_mimetype(g.window.display()));
 
-        for cme in &self.custom_context {
+        for cme in &*self.custom_context.borrow() {
             if cme.settings.rejects_count(entries.len()) {
                 trace!("Disabled context menu entry {} due to count", cme.display_name());
                 cme.action.set_enabled(false);
@@ -672,8 +692,8 @@ impl GuiMenu {
             }
         }
 
-        let mut custom: Vec<_> = self
-            .custom
+        let custom_borrow = self.custom.borrow();
+        let mut custom: Vec<_> = custom_borrow
             .iter()
             .filter(|ca| {
                 if ca.settings.rejects_count(entries.len()) {
@@ -700,7 +720,7 @@ impl GuiMenu {
                     ca.action.set_enabled(false)
                 }
             }
-            return self.menu.clone();
+            return self.popover.clone();
         }
 
         for eo in entries {
@@ -733,21 +753,21 @@ impl GuiMenu {
         }
 
         trace!("Finished filtering custom actions in {:?}", start.elapsed());
-        self.menu.clone()
+        self.popover.clone()
     }
 
     pub fn handle_active_change(&self, active: Option<TabId>) {
-        if !self.menu.is_visible() {
+        if !self.popover.is_visible() {
             return;
         }
 
         let ActionTarget::Tab(target) = self.action_target.get() else {
-            return self.menu.popdown();
+            return self.popover.popdown();
         };
 
         if Some(target) != active {
             debug!("Automatically closing context menu after active tab changed");
-            self.menu.popdown();
+            self.popover.popdown();
         }
     }
 }

@@ -214,6 +214,10 @@ specify them.
   * Changes the target for later commands from whatever the active tab was when
     the script was called to whatever the active tab is currently.
   * Only useful in the context of custom actions or `Script` calls.
+* `ReloadActions`
+  * Reloads and re-parses custom actions from the configured directory.
+  * This is not needed for every update to custom actions, it's only necessary
+    when custom actions are added, removed, or their settings are changed.
 
 ### External Executable Environment
 

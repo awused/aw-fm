@@ -575,6 +575,7 @@ impl Gui {
 
             "Refresh" => return tabs.refresh(target),
             "RefreshAll" => return tabs.refresh_all(),
+            "ReloadActions" => return self.menu.get().unwrap().rebuild_menu(self),
 
             "CloseTab" => return tabs.close_tab(target),
             "ClosePane" => return tabs.close_pane(target),
