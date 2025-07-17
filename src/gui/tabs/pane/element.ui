@@ -1,96 +1,102 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
-  <template class="Pane" parent="GtkBox">
-    <property name="orientation">vertical</property>
-    <property name="spacing">0</property>
+  <template class="Pane" parent="GtkWidget">
     <property name="hexpand">true</property>
     <property name="vexpand">true</property>
 
     <child>
-      <object class="GtkEntry" id="text_entry">
-        <style>
-          <class name="location-bar"/>
-        </style>
-
-      </object>
-    </child>
-
-    <child>
-      <object class="GtkScrolledWindow" id="scroller">
-        <property name="hscrollbar_policy">never</property>
-        <property name="overlay_scrolling">false</property>
-
-        <style>
-          <class name="pane-contents"/>
-        </style>
-
-      </object>
-    </child>
-
-    <child>
-      <object class="GtkBox">
-        <property name="orientation">horizontal</property>
+      <object class="GtkBox" id="inner_box">
+        <property name="orientation">vertical</property>
         <property name="spacing">0</property>
-
-        <style>
-          <class name="bottom-bar"/>
-        </style>
+        <property name="hexpand">true</property>
+        <property name="vexpand">true</property>
 
         <child>
-          <object class="GtkStack" id="stack">
+          <object class="GtkEntry" id="text_entry">
+            <style>
+              <class name="location-bar"/>
+            </style>
+
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkScrolledWindow" id="scroller">
+            <property name="hscrollbar_policy">never</property>
+            <property name="overlay_scrolling">false</property>
+
+            <style>
+              <class name="pane-contents"/>
+            </style>
+
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">0</property>
+
+            <style>
+              <class name="bottom-bar"/>
+            </style>
 
             <child>
-              <object class="GtkStackPage">
-                <property name="name">count</property>
-                <property name="child">
-                  <object class="GtkLabel" id="count">
-                    <property name="xalign">0</property>
-                  </object>
-                </property>
-              </object>
-            </child>
+              <object class="GtkStack" id="stack">
 
-            <child>
-              <object class="GtkStackPage">
-                <property name="name">selection</property>
-                <property name="child">
-                  <object class="GtkLabel" id="selection">
-                    <property name="xalign">0</property>
-                    <property name="ellipsize">PANGO_ELLIPSIZE_MIDDLE</property>
+                <child>
+                  <object class="GtkStackPage">
+                    <property name="name">count</property>
+                    <property name="child">
+                      <object class="GtkLabel" id="count">
+                        <property name="xalign">0</property>
+                      </object>
+                    </property>
                   </object>
-                </property>
-              </object>
-            </child>
+                </child>
 
-            <child>
-              <object class="GtkStackPage">
-                <property name="name">seek</property>
-                <property name="child">
-                  <object class="GtkLabel" id="seek">
-                    <property name="xalign">0</property>
+                <child>
+                  <object class="GtkStackPage">
+                    <property name="name">selection</property>
+                    <property name="child">
+                      <object class="GtkLabel" id="selection">
+                        <property name="xalign">0</property>
+                        <property name="ellipsize">PANGO_ELLIPSIZE_MIDDLE</property>
+                      </object>
+                    </property>
                   </object>
-                </property>
-              </object>
-            </child>
+                </child>
 
-            <child>
-              <object class="GtkStackPage">
-                <property name="name">clipboard</property>
-                <property name="child">
-                  <object class="GtkLabel" id="clipboard">
-                    <property name="xalign">0</property>
-                    <property name="ellipsize">PANGO_ELLIPSIZE_MIDDLE</property>
+                <child>
+                  <object class="GtkStackPage">
+                    <property name="name">seek</property>
+                    <property name="child">
+                      <object class="GtkLabel" id="seek">
+                        <property name="xalign">0</property>
+                      </object>
+                    </property>
                   </object>
-                </property>
+                </child>
+
+                <child>
+                  <object class="GtkStackPage">
+                    <property name="name">clipboard</property>
+                    <property name="child">
+                      <object class="GtkLabel" id="clipboard">
+                        <property name="xalign">0</property>
+                        <property name="ellipsize">PANGO_ELLIPSIZE_MIDDLE</property>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+
               </object>
             </child>
 
           </object>
         </child>
-
       </object>
     </child>
   </template>
 </interface>
-
 

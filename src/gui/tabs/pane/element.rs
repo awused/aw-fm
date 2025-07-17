@@ -20,7 +20,7 @@ use crate::gui::{Selected, gui_run, tabs_run};
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
-        @extends gtk::Widget, gtk::Box;
+        @extends gtk::Widget;
 }
 
 #[derive(AsRefStr, EnumString, Eq, PartialEq)]
@@ -162,7 +162,12 @@ impl PaneElement {
         let seek_controller = gtk::EventControllerKey::new();
         seek_controller.set_propagation_phase(PropagationPhase::Capture);
         seek_controller.connect_key_pressed(move |kc, key, _, mods| {
-            let pane = kc.widget().and_then(|w| w.parent()).and_downcast::<Self>().unwrap();
+            let pane = kc
+                .widget()
+                .and_then(|w| w.parent())
+                .and_then(|w| w.parent())
+                .and_downcast::<Self>()
+                .unwrap();
             pane.handle_seek(key, mods)
         });
         self.imp().scroller.add_controller(seek_controller);
@@ -387,14 +392,20 @@ impl PaneElement {
         });
         Propagation::Stop
     }
+
+    pub(super) fn last_allocated_width(&self) -> u32 {
+        self.imp().last_width.get()
+    }
 }
 
 mod imp {
     use std::cell::{Cell, RefCell};
 
     use gtk::glib::SourceId;
+    use gtk::glib::object::CastNone;
+    use gtk::prelude::WidgetExt;
     use gtk::subclass::prelude::*;
-    use gtk::{CompositeTemplate, glib};
+    use gtk::{CompositeTemplate, GridView, Orientation, glib};
     use once_cell::unsync::OnceCell;
 
     use crate::gui::tabs::id::TabId;
@@ -402,6 +413,9 @@ mod imp {
     #[derive(Default, CompositeTemplate)]
     #[template(file = "element.ui")]
     pub struct Pane {
+        #[template_child]
+        pub inner_box: TemplateChild<gtk::Box>,
+
         #[template_child]
         pub text_entry: TemplateChild<gtk::Entry>,
 
@@ -427,11 +441,12 @@ mod imp {
         pub original_text: RefCell<String>,
         pub tab: OnceCell<TabId>,
         pub selection_text_update: Cell<Option<SourceId>>,
+        pub(super) last_width: Cell<u32>,
     }
 
     #[glib::object_subclass]
     impl ObjectSubclass for Pane {
-        type ParentType = gtk::Box;
+        type ParentType = gtk::Widget;
         type Type = super::PaneElement;
 
         const NAME: &'static str = "Pane";
@@ -451,8 +466,31 @@ mod imp {
         }
     }
 
-    impl BoxImpl for Pane {}
-    impl WidgetImpl for Pane {}
+    impl WidgetImpl for Pane {
+        fn measure(&self, orientation: Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            self.inner_box.measure(orientation, for_size)
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            self.parent_size_allocate(width, height, baseline);
+            self.inner_box.allocate(width, height, baseline, None);
+            if width > 0 && self.last_width.get() != width as u32 {
+                self.last_width.set(width as u32);
+
+                if let Some(grid) = self.scroller.child().and_downcast::<GridView>() {
+                    // Yes I hate gtk
+                    let columns = ((width as f32 / 250f32).round() as u32).clamp(1, 32);
+                    if grid.max_columns() != columns {
+                        debug!(
+                            "Updating maximum grid columns to {columns} in {:?}",
+                            self.tab.get().unwrap()
+                        );
+                        grid.set_max_columns(columns);
+                    }
+                }
+            }
+        }
+    }
 
     impl Pane {}
 }

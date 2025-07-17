@@ -71,7 +71,7 @@ impl Manager {
         let nfs = unsafe {
             let mut statfs: libc::statfs = std::mem::zeroed();
             let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
-            let ret = libc::statfs(cpath.as_ptr(), &mut statfs);
+            let ret = libc::statfs(cpath.as_ptr(), &raw mut statfs);
             ret == 0 && statfs.f_type == libc::NFS_SUPER_MAGIC
         };
 

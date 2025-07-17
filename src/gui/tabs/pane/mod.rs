@@ -194,7 +194,12 @@ impl Pane {
         self.element.set_visible(visible);
     }
 
-    fn create(tab: TabId, settings: DirSettings, selection: &MultiSelection) -> Self {
+    fn create(
+        tab: TabId,
+        settings: DirSettings,
+        selection: &MultiSelection,
+        initial_width: u32,
+    ) -> Self {
         let (element, signals) = PaneElement::new(tab, selection);
         let deny_view_click = Rc::new(Cell::new(false));
 
@@ -204,6 +209,7 @@ impl Pane {
                 tab,
                 selection,
                 deny_view_click.clone(),
+                initial_width,
             )),
             DisplayMode::Columns => View::Columns(DetailsView::new(
                 &element.imp().scroller,
@@ -460,9 +466,10 @@ impl Pane {
         path: &Path,
         settings: DirSettings,
         selection: &MultiSelection,
+        initial_width: u32,
         insert: impl FnOnce(&Widget),
     ) -> Self {
-        let mut pane = Self::create(tab, settings, selection);
+        let mut pane = Self::create(tab, settings, selection, initial_width);
         pane.setup_flat(path);
         pane.set_visible(false);
 
@@ -479,9 +486,10 @@ impl Pane {
         selection: &MultiSelection,
         filter: CustomFilter,
         filtered: FilterListModel,
+        initial_width: u32,
         insert: F,
     ) -> Self {
-        let mut pane = Self::create(tab, settings, selection);
+        let mut pane = Self::create(tab, settings, selection, initial_width);
         pane.setup_search(filter, filtered, queries);
         pane.set_visible(false);
 
@@ -641,6 +649,7 @@ impl Pane {
                 self.tab,
                 &self.selection,
                 self.deny_view_click.clone(),
+                self.element.last_allocated_width(),
             )),
             DisplayMode::Columns => View::Columns(DetailsView::new(
                 &self.element.imp().scroller,

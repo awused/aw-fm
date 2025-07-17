@@ -31,6 +31,7 @@ impl IconView {
         tab: TabId,
         selection: &MultiSelection,
         deny_view_click: Rc<Cell<bool>>,
+        initial_width: u32,
     ) -> Self {
         let factory = gtk::SignalListItemFactory::new();
 
@@ -81,12 +82,21 @@ impl IconView {
         });
 
         let grid = GridView::new(Some(selection.clone()), Some(factory));
-        // We want this to grow as necessary, but setting this too high (>32) absolutely tanks
-        // performance. 16 is enough for a big 4K monitor and doesn't seem to ruin performance.
-        grid.set_max_columns(16);
         grid.set_min_columns(1);
         grid.set_enable_rubberband(true);
         grid.set_vexpand(true);
+
+        // We want this to grow as necessary, but setting this too high (>32) absolutely tanks
+        // performance if not necessary. Setting it low massively improves performance.
+        // Compared to the old 16, using 6 improves minimum navigation time from ~200ms to ~60ms.
+        // This dynamic value feels fairly comfortable. Cap it at 32.
+        if initial_width == 0 {
+            grid.set_max_columns(8);
+        } else {
+            grid.set_max_columns(((initial_width as f32 / 250f32).round() as u32).clamp(1, 32));
+        }
+
+        debug!("Created grid view with an initial {} columns", grid.max_columns());
 
         grid.connect_activate(move |gv, _a| {
             let display = gv.display();

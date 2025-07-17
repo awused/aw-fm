@@ -313,6 +313,7 @@ impl Tab {
         id: TabUid,
         target: NavTarget,
         existing_tabs: &[Self],
+        initial_width: u32,
         insert: impl FnOnce(&Widget),
     ) -> (Self, TabElement) {
         debug!("Opening tab {id:?} to {target:?}");
@@ -324,7 +325,14 @@ impl Tab {
         let contents = Contents::new(settings.sort);
         let state = PaneState::for_jump(target.scroll);
 
-        let pane = Pane::new_flat(id.copy(), dir.path(), settings, &contents.selection, insert);
+        let pane = Pane::new_flat(
+            id.copy(),
+            dir.path(),
+            settings,
+            &contents.selection,
+            initial_width,
+            insert,
+        );
 
         let mut t = Self {
             id,
@@ -346,7 +354,12 @@ impl Tab {
         (t, element)
     }
 
-    pub fn cloned(id: TabUid, source: &Self, insert: impl FnOnce(&Widget)) -> (Self, TabElement) {
+    pub fn cloned(
+        id: TabUid,
+        source: &Self,
+        initial_width: u32,
+        insert: impl FnOnce(&Widget),
+    ) -> (Self, TabElement) {
         // Assumes inactive tabs cannot be cloned.
         let mut contents = Contents::new(source.settings.sort);
         let element = TabElement::new(id.copy(), Path::new(""));
@@ -373,6 +386,7 @@ impl Tab {
                 &search.contents().selection,
                 search.filter.clone(),
                 search.contents().filtered.clone().unwrap(),
+                initial_width,
                 insert,
             )
         } else {
@@ -381,6 +395,7 @@ impl Tab {
                 source.dir.path(),
                 source.settings,
                 &contents.selection,
+                initial_width,
                 insert,
             )
         };
@@ -409,6 +424,7 @@ impl Tab {
     pub fn reopen(
         closed: ClosedTab,
         existing_tabs: &[Self],
+        initial_width: u32,
         insert: impl FnOnce(&Widget),
     ) -> (Self, TabElement) {
         debug!("Reopening closed tab {closed:?}");
@@ -418,8 +434,14 @@ impl Tab {
         let dir = FlatDir::new(closed.current.location);
         let contents = Contents::new(settings.sort);
 
-        let pane =
-            Pane::new_flat(closed.id.copy(), dir.path(), settings, &contents.selection, insert);
+        let pane = Pane::new_flat(
+            closed.id.copy(),
+            dir.path(),
+            settings,
+            &contents.selection,
+            initial_width,
+            insert,
+        );
 
         let mut t = Self {
             id: closed.id,

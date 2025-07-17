@@ -294,7 +294,7 @@ impl Gui {
     }
 
     fn setup(self: &Rc<Self>) {
-        self.tabs.borrow_mut().initial_setup();
+        self.tabs.borrow_mut().initial_setup(self.window.default_width());
         self.setup_interaction();
 
         let g = self.clone();

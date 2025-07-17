@@ -143,15 +143,16 @@ impl TabsList {
         }
     }
 
-    pub fn initial_setup(&mut self) {
+    pub fn initial_setup(&mut self, default_width: i32) {
         assert!(self.tabs.is_empty());
 
         let Some(nav_target) = NavTarget::initial(self) else {
             return;
         };
 
-        let (tab, element) =
-            Tab::new(next_id(), nav_target, &[], |w| self.pane_container.append(w));
+        let (tab, element) = Tab::new(next_id(), nav_target, &[], default_width as u32, |w| {
+            self.pane_container.append(w)
+        });
 
         self.tabs.push(tab);
         self.tab_elements.append(&element);
@@ -395,8 +396,9 @@ impl TabsList {
             self.element_insertion_index(id).unwrap()
         };
 
+        let width = self.pane_container.width() as u32;
         let (new_tab, element) =
-            Tab::cloned(next_id(), &self.tabs[index], |w| self.pane_container.append(w));
+            Tab::cloned(next_id(), &self.tabs[index], width, |w| self.pane_container.append(w));
         let id = new_tab.id();
 
         self.tabs.push(new_tab);
@@ -411,8 +413,9 @@ impl TabsList {
         nav_target: NavTarget,
         activate: bool,
     ) -> TabId {
+        let width = self.pane_container.width() as u32;
         let (new_tab, element) =
-            Tab::new(next_id(), nav_target, &self.tabs, |w| self.pane_container.append(w));
+            Tab::new(next_id(), nav_target, &self.tabs, width, |w| self.pane_container.append(w));
 
         let id = new_tab.id();
         self.tabs.push(new_tab);
@@ -443,7 +446,9 @@ impl TabsList {
 
         let index = closed.after.and_then(|a| self.element_insertion_index(a)).unwrap_or_default();
 
-        let (new_tab, element) = Tab::reopen(closed, &self.tabs, |w| self.pane_container.append(w));
+        let width = self.pane_container.width() as u32;
+        let (new_tab, element) =
+            Tab::reopen(closed, &self.tabs, width, |w| self.pane_container.append(w));
 
         let id = new_tab.id();
         self.tabs.push(new_tab);
