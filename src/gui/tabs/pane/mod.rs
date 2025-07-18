@@ -39,11 +39,15 @@ mod details;
 mod element;
 mod icon_view;
 
-static MIN_PANE_RES: i32 = 250;
+// For now, we don't care much about height, so width works for both
+pub const MIN_PANE_RES: i32 = 250;
 // TODO [incremental] -- lower to 2 when incremental filtering isn't broken.
 static MIN_SEARCH: usize = 3;
 
 thread_local! {
+    // We don't have this until we measure a grid with at least one item
+    static MIN_GRID_RES: Cell<(i32,i32)> = Cell::default();
+
     static DRAGGING_TAB: Cell<Option<TabId>> = Cell::default();
     static SYMLINK_BADGE: Lazy<Option<Icon>> = Lazy::new(||
         match Icon::for_string("emblem-symbolic-link") {
@@ -151,7 +155,6 @@ fn get_last_visible_child(parent: &Widget) -> Option<Widget> {
         child = child.prev_sibling()?;
     }
 }
-
 
 #[derive(Debug)]
 pub(super) struct Pane {
@@ -661,7 +664,7 @@ impl Pane {
         };
 
         if let Some(vs) = vs {
-            self.apply_state(vs, list, false);
+            self.start_apply_state(vs);
         }
         true
     }
@@ -714,8 +717,22 @@ impl Pane {
         PaneState { scroll, focus }
     }
 
-    pub fn apply_state(&mut self, state: PaneState, list: &Contents, hide_while_scrolling: bool) {
+    pub fn start_apply_state(&mut self, state: PaneState) {
         self.deny_view_click.set(false);
+        self.workaround_temp_state = Some(state);
+        self.element.imp().pane_state_after_allocate.set(true);
+
+        // Does this need to run before allocate?
+        // if scroll_flags.contains(ListScrollFlags::FOCUS) && self.element.focus_child().is_some()
+        // {     self.view.grab_focus();
+        // }
+    }
+
+    // Needs to run after the grid has been allocated, otherwise the scroll position gets scrambled
+    pub fn finish_apply_state(&mut self, list: &Contents) {
+        let Some(state) = self.workaround_temp_state.take() else {
+            return;
+        };
 
         let mut scroll_flags = ListScrollFlags::empty();
 
@@ -769,45 +786,28 @@ impl Pane {
             self.view.grab_focus();
         }
 
-        let id = self.tab;
-        if pos > 0 && hide_while_scrolling {
-            trace!("Hiding tab {id:?} during scrolling");
-            self.element.imp().scroller.child().unwrap().set_opacity(0.0);
+        if let Some(focus) = focus {
+            self.view.scroll_to(focus, ListScrollFlags::FOCUS);
         }
 
-        self.workaround_temp_state = Some(state);
+        self.view.scroll_to(pos, scroll_flags);
 
-        glib::idle_add_local_once(move || {
-            warn!("Working around buggy GTK scrolling by adding a delay");
-            tabs_run(|list| {
-                let Some(p) = list.find_mut(id).and_then(Tab::workaround_scroll_to) else {
-                    return;
-                };
+        if let Some(precise) = &precise {
+            let vadjust = self.element.imp().scroller.vadjustment();
 
-                if let Some(focus) = focus {
-                    p.view.scroll_to(focus, ListScrollFlags::FOCUS);
-                }
+            if precise.view == self.view.current_display_mode()
+                && precise.res == (self.element.width(), self.element.height())
+            {
+                info!(
+                    "Restoring precise scroll position for {:?}: {:?} / {:?}",
+                    self.tab,
+                    precise.position,
+                    vadjust.upper()
+                );
 
-                p.view.scroll_to(pos, scroll_flags);
-
-                if let Some(precise) = precise {
-                    if precise.view == p.view.current_display_mode()
-                        && precise.res == (p.element.width(), p.element.height())
-                    {
-                        info!("Restoring precise scroll position for {id:?}");
-                        p.element.imp().scroller.vadjustment().set_value(precise.position);
-                    }
-                }
-
-                p.element.imp().scroller.child().unwrap().set_opacity(1.0);
-                p.workaround_temp_state = None;
-            });
-        });
-
-        // match &self.view {
-        //     View::Icons(icons) => icons.scroll_to(pos, flags),
-        //     View::Columns(details) => details.scroll_to(pos, flags),
-        // }
+                vadjust.set_value(precise.position);
+            }
+        }
     }
 
     pub fn seek_to(&self, pos: u32) {

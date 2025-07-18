@@ -9,9 +9,11 @@ use self::icon_tile::IconTile;
 use super::{Bound, get_last_visible_child, setup_item_controllers, setup_view_controllers};
 use crate::com::EntryObject;
 use crate::gui::tabs::id::TabId;
+use crate::gui::tabs::pane::MIN_GRID_RES;
 use crate::gui::{applications, tabs_run};
 
 mod icon_tile;
+
 
 #[derive(Debug)]
 pub(super) struct IconView {
@@ -82,7 +84,6 @@ impl IconView {
         });
 
         let grid = GridView::new(Some(selection.clone()), Some(factory));
-        grid.set_min_columns(1);
         grid.set_enable_rubberband(true);
         grid.set_vexpand(true);
 
@@ -90,10 +91,14 @@ impl IconView {
         // performance if not necessary. Setting it low massively improves performance.
         // Compared to the old 16, using 6 improves minimum navigation time from ~200ms to ~60ms.
         // This dynamic value feels fairly comfortable. Cap it at 32.
-        if initial_width == 0 {
+        let col_width = MIN_GRID_RES.get().0;
+        if initial_width == 0 || col_width <= 0 {
+            grid.set_min_columns(1);
             grid.set_max_columns(8);
         } else {
-            grid.set_max_columns(((initial_width as f32 / 250f32).round() as u32).clamp(1, 32));
+            let columns = ((initial_width as f32 / col_width as f32).floor() as u32).clamp(1, 32);
+            grid.set_min_columns(columns);
+            grid.set_max_columns(columns);
         }
 
         debug!("Created grid view with an initial {} columns", grid.max_columns());

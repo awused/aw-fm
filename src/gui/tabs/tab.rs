@@ -522,10 +522,10 @@ impl Tab {
     }
 
     fn close_search(&mut self) {
-        trace!("Closing Search for {:?}", self.id);
         let Some(_search) = self.search.take() else {
             return;
         };
+        trace!("Closing Search for {:?}", self.id);
 
         if !self.loading() {
             self.element.stop_spin();
@@ -648,11 +648,10 @@ impl Tab {
             self.flat_update(left, right, u);
         }
 
-        let hide_scroll = s_id.kind.initial();
         // If it's initial && finished, it's a complete snapshot
-        self.maybe_finish_load(hide_scroll);
+        self.maybe_finish_load();
         // there will be no exact matches to the left.
-        self.matching_mut(right).for_each(|s| s.maybe_finish_load(hide_scroll));
+        self.matching_mut(right).for_each(Self::maybe_finish_load);
         info!("Finished loading {:?} in {:?}", self.dir.path(), start.elapsed());
     }
 
@@ -668,7 +667,7 @@ impl Tab {
         let search = self.search.as_mut().unwrap();
         assert!(search.matches_snapshot(&snap));
         search.apply_search_snapshot(snap);
-        self.maybe_finish_load(false);
+        self.maybe_finish_load();
     }
 
     pub fn matches_flat_update(&self, update: &Update) -> bool {
@@ -923,7 +922,7 @@ impl Tab {
                 });
                 self.pane.overwrite_state(state);
 
-                self.apply_pane_state(true);
+                self.apply_pane_state();
             }
 
             return true;
@@ -1006,7 +1005,7 @@ impl Tab {
         state.focus = Some(FocusState { path, select: true });
         self.pane.overwrite_state(state);
 
-        self.apply_pane_state(false);
+        self.apply_pane_state();
     }
 
     pub fn parent(&mut self, left: &[Self], right: &[Self]) {
@@ -1053,14 +1052,13 @@ impl Tab {
     fn apply_history(&mut self, left: &[Self], right: &[Self], hist: HistoryEntry) {
         // Shouldn't be a jump, could be a search starting/ending.
         if hist.location == *self.dir.path() {
-            let hide_scroll = hist.search.is_none();
             if let Some(query) = hist.search {
                 self.open_search(query);
             } else {
                 self.close_search();
             }
             self.pane.overwrite_state(hist.state);
-            return self.apply_pane_state(hide_scroll);
+            return self.apply_pane_state();
         }
 
         let target = NavTarget::assume_dir(hist.location);
@@ -1070,7 +1068,7 @@ impl Tab {
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
             self.pane.overwrite_state(hist.state);
-            return self.apply_pane_state(false);
+            return self.apply_pane_state();
         }
 
         if let Some(query) = hist.search {
@@ -1080,7 +1078,7 @@ impl Tab {
         }
 
         self.pane.overwrite_state(hist.state);
-        self.apply_pane_state(true);
+        self.apply_pane_state();
     }
 
     pub(super) fn back_or_parent(&mut self, left: &[Self], right: &[Self]) {
@@ -1144,7 +1142,7 @@ impl Tab {
             );
         }
 
-        self.apply_pane_state(true)
+        self.apply_pane_state()
     }
 
     fn current_history(&self) -> HistoryEntry {
@@ -1157,18 +1155,18 @@ impl Tab {
         HistoryEntry { location: self.dir(), search, state }
     }
 
-    fn maybe_finish_load(&mut self, hide_scroll: bool) {
+    fn maybe_finish_load(&mut self) {
         // We can be done loading without being loaded (flat loaded + search unloaded)
         if !self.loading() {
             self.element.stop_spin()
         }
 
         if self.loaded() {
-            self.apply_pane_state(hide_scroll);
+            self.apply_pane_state();
         }
     }
 
-    fn apply_pane_state(&mut self, hide_scroll: bool) {
+    fn apply_pane_state(&mut self) {
         if !self.loaded() {
             trace!("Deferring applying pane state to flat pane until loading is done.");
             return;
@@ -1185,10 +1183,16 @@ impl Tab {
 
         info!("Applying {state:?} to tab {:?}", self.id);
 
-        if let Some(search) = &self.search {
-            pane.apply_state(state, search.contents(), hide_scroll);
-        } else {
-            pane.apply_state(state, &self.contents, hide_scroll);
+        pane.start_apply_state(state);
+    }
+
+    pub fn finish_apply_state(&mut self) {
+        if let TabPane::Displayed(pane) = &mut self.pane {
+            if let Some(search) = &self.search {
+                pane.finish_apply_state(search.contents());
+            } else {
+                pane.finish_apply_state(&self.contents);
+            }
         }
     }
 
@@ -1207,7 +1211,7 @@ impl Tab {
 
         self.load(left, right);
 
-        self.apply_pane_state(true)
+        self.apply_pane_state()
     }
 
     pub fn start_hide(&mut self) {
@@ -1806,7 +1810,7 @@ impl Tab {
 
         self.pane.overwrite_state(state);
 
-        self.apply_pane_state(false);
+        self.apply_pane_state();
     }
 
     pub fn context_menu(&self) -> PopoverMenu {
@@ -1856,10 +1860,6 @@ impl Tab {
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
     pub fn workaround_enable_rubberband(&self) {
         self.pane.workaround_enable_rubberband();
-    }
-
-    pub const fn workaround_scroll_to(&mut self) -> Option<&mut Pane> {
-        self.pane.get_visible_mut()
     }
 }
 

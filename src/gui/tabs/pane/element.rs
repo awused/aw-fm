@@ -401,6 +401,7 @@ impl PaneElement {
 mod imp {
     use std::cell::{Cell, RefCell};
 
+    use gtk::gio::prelude::ListModelExt;
     use gtk::glib::SourceId;
     use gtk::glib::object::CastNone;
     use gtk::prelude::WidgetExt;
@@ -409,6 +410,8 @@ mod imp {
     use once_cell::unsync::OnceCell;
 
     use crate::gui::tabs::id::TabId;
+    use crate::gui::tabs::pane::MIN_GRID_RES;
+    use crate::gui::tabs_run;
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "element.ui")]
@@ -441,6 +444,7 @@ mod imp {
         pub original_text: RefCell<String>,
         pub tab: OnceCell<TabId>,
         pub selection_text_update: Cell<Option<SourceId>>,
+        pub pane_state_after_allocate: Cell<bool>,
         pub(super) last_width: Cell<u32>,
     }
 
@@ -466,28 +470,75 @@ mod imp {
         }
     }
 
+
     impl WidgetImpl for Pane {
         fn measure(&self, orientation: Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            // This is hacky, but best to do it here where we can ensure it's done at the right
+            // time. Measure the minimum size of a grid with at least one item and reuse it.
+            //
+            // The width of the grid doesn't seem to care about the scroll bar, so we can get away
+            // with just measuring inner_box directly and not need any complicated formula for
+            // tiles.
+            if let Some(grid) = self.scroller.child().and_downcast::<GridView>() {
+                let mut minimums = MIN_GRID_RES.get();
+
+                // We only really care about width, height could be 0 (but shouldn't be)
+                if minimums.0 == 0
+                    && let Some(model) = grid.model()
+                    && model.n_items() > 0
+                {
+                    grid.set_min_columns(1);
+                    let width = self.inner_box.measure(Orientation::Horizontal, -1).0;
+                    let height = self.inner_box.measure(Orientation::Vertical, -1).0;
+                    minimums = (width, height);
+                    MIN_GRID_RES.set(minimums);
+                    info!("Measured grid view minimum res as {minimums:?}");
+                }
+
+                if minimums.0 != 0 {
+                    match orientation {
+                        Orientation::Horizontal => return (minimums.0, minimums.0, -1, -1),
+                        Orientation::Vertical => return (minimums.1, minimums.1, -1, -1),
+                        _ => {}
+                    };
+                }
+            }
+
             self.inner_box.measure(orientation, for_size)
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
-            self.parent_size_allocate(width, height, baseline);
-            self.inner_box.allocate(width, height, baseline, None);
-            if width > 0 && self.last_width.get() != width as u32 {
+            if width > 0
+                && let minimums = MIN_GRID_RES.get()
+                && minimums.0 != 0
+            {
                 self.last_width.set(width as u32);
 
                 if let Some(grid) = self.scroller.child().and_downcast::<GridView>() {
                     // Yes I hate gtk
-                    let columns = ((width as f32 / 250f32).round() as u32).clamp(1, 32);
-                    if grid.max_columns() != columns {
+                    let columns = ((width as f32 / minimums.0 as f32).floor() as u32).clamp(1, 32);
+                    if grid.max_columns() != columns || grid.min_columns() != columns {
                         debug!(
                             "Updating maximum grid columns to {columns} in {:?}",
                             self.tab.get().unwrap()
                         );
+                        grid.set_min_columns(columns);
                         grid.set_max_columns(columns);
                     }
                 }
+            }
+
+            self.parent_size_allocate(width, height, baseline);
+            self.inner_box.allocate(width, height, baseline, None);
+
+            if self.pane_state_after_allocate.get() {
+                self.pane_state_after_allocate.set(false);
+
+                tabs_run(|list| {
+                    if let Some(tab) = list.find_mut(*self.tab.get().unwrap()) {
+                        tab.finish_apply_state();
+                    }
+                })
             }
         }
     }
