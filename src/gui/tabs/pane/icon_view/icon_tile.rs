@@ -39,6 +39,8 @@ impl Default for IconTile {
 
 impl Bound for IconTile {
     fn bind(&self, eo: &EntryObject) {
+        eo.mark_bound(self.is_mapped());
+
         let imp = self.imp();
 
         // Name can never change, only set it once.
@@ -65,8 +67,6 @@ impl Bound for IconTile {
             }
             None
         });
-
-        eo.mark_bound(self.is_mapped());
 
         let d = SignalHolder::new(eo, id);
         assert!(imp.update_connection.replace(Some(d)).is_none())

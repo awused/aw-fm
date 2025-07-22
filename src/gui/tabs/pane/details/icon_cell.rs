@@ -37,6 +37,8 @@ impl Default for IconCell {
 
 impl Bound for IconCell {
     fn bind(&self, eo: &EntryObject) {
+        eo.mark_bound(self.is_mapped());
+
         let imp = self.imp();
         imp.bound_object.replace(Some(eo.clone()));
         imp.update_contents(eo);
@@ -51,8 +53,6 @@ impl Bound for IconCell {
             }
             None
         });
-
-        eo.mark_bound(self.is_mapped());
 
         let d = SignalHolder::new(eo, id);
 

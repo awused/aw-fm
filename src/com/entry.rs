@@ -383,12 +383,10 @@ mod internal {
 
     #[derive(Debug)]
     enum Thumb {
-        // For now, we do not thumbnail directories.
-        // If we ever add thumbnails to directories, this can be removed.
         Never,
         Unloaded,
+        // TODO Loading(DesktopThumbnailSize, bool), if bool is true, show the icon
         Loading(DesktopThumbnailSize),
-        // TODO -- LoadingSlow or Slow that causes the icon to be rendered?
         Loaded(Texture, DesktopThumbnailSize),
         Outdated(Texture, Option<DesktopThumbnailSize>),
         Failed,
@@ -405,10 +403,11 @@ mod internal {
             }
         }
 
-        // Texture is refcounted, so this is cheap
-        fn renderable(&self) -> Thumbnail {
+        fn renderable(&self, from_event: bool) -> Thumbnail {
             match self {
                 Self::Never | Self::Failed => Thumbnail::None,
+                // TODO -- Thumbnail::None when entry was from an event?
+                Self::Unloaded | Self::Loading(_) if from_event => Thumbnail::None,
                 Self::Unloaded | Self::Loading(_) => Thumbnail::Pending,
                 Self::Loaded(tex, _) | Self::Outdated(tex, _) => Thumbnail::Texture(tex.clone()),
             }
@@ -766,7 +765,9 @@ mod internal {
         }
 
         pub(super) fn thumbnail(&self) -> Thumbnail {
-            self.0.borrow().as_ref().unwrap().thumbnail.renderable()
+            let b = self.0.borrow();
+            let inner = b.as_ref().unwrap();
+            inner.thumbnail.renderable(inner.updated_from_event)
         }
 
         // Returns true if it's appropriate to synchronously thumbnail this file.
