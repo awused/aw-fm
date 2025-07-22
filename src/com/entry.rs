@@ -134,7 +134,6 @@ impl GetEntry for Arc<Entry> {
     }
 }
 
-
 // Put methods in here only when they are used alongside multiple other fields on the Entry object.
 // Otherwise put them on Wrapper or EntryObject
 impl Entry {
@@ -329,25 +328,18 @@ impl Entry {
     }
 }
 
-
 #[derive(Debug)]
 pub enum Thumbnail {
-    // For now, we do not thumbnail directories.
-    // If we ever add thumbnails to directories, this can be removed.
-    Never,
-    Unloaded,
-    Loading(DesktopThumbnailSize),
-    Loaded(Texture, DesktopThumbnailSize),
-    Outdated(Texture, Option<DesktopThumbnailSize>),
-    Failed,
+    Texture(Texture),
+    Pending,
+    None,
 }
 
-impl Thumbnail {
-    fn needs_load(&self, size: DesktopThumbnailSize) -> bool {
-        match self {
-            Self::Loading(sz) | Self::Loaded(_, sz) | Self::Outdated(_, Some(sz)) => *sz != size,
-            Self::Never | Self::Failed => false,
-            Self::Unloaded | Self::Outdated(_, None) => true,
+impl From<Thumbnail> for Option<Texture> {
+    fn from(value: Thumbnail) -> Self {
+        match value {
+            Thumbnail::Texture(texture) => Some(texture),
+            Thumbnail::Pending | Thumbnail::None => None,
         }
     }
 }
@@ -393,10 +385,45 @@ mod internal {
     }
 
     #[derive(Debug)]
+    enum Thumb {
+        // For now, we do not thumbnail directories.
+        // If we ever add thumbnails to directories, this can be removed.
+        Never,
+        Unloaded,
+        Loading(DesktopThumbnailSize),
+        // TODO -- LoadingSlow or Slow that causes the icon to be rendered?
+        Loaded(Texture, DesktopThumbnailSize),
+        Outdated(Texture, Option<DesktopThumbnailSize>),
+        Failed,
+    }
+
+    impl Thumb {
+        fn needs_load(&self, size: DesktopThumbnailSize) -> bool {
+            match self {
+                Self::Loading(sz) | Self::Loaded(_, sz) | Self::Outdated(_, Some(sz)) => {
+                    *sz != size
+                }
+                Self::Never | Self::Failed => false,
+                Self::Unloaded | Self::Outdated(_, None) => true,
+            }
+        }
+
+        // Texture is refcounted, so this is cheap
+        fn renderable(&self) -> Thumbnail {
+            match self {
+                Self::Never | Self::Failed => Thumbnail::None,
+                Self::Unloaded | Self::Loading(_) => Thumbnail::Pending,
+                Self::Loaded(tex, _) | Self::Outdated(tex, _) => Thumbnail::Texture(tex.clone()),
+            }
+        }
+    }
+
+
+    #[derive(Debug)]
     struct Wrapper {
         entry: Entry,
         widgets: WidgetCounter,
-        thumbnail: Thumbnail,
+        thumbnail: Thumb,
         updated_from_event: bool,
     }
 
@@ -472,9 +499,9 @@ mod internal {
                     } else {
                         Self::INITIAL_PRIORITY.with(|p| **p)
                     };
-                    (Thumbnail::Unloaded, Some(p))
+                    (Thumb::Unloaded, Some(p))
                 }
-                EntryKind::Directory { .. } => (Thumbnail::Never, None),
+                EntryKind::Directory { .. } => (Thumb::Never, None),
                 EntryKind::Uninitialized => unreachable!(),
             };
 
@@ -502,18 +529,17 @@ mod internal {
                     let wrapped = self.0.borrow();
                     let inner = wrapped.as_ref().unwrap();
                     let new_thumb = match &inner.thumbnail {
-                        Thumbnail::Never
-                        | Thumbnail::Unloaded
-                        | Thumbnail::Loading(_)
-                        | Thumbnail::Failed => Thumbnail::Unloaded,
-                        Thumbnail::Loaded(old, _) | Thumbnail::Outdated(old, _) => {
-                            Thumbnail::Outdated(old.clone(), None)
+                        Thumb::Never | Thumb::Unloaded | Thumb::Loading(_) | Thumb::Failed => {
+                            Thumb::Unloaded
+                        }
+                        Thumb::Loaded(old, _) | Thumb::Outdated(old, _) => {
+                            Thumb::Outdated(old.clone(), None)
                         }
                     };
 
                     (new_thumb, Some(widgets.priority()))
                 }
-                EntryKind::Directory { .. } => (Thumbnail::Never, None),
+                EntryKind::Directory { .. } => (Thumb::Never, None),
                 EntryKind::Uninitialized => unreachable!(),
             };
 
@@ -557,17 +583,16 @@ mod internal {
                 // The generated thumbnail can still be used to satisfy a later Loading state if
                 // that does change.
                 inner.widgets.priority() == ThumbPriority::Low
-                    && matches!(&inner.thumbnail, Thumbnail::Unloaded)
+                    && matches!(&inner.thumbnail, Thumb::Unloaded)
             } else if inner.widgets.priority() == p {
                 match &mut inner.thumbnail {
-                    Thumbnail::Never
-                    | Thumbnail::Unloaded
-                    | Thumbnail::Loading(..)
-                    | Thumbnail::Failed => inner.thumbnail = Thumbnail::Loading(size),
-                    Thumbnail::Loaded(tex, _) => {
-                        inner.thumbnail = Thumbnail::Outdated(tex.clone(), Some(size))
+                    Thumb::Never | Thumb::Unloaded | Thumb::Loading(..) | Thumb::Failed => {
+                        inner.thumbnail = Thumb::Loading(size)
                     }
-                    Thumbnail::Outdated(_, loading) => *loading = Some(size),
+                    Thumb::Loaded(tex, _) => {
+                        inner.thumbnail = Thumb::Outdated(tex.clone(), Some(size))
+                    }
+                    Thumb::Outdated(_, loading) => *loading = Some(size),
                 }
                 true
             } else {
@@ -612,7 +637,7 @@ mod internal {
                     // This is spammy because gtk changes the bound widgets a lot.
                     // That also means burning a lot of CPU time sometimes, but eh.
                     // trace!("Unloaded thumbnail for {:?}", inner.entry.abs_path);
-                    inner.thumbnail = Thumbnail::Unloaded;
+                    inner.thumbnail = Thumb::Unloaded;
                 }
             }
         }
@@ -644,10 +669,10 @@ mod internal {
             if Self::UNLOAD_LOW.with(|u| **u) {
                 if new_p == ThumbPriority::Low {
                     match &inner.thumbnail {
-                        Thumbnail::Loading(_) | Thumbnail::Loaded(..) | Thumbnail::Outdated(..) => {
+                        Thumb::Loading(_) | Thumb::Loaded(..) | Thumb::Outdated(..) => {
                             Self::start_unload_thumbnail(inner.entry.abs_path.clone())
                         }
-                        Thumbnail::Never | Thumbnail::Failed | Thumbnail::Unloaded => {}
+                        Thumb::Never | Thumb::Failed | Thumb::Unloaded => {}
                     }
                     return None;
                 }
@@ -693,17 +718,17 @@ mod internal {
             inner.updated_from_event = false;
 
             match thumb {
-                Thumbnail::Loaded(_, sz) if *sz != size => {}
-                Thumbnail::Loading(sz) | Thumbnail::Outdated(_, Some(sz)) if *sz == size => {}
-                Thumbnail::Never
-                | Thumbnail::Unloaded
-                | Thumbnail::Failed
-                | Thumbnail::Loading(..)
-                | Thumbnail::Loaded(..)
-                | Thumbnail::Outdated(..) => return,
+                Thumb::Loaded(_, sz) if *sz != size => {}
+                Thumb::Loading(sz) | Thumb::Outdated(_, Some(sz)) if *sz == size => {}
+                Thumb::Never
+                | Thumb::Unloaded
+                | Thumb::Failed
+                | Thumb::Loading(..)
+                | Thumb::Loaded(..)
+                | Thumb::Outdated(..) => return,
             }
 
-            *thumb = Thumbnail::Loaded(tex, size);
+            *thumb = Thumb::Loaded(tex, size);
             drop(b);
             self.obj().emit_by_name::<()>("update", &[]);
         }
@@ -713,38 +738,29 @@ mod internal {
             let inner = &mut b.as_mut().unwrap();
             let thumb = &mut inner.thumbnail;
             if inner.entry.mtime != mtime {
-                trace!("Not failing thumbnail for updated file {:?}", &*inner.entry.name);
+                debug!("Not failing thumbnail for updated file {:?}", &*inner.entry.name);
                 return;
             }
 
             inner.updated_from_event = false;
 
             match thumb {
-                Thumbnail::Never | Thumbnail::Unloaded | Thumbnail::Failed => (),
-                Thumbnail::Loading(_) => *thumb = Thumbnail::Failed,
-                Thumbnail::Outdated(..) | Thumbnail::Loaded(..) => {
-                    *thumb = Thumbnail::Failed;
+                Thumb::Never | Thumb::Failed => return,
+                Thumb::Loading(_) | Thumb::Unloaded => (),
+                Thumb::Outdated(..) | Thumb::Loaded(..) => {
                     info!(
                         "Marking previously valid thumbnail as failed for: {:?}",
                         inner.entry.abs_path
                     );
-                    drop(b);
-                    self.obj().emit_by_name::<()>("update", &[]);
                 }
             }
+            *thumb = Thumb::Failed;
+            drop(b);
+            self.obj().emit_by_name::<()>("update", &[]);
         }
 
-        // Texture is refcounted, so this is cheap
-        pub fn thumbnail(&self) -> Option<Texture> {
-            let b = self.0.borrow();
-            let thumb = &b.as_ref().unwrap().thumbnail;
-            if let Thumbnail::Loaded(tex, _) = thumb {
-                Some(tex.clone())
-            } else if let Thumbnail::Outdated(tex, _) = thumb {
-                Some(tex.clone())
-            } else {
-                None
-            }
+        pub(super) fn thumbnail(&self) -> Thumbnail {
+            self.0.borrow().as_ref().unwrap().thumbnail.renderable()
         }
 
         // Returns true if it's appropriate to synchronously thumbnail this file.
@@ -753,9 +769,9 @@ mod internal {
         // wrong size.
         pub fn can_sync_thumbnail(&self) -> bool {
             match self.0.borrow().as_ref().unwrap().thumbnail {
-                Thumbnail::Never | Thumbnail::Loaded(..) | Thumbnail::Failed => false,
-                Thumbnail::Unloaded | Thumbnail::Loading(_) => true,
-                Thumbnail::Outdated(..) => {
+                Thumb::Never | Thumb::Loaded(..) | Thumb::Failed => false,
+                Thumb::Unloaded | Thumb::Loading(_) => true,
+                Thumb::Outdated(..) => {
                     // This is a really niche edge case, but really it should be handled.
                     true
                 }
@@ -908,6 +924,24 @@ impl EntryObject {
             self.imp().change_widgets(0, if mapped { 1 } else { -1 }),
             self.imp().was_updated_from_event(),
         );
+    }
+
+    pub fn thumbnail_no_defer(&self) -> Option<Texture> {
+        self.imp().thumbnail().into()
+    }
+
+    // TODO -- the idea here is to show the icon if the thumbnail is still loading after a
+    // non-trivial amount of time. If that's not necessary, remove these two methods and go back to
+    // imp().thumbnail().
+    pub fn thumbnail_or_defer(&self) -> Thumbnail {
+        let thumb = self.imp().thumbnail();
+        // if let Thumbnail::Pending = thumb {
+        // let c = self.clone();
+        //     glib::timeout_add_local_once(Duration::from_millis(5), move || {
+        //
+        //     });
+        // }
+        thumb
     }
 
     pub fn change_thumb_size(size: DesktopThumbnailSize) {

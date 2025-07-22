@@ -74,9 +74,9 @@ mod imp {
 
     use gtk::prelude::WidgetExt;
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
 
-    use crate::com::{EntryObject, SignalHolder};
+    use crate::com::{EntryObject, SignalHolder, Thumbnail};
     use crate::gui::tabs::pane::SYMLINK_BADGE;
 
     #[derive(Default, CompositeTemplate)]
@@ -122,13 +122,12 @@ mod imp {
 
     impl IconCell {
         pub(super) fn update_contents(&self, obj: &EntryObject) {
-            let thumb = obj.imp().thumbnail();
             // There's basically no mutation that won't cause the thumbnail
             // to be regenerated, so this is expensive but never wasted.
-            if let Some(texture) = thumb {
-                self.image.set_paintable(Some(&texture));
-            } else {
-                self.image.set_from_gicon(&obj.icon());
+            match obj.thumbnail_or_defer() {
+                Thumbnail::Texture(texture) => self.image.set_paintable(Some(&texture)),
+                Thumbnail::None => self.image.set_from_gicon(&obj.icon()),
+                Thumbnail::Pending => self.image.clear(),
             }
 
             if let Some(badge) = self.symlink_badge.take() {

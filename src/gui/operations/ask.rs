@@ -5,18 +5,18 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gtk::Image;
 use gtk::gdk::Texture;
 use gtk::gio::Icon;
 use gtk::glib::{self, Object};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::Image;
 
 use super::Operation;
 use crate::com::{Entry, EntryObject};
 use crate::config::FileCollision;
 use crate::gui::operations::ConflictKind;
-use crate::gui::{gui_run, Gui};
+use crate::gui::{Gui, gui_run};
 
 
 #[derive(Debug)]
@@ -156,7 +156,7 @@ impl AskDialog {
             Self::set_image(
                 &self.imp().original_icon,
                 &e,
-                eo.imp().thumbnail(),
+                eo.thumbnail_no_defer(),
                 eo.imp().can_sync_thumbnail(),
             );
             self.imp().original_size.set_text(&e.long_size_string());
@@ -177,7 +177,7 @@ impl AskDialog {
             Self::set_image(
                 &self.imp().new_icon,
                 &e,
-                eo.imp().thumbnail(),
+                eo.thumbnail_no_defer(),
                 eo.imp().can_sync_thumbnail(),
             );
             self.imp().new_size.set_text(&e.long_size_string());
@@ -282,7 +282,7 @@ impl AskDialog {
 
 mod imp {
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "ask.ui")]

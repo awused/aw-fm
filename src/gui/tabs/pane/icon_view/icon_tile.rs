@@ -3,8 +3,8 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 
 use crate::com::{EntryObject, SignalHolder};
-use crate::gui::tabs::pane::Bound;
 use crate::gui::PANGO_ATTRIBUTES;
+use crate::gui::tabs::pane::Bound;
 
 
 glib::wrapper! {
@@ -87,9 +87,9 @@ mod imp {
 
     use gtk::prelude::WidgetExt;
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
 
-    use crate::com::{EntryObject, SignalHolder};
+    use crate::com::{EntryObject, SignalHolder, Thumbnail};
     use crate::gui::tabs::pane::SYMLINK_BADGE;
 
     #[derive(Default, CompositeTemplate)]
@@ -141,10 +141,10 @@ mod imp {
         pub(super) fn update_contents(&self, obj: &EntryObject) {
             // There's basically no mutation that won't cause the thumbnail
             // to be regenerated, so this is expensive but never wasted.
-            if let Some(texture) = obj.imp().thumbnail() {
-                self.image.set_paintable(Some(&texture));
-            } else {
-                self.image.set_from_gicon(&obj.icon());
+            match obj.thumbnail_or_defer() {
+                Thumbnail::Texture(texture) => self.image.set_paintable(Some(&texture)),
+                Thumbnail::None => self.image.set_from_gicon(&obj.icon()),
+                Thumbnail::Pending => self.image.clear(),
             }
 
             self.bound_object.replace(Some(obj.clone()));

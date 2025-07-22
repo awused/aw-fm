@@ -4,8 +4,8 @@ use std::fs::Permissions;
 use std::os::unix::prelude::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gstreamer::{Caps, ClockTime};
@@ -19,7 +19,7 @@ use num_format::{Locale, ToFormattedString};
 use uzers::{get_group_by_gid, get_user_by_uid};
 
 use crate::com::{ChildInfo, EntryObject};
-use crate::gui::{show_error, show_warning, Gui};
+use crate::gui::{Gui, show_error, show_warning};
 
 glib::wrapper! {
     pub struct PropDialog(ObjectSubclass<imp::PropDialog>)
@@ -231,7 +231,7 @@ impl PropDialog {
     }
 
     fn set_image(&self, g: &Gui, eo: &EntryObject) {
-        if let Some(tex) = eo.imp().thumbnail() {
+        if let Some(tex) = eo.thumbnail_no_defer() {
             self.imp().media_icon.set_paintable(Some(&tex));
             self.imp().icon.set_paintable(Some(&tex));
             return;
@@ -537,13 +537,13 @@ fn set_text_for_tag(
 
 mod imp {
     use std::cell::{Cell, OnceCell};
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     use gstreamer::glib::SignalHandlerId;
     use gstreamer_pbutils::Discoverer;
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
 
     #[derive(Default, CompositeTemplate)]
     #[template(file = "dialog.ui")]
