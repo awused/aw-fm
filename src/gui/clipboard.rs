@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::path::Path;
-use std::str::{from_utf8, FromStr};
+use std::str::{FromStr, from_utf8};
 use std::sync::Arc;
 use std::thread;
 
@@ -9,11 +9,11 @@ use gtk::gio::{Cancellable, InputStream, MemoryOutputStream, OutputStreamSpliceF
 use gtk::glib::{GString, Priority};
 use gtk::prelude::{DisplayExt, FileExt, MemoryOutputStreamExt, OutputStreamExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{gdk, gio, glib, MultiSelection};
+use gtk::{MultiSelection, gdk, gio, glib};
 use strum_macros::{EnumString, IntoStaticStr};
 
 use super::tabs::id::TabId;
-use crate::gui::{gui_run, operations, Selected};
+use crate::gui::{Selected, gui_run, operations};
 
 pub const SPECIAL: &str = "x-special/aw-fm-copied-files";
 pub const SPECIAL_MATE: &str = "x-special/mate-copied-files";
@@ -218,6 +218,7 @@ pub fn handle_drop(drop_ev: &gdk::Drop, tab: TabId, path: Arc<Path>) -> bool {
 
 
 mod imp {
+    use std::cell::OnceCell;
     use std::ffi::OsString;
     use std::future::Future;
     use std::os::unix::ffi::OsStringExt;
@@ -225,12 +226,11 @@ mod imp {
     use std::pin::Pin;
     use std::rc::Rc;
 
-    use gtk::glib::value::ToValue;
     use gtk::glib::GString;
+    use gtk::glib::value::ToValue;
     use gtk::prelude::{FileExt, OutputStreamExt};
     use gtk::subclass::prelude::*;
     use gtk::{gdk, gio, glib};
-    use once_cell::unsync::OnceCell;
 
     use super::{ClipboardOp, SPECIAL, SPECIAL_GNOME, SPECIAL_MATE, URIS};
     use crate::com::EntryObject;

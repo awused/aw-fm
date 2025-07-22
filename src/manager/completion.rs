@@ -2,11 +2,10 @@ use std::cmp::min;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
-use once_cell::sync::Lazy;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
 use rayon::{ThreadPool, ThreadPoolBuilder};
@@ -19,7 +18,7 @@ use crate::gui::TabId;
 use crate::handle_panic;
 use crate::natsort::{lowercase, normalize_lowercase};
 
-static COMPLETION_POOL: Lazy<ThreadPool> = Lazy::new(|| {
+static COMPLETION_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     ThreadPoolBuilder::new()
         .thread_name(|u| format!("completion-{u}"))
         .panic_handler(handle_panic)

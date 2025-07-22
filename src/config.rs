@@ -3,12 +3,11 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use clap::Parser;
 use dirs::config_dir;
 use gtk::gdk;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Deserializer, de};
 
 
@@ -250,8 +249,8 @@ where
     }
 }
 
-pub static OPTIONS: Lazy<Opt> = Lazy::new(Opt::parse);
-pub static ACTIONS_DIR: Lazy<Arc<PathBuf>> = Lazy::new(|| {
+pub static OPTIONS: LazyLock<Opt> = LazyLock::new(Opt::parse);
+pub static ACTIONS_DIR: LazyLock<Arc<PathBuf>> = LazyLock::new(|| {
     CONFIG.actions_directory.clone().unwrap_or_else(|| {
         config_dir()
             .unwrap_or_else(|| {
@@ -265,7 +264,7 @@ pub static ACTIONS_DIR: Lazy<Arc<PathBuf>> = Lazy::new(|| {
 
 static DEFAULT_CONFIG: &str = include_str!("../aw-fm.toml.sample");
 
-pub static CONFIG: Lazy<Config> = Lazy::new(|| {
+pub static CONFIG: LazyLock<Config> = LazyLock::new(|| {
     match awconf::load_config::<Config>("aw-fm", OPTIONS.awconf.as_ref(), Some(DEFAULT_CONFIG)) {
         Ok((conf, Some(path))) => {
             info!("Loaded config from {path:?}");
@@ -284,7 +283,7 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| {
 
 
 pub fn init() {
-    Lazy::force(&OPTIONS);
-    Lazy::force(&CONFIG);
-    Lazy::force(&ACTIONS_DIR);
+    LazyLock::force(&OPTIONS);
+    LazyLock::force(&CONFIG);
+    LazyLock::force(&ACTIONS_DIR);
 }

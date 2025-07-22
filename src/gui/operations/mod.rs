@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 use gtk::gio::{self, Cancellable, FileCopyFlags, FileInfo, FileQueryInfoFlags};
 use gtk::glib;
 use gtk::prelude::*;
-use once_cell::unsync::Lazy;
 use regex::bytes::{Captures, Regex};
 
 use self::progress::Progress;
@@ -26,12 +25,9 @@ mod undo;
 const OPERATIONS_HISTORY: usize = 10;
 
 thread_local! {
-    static COPY_REGEX: Lazy<Regex> =
-        Lazy::new(||Regex::new(r"^(.*)( \(copy (\d+)\))(\.[^/]+)?$").unwrap());
-    static COPIED_REGEX: Lazy<Regex> =
-        Lazy::new(||Regex::new(r"^(.*)( \(copied (\d+)\))(\.[^/]+)?$").unwrap());
-    static MOVED_REGEX: Lazy<Regex> =
-        Lazy::new(||Regex::new(r"^(.*)( \(moved (\d+)\))(\.[^/]+)?$").unwrap());
+    static COPY_REGEX: Regex = Regex::new(r"^(.*)( \(copy (\d+)\))(\.[^/]+)?$").unwrap();
+    static COPIED_REGEX: Regex = Regex::new(r"^(.*)( \(copied (\d+)\))(\.[^/]+)?$").unwrap();
+    static MOVED_REGEX: Regex = Regex::new(r"^(.*)( \(moved (\d+)\))(\.[^/]+)?$").unwrap();
 }
 
 // Whatever we add to a name to resolve collisions

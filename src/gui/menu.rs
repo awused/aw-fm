@@ -15,7 +15,6 @@ use gtk::gio::{Menu, MenuItem, SimpleAction, SimpleActionGroup};
 use gtk::glib::{Variant, VariantTy};
 use gtk::prelude::*;
 use gtk::{PopoverMenu, PositionType};
-use once_cell::unsync::Lazy;
 use regex::bytes::Regex;
 
 use super::{ActionTarget, Gui, TabId};
@@ -141,10 +140,10 @@ impl Ord for ActionSettings {
 }
 
 thread_local! {
-    static SETTINGS_RE: Lazy<regex::Regex> = Lazy::new(||
+    static SETTINGS_RE: regex::Regex =
         regex::Regex::new(
             r"(name|directories|files|mimetypes|extensions|regex|selection|priority|parse_output)=(.*)$")
-                .unwrap());
+                .unwrap();
 }
 
 impl ActionSettings {

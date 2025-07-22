@@ -38,6 +38,7 @@ impl Default for IconCell {
 impl Bound for IconCell {
     fn bind(&self, eo: &EntryObject) {
         let imp = self.imp();
+        imp.bound_object.replace(Some(eo.clone()));
         imp.update_contents(eo);
 
         // Don't need to be weak refs
@@ -62,6 +63,7 @@ impl Bound for IconCell {
         eo.mark_unbound(self.is_mapped());
         self.imp().bound_object.take().unwrap();
         self.imp().update_connection.take().unwrap();
+        self.imp().image.clear();
     }
 
     fn bound_object(&self) -> Option<EntryObject> {
@@ -122,8 +124,8 @@ mod imp {
 
     impl IconCell {
         pub(super) fn update_contents(&self, obj: &EntryObject) {
-            // There's basically no mutation that won't cause the thumbnail
-            // to be regenerated, so this is expensive but never wasted.
+            // The overhead of checking if the texture/icon is unchanged is too high compared to
+            // the savings. Would want to move thumbnails to a separate signal if it matters.
             match obj.thumbnail_or_defer() {
                 Thumbnail::Texture(texture) => self.image.set_paintable(Some(&texture)),
                 Thumbnail::None => self.image.set_from_gicon(&obj.icon()),
@@ -138,7 +140,7 @@ mod imp {
                 }
             } else if obj.get().symlink.is_some() {
                 SYMLINK_BADGE.with(|sb| {
-                    let Some(icon) = &**sb else {
+                    let Some(icon) = sb else {
                         return;
                     };
 
@@ -149,8 +151,6 @@ mod imp {
                     self.overlay.add_overlay(&badge);
                 });
             }
-
-            self.bound_object.replace(Some(obj.clone()));
         }
     }
 }

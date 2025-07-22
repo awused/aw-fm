@@ -182,11 +182,10 @@ impl TabElement {
 }
 
 mod imp {
-    use std::cell::Cell;
+    use std::cell::{Cell, OnceCell};
 
     use gtk::subclass::prelude::*;
     use gtk::{CompositeTemplate, ListItem, glib};
-    use once_cell::unsync::OnceCell;
 
     use crate::gui::tabs::id::TabId;
 

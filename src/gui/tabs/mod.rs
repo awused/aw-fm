@@ -231,11 +231,9 @@ pub mod id {
     pub struct TabId(u64);
 
     pub fn next_id() -> TabUid {
-        TabUid(NEXT_ID.with(|n| {
-            let o = n.get();
-            n.set(o + 1);
-            o
-        }))
+        let n = NEXT_ID.get();
+        NEXT_ID.set(n + 1);
+        TabUid(n)
     }
 
     impl TabUid {

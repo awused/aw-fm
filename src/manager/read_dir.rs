@@ -4,7 +4,7 @@ use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use constants::*;
@@ -16,7 +16,6 @@ use gtk::gio::{
 use gtk::glib::GStr;
 use gtk::prelude::FileExt;
 use ignore::{WalkBuilder, WalkState};
-use once_cell::sync::Lazy;
 use rayon::slice::ParallelSliceMut;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tokio::select;
@@ -70,7 +69,7 @@ mod constants {
 // directories, and entries don't end up stalling the ReadDir.
 // Still limit how many are read at once instead of using spawn_blocking.
 // Rayon is not really being utilized here, but it already exists as a dependency.
-static READ_POOL: Lazy<ThreadPool> = Lazy::new(|| {
+static READ_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     ThreadPoolBuilder::new()
         .thread_name(|u| format!("read-dir-{u}"))
         .panic_handler(handle_panic)
@@ -100,9 +99,9 @@ fn spawn_entry_pool() -> ThreadPool {
 
 // Keep one reusable ENTRY_POOL for most directory reads.
 // In the case this one is in use, we spin up another pool as needed.
-static ENTRY_POOL: Lazy<Mutex<ThreadPool>> = Lazy::new(|| Mutex::new(spawn_entry_pool()));
+static ENTRY_POOL: LazyLock<Mutex<ThreadPool>> = LazyLock::new(|| Mutex::new(spawn_entry_pool()));
 
-static SORT_POOL: Lazy<ThreadPool> = Lazy::new(|| {
+static SORT_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     ThreadPoolBuilder::new()
         .thread_name(|u| format!("sort-{u}"))
         .panic_handler(handle_panic)
@@ -113,7 +112,7 @@ static SORT_POOL: Lazy<ThreadPool> = Lazy::new(|| {
 });
 
 // This will rarely be spun up
-static COUNT_POOL: Lazy<ThreadPool> = Lazy::new(|| {
+static COUNT_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     ThreadPoolBuilder::new()
         .thread_name(|u| format!("count-{u}"))
         .panic_handler(handle_panic)
@@ -734,7 +733,7 @@ impl ChildAccumulator {
     }
 }
 
-static CHILD_ATTRIBUTES: Lazy<String> = Lazy::new(|| {
+static CHILD_ATTRIBUTES: LazyLock<String> = LazyLock::new(|| {
     [
         FILE_ATTRIBUTE_STANDARD_TYPE,
         FILE_ATTRIBUTE_STANDARD_SIZE,
@@ -839,10 +838,10 @@ fn recurse_children(
             Box::new(visitor)
         });
 
-        drop(sender.send(GuiAction::DirChildren(cancel, ChildInfo {
-            done: true,
-            ..ChildInfo::default()
-        })));
+        drop(sender.send(GuiAction::DirChildren(
+            cancel,
+            ChildInfo { done: true, ..ChildInfo::default() },
+        )));
 
         trace!(
             "Finished measuring children of {dir_count} directories in {:?}",

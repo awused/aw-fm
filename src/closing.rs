@@ -4,11 +4,10 @@ use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::{process, thread};
 
 use async_channel::{Receiver, Sender, bounded};
-use once_cell::sync::{Lazy, OnceCell};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::com::GuiAction;
@@ -17,12 +16,12 @@ use crate::spawn_thread;
 type CloseSender = Mutex<Option<Sender<()>>>;
 type CloseReceiver = Receiver<()>;
 
-static CLOSED: Lazy<Arc<AtomicBool>> = Lazy::new(|| Arc::new(AtomicBool::new(false)));
-static CLOSER: Lazy<(CloseSender, CloseReceiver)> = Lazy::new(|| {
+static CLOSED: LazyLock<Arc<AtomicBool>> = LazyLock::new(|| Arc::new(AtomicBool::new(false)));
+static CLOSER: LazyLock<(CloseSender, CloseReceiver)> = LazyLock::new(|| {
     let (s, r) = bounded::<()>(1);
     (Mutex::new(Option::Some(s)), r)
 });
-static GUI_CLOSER: OnceCell<UnboundedSender<GuiAction>> = OnceCell::new();
+static GUI_CLOSER: OnceLock<UnboundedSender<GuiAction>> = OnceLock::new();
 
 #[derive(Default)]
 pub struct CloseOnDrop {
@@ -91,7 +90,7 @@ pub fn fatal(msg: impl AsRef<str>) {
 }
 
 pub fn init(gui_sender: UnboundedSender<GuiAction>) {
-    Lazy::force(&CLOSER);
+    LazyLock::force(&CLOSER);
 
     GUI_CLOSER.set(gui_sender).expect("closing::init() called twice");
 

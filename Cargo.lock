@@ -168,7 +168,6 @@ dependencies = [
  "metadeps",
  "notify",
  "num-format",
- "once_cell",
  "ouroboros",
  "path-clean",
  "pkg-config",

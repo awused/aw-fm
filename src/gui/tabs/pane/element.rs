@@ -399,7 +399,7 @@ impl PaneElement {
 }
 
 mod imp {
-    use std::cell::{Cell, RefCell};
+    use std::cell::{Cell, OnceCell, RefCell};
 
     use gtk::gio::prelude::ListModelExt;
     use gtk::glib::SourceId;
@@ -407,7 +407,6 @@ mod imp {
     use gtk::prelude::WidgetExt;
     use gtk::subclass::prelude::*;
     use gtk::{CompositeTemplate, GridView, Orientation, glib};
-    use once_cell::unsync::OnceCell;
 
     use crate::gui::tabs::id::TabId;
     use crate::gui::tabs::pane::MIN_GRID_RES;

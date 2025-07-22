@@ -5,16 +5,17 @@ use std::ffi::{OsStr, OsString};
 use std::ops::Deref;
 
 use Segment::*;
-use once_cell::unsync::Lazy;
 use ouroboros::self_referencing;
 use regex::Regex;
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
 use crate::config::CONFIG;
 
+// Avoid atomic reads, after benchmarking this seems fastest, even compared to storing static
+// references to a LazyLock.
 thread_local! {
     static SEGMENT_RE: Regex = Regex::new(r"([^\d.]*)((\d+(\.\d+)?)|\.)").unwrap();
-    static NORMALIZE: Lazy<bool> = Lazy::new(|| CONFIG.normalize_names);
+    static NORMALIZE: bool = CONFIG.normalize_names;
 }
 
 #[derive(PartialEq, Debug)]
@@ -175,7 +176,7 @@ pub fn lowercase(original: &OsStr) -> Cow<str> {
 }
 
 pub fn normalize_lowercase(lower: &str) -> Cow<str> {
-    if !NORMALIZE.with(|n| **n) || is_nfkc_quick(lower.chars()) == IsNormalized::Yes {
+    if !NORMALIZE.with(|n| *n) || is_nfkc_quick(lower.chars()) == IsNormalized::Yes {
         return Cow::Borrowed(lower);
     }
 

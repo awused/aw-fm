@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, btree_map, hash_map};
 use std::fmt::{self, Formatter};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 
 use ahash::AHashMap;
 use chrono::{Local, TimeZone};
@@ -23,7 +23,6 @@ use gtk::glib::ffi::GVariant;
 use gtk::glib::{self, GStr, GString, Object, Variant, WeakRef};
 use gtk::prelude::{FileExt, IconExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use once_cell::sync::Lazy;
 
 use super::{SortDir, SortMode, SortSettings};
 use crate::gui::{ThumbPriority, queue_thumb};
@@ -32,7 +31,7 @@ use crate::natsort::{self, NatKey};
 
 // In theory could use standard::edit-name and standard::display-name instead of taking
 // those from the path. In practice none of my own files are that broken.
-static ATTRIBUTES: Lazy<String> = Lazy::new(|| {
+static ATTRIBUTES: LazyLock<String> = LazyLock::new(|| {
     [
         FILE_ATTRIBUTE_STANDARD_TYPE,
         // FAST_CONTENT_TYPE doesn't sniff mimetypes, but even getting the icon involves getting
@@ -348,7 +347,7 @@ impl From<Thumbnail> for Option<Texture> {
 mod internal {
     use std::cell::{Ref, RefCell};
     use std::path::Path;
-    use std::sync::Arc;
+    use std::sync::{Arc, LazyLock};
 
     use gnome_desktop::DesktopThumbnailSize;
     use gtk::gdk::Texture;
@@ -359,8 +358,6 @@ mod internal {
         ObjectImpl, ObjectSubclass, ObjectSubclassExt, ObjectSubclassIsExt,
     };
     use hashlink::LinkedHashSet;
-    use once_cell::sync::Lazy as SyncLazy;
-    use once_cell::unsync::Lazy;
 
     use super::{ALL_ENTRY_OBJECTS, Entry, FileTime, ThumbPriority, Thumbnail};
     use crate::com::EntryKind;
@@ -440,8 +437,8 @@ mod internal {
 
     impl ObjectImpl for EntryWrapper {
         fn signals() -> &'static [glib::subclass::Signal] {
-            static SIGNALS: SyncLazy<Vec<Signal>> =
-                SyncLazy::new(|| vec![Signal::builder("update").build()]);
+            static SIGNALS: LazyLock<Vec<Signal>> =
+                LazyLock::new(|| vec![Signal::builder("update").build()]);
             SIGNALS.as_ref()
         }
 
@@ -466,7 +463,7 @@ mod internal {
                 }
             });
 
-            if removed && Self::UNLOAD_LOW.with(|u| **u) {
+            if removed && Self::UNLOAD_LOW.with(|u| *u) {
                 Self::UNLOAD_QUEUE.with_borrow_mut(|q| q.remove(path));
             }
         }
@@ -480,29 +477,34 @@ mod internal {
         const LRU_THUMBNAIL_LIMIT: usize = 512;
 
         thread_local! {
-            static UNLOAD_LOW: Lazy<bool> = Lazy::new(|| CONFIG.background_thumbnailers < 0);
+            static ENABLE_THUMBS: bool = CONFIG.max_thumbnailers > 0;
+            static UNLOAD_LOW: bool = CONFIG.background_thumbnailers < 0;
             static UNLOAD_QUEUE: RefCell<LinkedHashSet<Arc<Path>>> = RefCell::default();
-            static INITIAL_PRIORITY: Lazy<ThumbPriority> = Lazy::new(||
+            static INITIAL_PRIORITY: ThumbPriority =
                 if CONFIG.background_thumbnailers >= 0 {
                     ThumbPriority::Low
                 } else {
                     ThumbPriority::Generate
-                });
+                };
         }
 
         pub(super) fn init(&self, entry: Entry, from_event: bool) -> Option<ThumbPriority> {
-            let (thumbnail, p) = match entry.kind {
-                EntryKind::File { .. } => {
-                    let p = if from_event {
-                        // Use Low if it came from an event to avoid slowing down everything.
-                        ThumbPriority::Low
-                    } else {
-                        Self::INITIAL_PRIORITY.with(|p| **p)
-                    };
-                    (Thumb::Unloaded, Some(p))
+            let (thumbnail, p) = if Self::ENABLE_THUMBS.with(|p| *p) {
+                match entry.kind {
+                    EntryKind::File { .. } => {
+                        let p = if from_event {
+                            // Use Low if it came from an event to avoid slowing down everything.
+                            ThumbPriority::Low
+                        } else {
+                            Self::INITIAL_PRIORITY.with(|p| *p)
+                        };
+                        (Thumb::Unloaded, Some(p))
+                    }
+                    EntryKind::Directory { .. } => (Thumb::Never, None),
+                    EntryKind::Uninitialized => unreachable!(),
                 }
-                EntryKind::Directory { .. } => (Thumb::Never, None),
-                EntryKind::Uninitialized => unreachable!(),
+            } else {
+                (Thumb::Never, None)
             };
 
             // TODO -- other mechanisms to set thumbnails as Never, like mimetype or somesuch
@@ -524,23 +526,27 @@ mod internal {
 
             let widgets = { self.0.borrow().as_ref().unwrap().widgets.clone() };
 
-            let (thumbnail, new_p) = match entry.kind {
-                EntryKind::File { .. } => {
-                    let wrapped = self.0.borrow();
-                    let inner = wrapped.as_ref().unwrap();
-                    let new_thumb = match &inner.thumbnail {
-                        Thumb::Never | Thumb::Unloaded | Thumb::Loading(_) | Thumb::Failed => {
-                            Thumb::Unloaded
-                        }
-                        Thumb::Loaded(old, _) | Thumb::Outdated(old, _) => {
-                            Thumb::Outdated(old.clone(), None)
-                        }
-                    };
+            let (thumbnail, new_p) = if Self::ENABLE_THUMBS.with(|p| *p) {
+                match entry.kind {
+                    EntryKind::File { .. } => {
+                        let wrapped = self.0.borrow();
+                        let inner = wrapped.as_ref().unwrap();
+                        let new_thumb = match &inner.thumbnail {
+                            Thumb::Never | Thumb::Unloaded | Thumb::Loading(_) | Thumb::Failed => {
+                                Thumb::Unloaded
+                            }
+                            Thumb::Loaded(old, _) | Thumb::Outdated(old, _) => {
+                                Thumb::Outdated(old.clone(), None)
+                            }
+                        };
 
-                    (new_thumb, Some(widgets.priority()))
+                        (new_thumb, Some(widgets.priority()))
+                    }
+                    EntryKind::Directory { .. } => (Thumb::Never, None),
+                    EntryKind::Uninitialized => unreachable!(),
                 }
-                EntryKind::Directory { .. } => (Thumb::Never, None),
-                EntryKind::Uninitialized => unreachable!(),
+            } else {
+                (Thumb::Never, None)
             };
 
             // Since this is used as the key in the hash map, if we use the new Arc<Path> we'll
@@ -614,7 +620,7 @@ mod internal {
         }
 
         pub(super) fn purge_unload_queue() {
-            if !Self::UNLOAD_LOW.with(|u| **u) {
+            if !Self::UNLOAD_LOW.with(|u| *u) {
                 return;
             }
 
@@ -666,7 +672,7 @@ mod internal {
 
             let new_p = w.priority();
 
-            if Self::UNLOAD_LOW.with(|u| **u) {
+            if Self::UNLOAD_LOW.with(|u| *u) {
                 if new_p == ThumbPriority::Low {
                     match &inner.thumbnail {
                         Thumb::Loading(_) | Thumb::Loaded(..) | Thumb::Outdated(..) => {
@@ -934,14 +940,13 @@ impl EntryObject {
     // non-trivial amount of time. If that's not necessary, remove these two methods and go back to
     // imp().thumbnail().
     pub fn thumbnail_or_defer(&self) -> Thumbnail {
-        let thumb = self.imp().thumbnail();
         // if let Thumbnail::Pending = thumb {
         // let c = self.clone();
         //     glib::timeout_add_local_once(Duration::from_millis(5), move || {
         //
         //     });
         // }
-        thumb
+        self.imp().thumbnail()
     }
 
     pub fn change_thumb_size(size: DesktopThumbnailSize) {

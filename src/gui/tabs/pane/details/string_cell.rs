@@ -44,8 +44,8 @@ impl StringCell {
 impl Bound for StringCell {
     fn bind(&self, obj: &EntryObject) {
         let imp = self.imp();
-        imp.update_contents(&obj.get());
         imp.bound_object.replace(Some(obj.clone()));
+        imp.update_contents(&obj.get());
 
         // Can never change.
         if matches!(imp.kind.get(), EntryString::Name) {
@@ -82,7 +82,7 @@ mod imp {
     use std::cell::{Cell, RefCell};
 
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
 
     use super::EntryString;
     use crate::com::{Entry, EntryObject, SignalHolder};

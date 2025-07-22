@@ -24,17 +24,16 @@ THE SOFTWARE.
 */
 
 use std::cmp::min;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use once_cell::sync::Lazy;
-
-static START: Lazy<Instant> = Lazy::new(Instant::now);
+static START: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 static PREFIX: &str = concat!(env!("CARGO_CRATE_NAME"), "::");
 
 pub fn init_logging() {
-    Lazy::force(&START); // Inititalize the start time.
+    LazyLock::force(&START); // Inititalize the start time.
 
     env_logger::Builder::from_default_env()
         .format(|f, record| {

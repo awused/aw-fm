@@ -16,7 +16,6 @@ use gtk::{
     CustomFilter, DragSource, DropTargetAsync, EventControllerKey, FilterChange, FilterListModel,
     GestureClick, ListScrollFlags, MultiSelection, Orientation, Widget, WidgetPaintable,
 };
-use once_cell::unsync::Lazy;
 
 use self::details::DetailsView;
 use self::element::{PaneElement, PaneSignals};
@@ -49,15 +48,14 @@ thread_local! {
     static MIN_GRID_RES: Cell<(i32,i32)> = Cell::default();
 
     static DRAGGING_TAB: Cell<Option<TabId>> = Cell::default();
-    static SYMLINK_BADGE: Lazy<Option<Icon>> = Lazy::new(||
+    static SYMLINK_BADGE: Option<Icon> =
         match Icon::for_string("emblem-symbolic-link") {
             Ok(icon) => Some(icon),
             Err(e) => {
                 error!("Failed to load symbolic link badge: {e}");
                 None
             },
-        }
-    );
+        };
 }
 
 

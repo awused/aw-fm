@@ -52,6 +52,7 @@ impl Bound for IconTile {
             // self.name.set_tooltip_text(Some(&disp_string));
         }
 
+        imp.bound_object.replace(Some(eo.clone()));
         imp.update_contents(eo);
 
         // Don't need to be weak refs
@@ -75,6 +76,7 @@ impl Bound for IconTile {
         eo.mark_unbound(self.is_mapped());
         self.imp().bound_object.take().unwrap();
         self.imp().update_connection.take().unwrap();
+        self.imp().image.clear();
     }
 
     fn bound_object(&self) -> Option<EntryObject> {
@@ -139,15 +141,13 @@ mod imp {
 
     impl IconTile {
         pub(super) fn update_contents(&self, obj: &EntryObject) {
-            // There's basically no mutation that won't cause the thumbnail
-            // to be regenerated, so this is expensive but never wasted.
+            // The overhead of checking if the texture/icon is unchanged is too high compared to
+            // the savings. Would want to move thumbnails to a separate signal if it matters.
             match obj.thumbnail_or_defer() {
                 Thumbnail::Texture(texture) => self.image.set_paintable(Some(&texture)),
                 Thumbnail::None => self.image.set_from_gicon(&obj.icon()),
                 Thumbnail::Pending => self.image.clear(),
             }
-
-            self.bound_object.replace(Some(obj.clone()));
 
             let entry = obj.get();
 
@@ -159,7 +159,7 @@ mod imp {
                 }
             } else if entry.symlink.is_some() {
                 SYMLINK_BADGE.with(|sb| {
-                    let Some(icon) = &**sb else {
+                    let Some(icon) = sb else {
                         return;
                     };
 
