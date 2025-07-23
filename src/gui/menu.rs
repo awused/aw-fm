@@ -7,7 +7,7 @@ use std::io::Read;
 use std::os::unix::prelude::{OsStrExt, PermissionsExt};
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use ahash::AHashMap;
@@ -139,12 +139,11 @@ impl Ord for ActionSettings {
     }
 }
 
-thread_local! {
-    static SETTINGS_RE: regex::Regex =
-        regex::Regex::new(
-            r"(name|directories|files|mimetypes|extensions|regex|selection|priority|parse_output)=(.*)$")
-                .unwrap();
-}
+static SETTINGS_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r"(name|directories|files|mimetypes|extensions|regex|selection|priority|parse_output)=(.*)$")
+            .unwrap()
+});
 
 impl ActionSettings {
     fn parse_script(path: &Path, read: impl Read) -> Option<Self> {
@@ -191,7 +190,7 @@ impl ActionSettings {
                 return Some(s);
             }
 
-            let Some(cap) = SETTINGS_RE.with(|re| re.captures(line)) else {
+            let Some(cap) = SETTINGS_RE.captures(line) else {
                 continue;
             };
 

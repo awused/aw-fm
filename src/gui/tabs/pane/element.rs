@@ -479,28 +479,30 @@ mod imp {
             // with just measuring inner_box directly and not need any complicated formula for
             // tiles.
             if let Some(grid) = self.scroller.child().and_downcast::<GridView>() {
-                let mut minimums = MIN_GRID_RES.get();
-
                 // We only really care about width, height could be 0 (but shouldn't be)
-                if minimums.0 == 0
-                    && let Some(model) = grid.model()
+                let minimums = if let Some(m) = MIN_GRID_RES.get() {
+                    m
+                } else if let Some(model) = grid.model()
                     && model.n_items() > 0
                 {
                     grid.set_min_columns(1);
                     let width = self.inner_box.measure(Orientation::Horizontal, -1).0;
                     let height = self.inner_box.measure(Orientation::Vertical, -1).0;
-                    minimums = (width, height);
-                    MIN_GRID_RES.set(minimums);
-                    info!("Measured grid view minimum res as {minimums:?}");
-                }
+                    if width > 0 {
+                        info!("Measured grid view minimum res as {width}x{height}");
+                        MIN_GRID_RES.set((width, height)).unwrap();
+                    }
+                    &(width, height)
+                } else {
+                    return self.inner_box.measure(orientation, for_size);
+                };
 
-                if minimums.0 != 0 {
-                    match orientation {
-                        Orientation::Horizontal => return (minimums.0, minimums.0, -1, -1),
-                        Orientation::Vertical => return (minimums.1, minimums.1, -1, -1),
-                        _ => {}
-                    };
-                }
+
+                match orientation {
+                    Orientation::Horizontal => return (minimums.0, minimums.0, -1, -1),
+                    Orientation::Vertical => return (minimums.1, minimums.1, -1, -1),
+                    _ => {}
+                };
             }
 
             self.inner_box.measure(orientation, for_size)
@@ -508,8 +510,7 @@ mod imp {
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             if width > 0
-                && let minimums = MIN_GRID_RES.get()
-                && minimums.0 != 0
+                && let Some(minimums) = MIN_GRID_RES.get()
             {
                 self.last_width.set(width as u32);
 

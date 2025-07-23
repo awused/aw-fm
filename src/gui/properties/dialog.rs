@@ -1,11 +1,11 @@
 use std::borrow::Cow;
-use std::cell::{Cell, OnceCell};
+use std::cell::Cell;
 use std::fs::Permissions;
 use std::os::unix::prelude::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use gstreamer::{Caps, ClockTime};
@@ -26,9 +26,7 @@ glib::wrapper! {
         @extends gtk::Widget, gtk::Window;
 }
 
-thread_local! {
-    static GSTREAMER_INIT: OnceCell<()> = const { OnceCell::new() };
-}
+static GSTREAMER_INIT: OnceLock<()> = OnceLock::new();
 
 impl PropDialog {
     pub(super) fn show(
@@ -378,9 +376,7 @@ impl PropDialog {
                 return;
             }
 
-            GSTREAMER_INIT.with(|cell| {
-                cell.get_or_init(|| gstreamer::init().unwrap());
-            });
+            GSTREAMER_INIT.get_or_init(|| gstreamer::init().unwrap());
 
             s.imp().media_initialized.set(true);
             debug!("Fetching media info for {path:?}");

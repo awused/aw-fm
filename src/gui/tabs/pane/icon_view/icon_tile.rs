@@ -9,7 +9,7 @@ use crate::gui::tabs::pane::Bound;
 
 glib::wrapper! {
     pub struct IconTile(ObjectSubclass<imp::IconTile>)
-        @extends gtk::Widget, gtk::Box;
+        @extends gtk::Widget;
 }
 
 impl Default for IconTile {
@@ -51,7 +51,7 @@ impl Bound for IconTile {
 
             // Seems to cause it to lock up completely in large directories with sorting?
             // Absolutely tanks performance either way.
-            // self.name.set_tooltip_text(Some(&disp_string));
+            // imp.name.set_tooltip_text(Some(&disp_string));
         }
 
         imp.bound_object.replace(Some(eo.clone()));
@@ -86,10 +86,11 @@ impl Bound for IconTile {
 
 mod imp {
     use std::cell::{Cell, RefCell};
+    use std::sync::OnceLock;
 
     use gtk::prelude::WidgetExt;
     use gtk::subclass::prelude::*;
-    use gtk::{CompositeTemplate, glib};
+    use gtk::{CompositeTemplate, Orientation, glib};
 
     use crate::com::{EntryObject, SignalHolder, Thumbnail};
     use crate::gui::tabs::pane::SYMLINK_BADGE;
@@ -97,6 +98,9 @@ mod imp {
     #[derive(Default, CompositeTemplate)]
     #[template(file = "icon_tile.ui")]
     pub struct IconTile {
+        #[template_child]
+        pub inner_box: TemplateChild<gtk::Box>,
+
         #[template_child]
         pub image: TemplateChild<gtk::Image>,
         #[template_child]
@@ -116,7 +120,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for IconTile {
-        type ParentType = gtk::Box;
+        type ParentType = gtk::Widget;
         type Type = super::IconTile;
 
         const NAME: &'static str = "IconTile";
@@ -136,8 +140,34 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for IconTile {}
-    impl BoxImpl for IconTile {}
+    static RES: OnceLock<(i32, i32)> = OnceLock::new();
+
+    impl WidgetImpl for IconTile {
+        fn measure(&self, orientation: Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+            let minimums = if let Some(m) = RES.get() {
+                m
+            } else {
+                let width = self.inner_box.measure(Orientation::Horizontal, -1).0;
+                let height = self.inner_box.measure(Orientation::Vertical, -1).0;
+                if width > 0 && height > 0 {
+                    info!("Measured grid tile res as {width}x{height}");
+                    RES.set((width, height)).unwrap()
+                }
+                &(width, height)
+            };
+
+            match orientation {
+                Orientation::Horizontal => (minimums.0, minimums.0, -1, -1),
+                Orientation::Vertical => (minimums.1, minimums.1, -1, -1),
+                _ => unreachable!(),
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            self.parent_size_allocate(width, height, baseline);
+            self.inner_box.allocate(width, height, baseline, None);
+        }
+    }
 
     impl IconTile {
         pub(super) fn update_contents(&self, obj: &EntryObject) {

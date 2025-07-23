@@ -3,6 +3,7 @@ use std::cell::{Cell, RefCell};
 use std::cmp::min;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use ahash::AHashMap;
@@ -43,10 +44,10 @@ pub const MIN_PANE_RES: i32 = 250;
 // TODO [incremental] -- lower to 2 when incremental filtering isn't broken.
 static MIN_SEARCH: usize = 3;
 
-thread_local! {
-    // We don't have this until we measure a grid with at least one item
-    static MIN_GRID_RES: Cell<(i32,i32)> = Cell::default();
+// We don't have this until we measure a grid with at least one item
+static MIN_GRID_RES: OnceLock<(i32, i32)> = OnceLock::new();
 
+thread_local! {
     static DRAGGING_TAB: Cell<Option<TabId>> = Cell::default();
     static SYMLINK_BADGE: Option<Icon> =
         match Icon::for_string("emblem-symbolic-link") {

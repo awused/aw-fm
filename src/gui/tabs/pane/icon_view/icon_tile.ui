@@ -1,50 +1,55 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
-  <template class="IconTile" parent="GtkBox">
-    <property name="orientation">vertical</property>
-    <property name="spacing">0</property>
-    <property name="height-request">100</property>
+  <template class="IconTile" parent="GtkWidget">
 
     <child>
-      <object class="GtkOverlay" id="overlay">
-        <property name="halign">center</property>
+      <object class="GtkBox" id="inner_box">
+        <property name="orientation">vertical</property>
+        <property name="spacing">0</property>
+        <property name="height-request">100</property>
 
         <child>
-          <object class="GtkImage" id="image">
-            <property name="pixel-size">128</property>
-            <property name="width-request">128</property>
-            <property name="height-request">128</property>
-            <property name="halign">GTK_ALIGN_CENTER</property>
+          <object class="GtkOverlay" id="overlay">
+            <property name="halign">center</property>
+
+            <child>
+              <object class="GtkImage" id="image">
+                <property name="pixel-size">128</property>
+                <property name="width-request">128</property>
+                <property name="height-request">128</property>
+                <property name="halign">GTK_ALIGN_CENTER</property>
+              </object>
+            </child>
+
           </object>
         </child>
 
-      </object>
-    </child>
+        <child>
+          <object class="GtkInscription" id="name">
+            <property name="xalign">0.5</property>
+            <property name="yalign">0.0</property>
+            <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
+            <property name="nat-lines">2</property>
+            <property name="min-lines">2</property>
+            <property name="nat-chars">20</property>
+            <property name="min-chars">20</property>
+            <property name="text-overflow">GTK_INSCRIPTION_OVERFLOW_ELLIPSIZE_END</property>
 
-    <child>
-      <object class="GtkInscription" id="name">
-        <property name="xalign">0.5</property>
-        <property name="yalign">0.0</property>
-        <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
-        <property name="nat-lines">2</property>
-        <property name="min-lines">2</property>
-        <property name="nat-chars">20</property>
-        <property name="min-chars">20</property>
-        <property name="text-overflow">GTK_INSCRIPTION_OVERFLOW_ELLIPSIZE_END</property>
+            <style>
+              <class name="name"/>
+            </style>
+          </object>
+        </child>
 
-        <style>
-          <class name="name"/>
-        </style>
-      </object>
-    </child>
-
-    <child>
-      <object class="GtkInscription" id="size">
-        <property name="xalign">0.5</property>
-        <property name="nat-lines">1</property>
-        <property name="min-lines">1</property>
-        <property name="nat-chars">20</property>
-        <property name="min-chars">20</property>
+        <child>
+          <object class="GtkInscription" id="size">
+            <property name="xalign">0.5</property>
+            <property name="nat-lines">1</property>
+            <property name="min-lines">1</property>
+            <property name="nat-chars">20</property>
+            <property name="min-chars">20</property>
+          </object>
+        </child>
       </object>
     </child>
   </template>

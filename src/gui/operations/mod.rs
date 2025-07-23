@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::fs::{ReadDir, remove_dir};
 use std::path::Path;
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use gtk::gio::{self, Cancellable, FileCopyFlags, FileInfo, FileQueryInfoFlags};
@@ -24,11 +24,12 @@ mod undo;
 
 const OPERATIONS_HISTORY: usize = 10;
 
-thread_local! {
-    static COPY_REGEX: Regex = Regex::new(r"^(.*)( \(copy (\d+)\))(\.[^/]+)?$").unwrap();
-    static COPIED_REGEX: Regex = Regex::new(r"^(.*)( \(copied (\d+)\))(\.[^/]+)?$").unwrap();
-    static MOVED_REGEX: Regex = Regex::new(r"^(.*)( \(moved (\d+)\))(\.[^/]+)?$").unwrap();
-}
+static COPY_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(.*)( \(copy (\d+)\))(\.[^/]+)?$").unwrap());
+static COPIED_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(.*)( \(copied (\d+)\))(\.[^/]+)?$").unwrap());
+static MOVED_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(.*)( \(moved (\d+)\))(\.[^/]+)?$").unwrap());
 
 // Whatever we add to a name to resolve collisions
 #[derive(Debug, Clone, Copy)]
@@ -41,9 +42,9 @@ enum Fragment {
 impl Fragment {
     fn captures(self, bytes: &[u8]) -> Option<Captures<'_>> {
         match self {
-            Self::Copy => COPY_REGEX.with(|r| r.captures(bytes)),
-            Self::Copied => COPIED_REGEX.with(|r| r.captures(bytes)),
-            Self::Moved => MOVED_REGEX.with(|r| r.captures(bytes)),
+            Self::Copy => COPY_REGEX.captures(bytes),
+            Self::Copied => COPIED_REGEX.captures(bytes),
+            Self::Moved => MOVED_REGEX.captures(bytes),
         }
     }
 
