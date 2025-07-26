@@ -2,14 +2,14 @@ use std::cell::Cell;
 use std::ffi::OsStr;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
-use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, SyncSender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
 use dirs::data_dir;
 use rusqlite::types::{FromSql, FromSqlError};
-use rusqlite::{params, Connection, ToSql};
+use rusqlite::{Connection, ToSql, params};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
@@ -99,7 +99,7 @@ impl DBCon {
         update_to_current(&mut con);
 
         let (sender, receiver) = std::sync::mpsc::sync_channel(2);
-        let h = spawn_thread("databse", move || Con(con).run(receiver));
+        let h = spawn_thread("database", move || Con(con).run(receiver));
 
         trace!("Opened database in {:?}", start.elapsed());
 

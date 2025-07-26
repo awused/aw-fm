@@ -372,8 +372,10 @@ impl PaneElement {
         // Allow ^ for prefix matching?
         // There are unicode spaces that could matter, but not for me
         // is_whitespace() would not be appropriate
-        // Don't allow seeking to start with a space
-        if !((c == ' ' && seek_visible) || c.is_alphanumeric()) {
+        // Don't allow seeking to start with a space/hyphen/underscore?
+        if !(((c == ' ' || c == '_' || c == '-' || c == '.') && seek_visible)
+            || c.is_alphanumeric())
+        {
             return Propagation::Proceed;
         }
 
@@ -387,6 +389,7 @@ impl PaneElement {
         }
 
         debug!("Seek to \"{t}\" in {tab:?}");
+        // With wrapping and seek_visible this could be something like "maybe_seek_next"
         tabs_run(move |tlist| {
             tlist.find_mut(tab).unwrap().seek(&t);
         });
