@@ -19,6 +19,10 @@ pub struct Opt {
 
     #[arg(value_parser)]
     pub file_name: Option<PathBuf>,
+
+    /// Start with no default tab
+    #[arg(long)]
+    pub empty: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -203,6 +207,8 @@ pub struct Config {
     pub background_thumbnailers: i16,
     #[serde(default)]
     pub force_small_thumbnails: bool,
+    #[serde(default)]
+    pub disable_filemanager_dbus: bool,
 }
 
 // Serde seems broken with OsString for some reason

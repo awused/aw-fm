@@ -101,7 +101,7 @@ async fn run_with_output(
                 let stdout = String::from_utf8_lossy(&output.stdout);
 
                 for line in stdout.trim().lines() {
-                    if line == "ClearTarget" {
+                    if line == "ClearTarget" || line == "ClearTargetTab" {
                         info!("Clearing script target tab, was {target_tab:?}");
                         target_tab = ActionTarget::Active;
                         continue;

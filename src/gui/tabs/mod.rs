@@ -93,7 +93,7 @@ impl PaneState {
 }
 
 #[derive(Debug, Clone)]
-struct NavTarget {
+pub(super) struct NavTarget {
     // A clean and absolute but not canonical path.
     dir: Arc<Path>,
     scroll: Option<Arc<Path>>,
@@ -156,16 +156,20 @@ impl NavTarget {
     }
 
     // Will cause an error later if this isn't a directory.
-    fn assume_dir<P: AsRef<Path> + Into<Arc<Path>>>(path: P) -> Self {
+    pub(super) fn assume_dir<P: AsRef<Path> + Into<Arc<Path>>>(path: P) -> Self {
         Self { dir: path.into(), scroll: None }
     }
 
     // Will cause an error later if path isn't a directory, jump missing causes no real problems.
-    fn assume_jump<P: AsRef<Path> + Into<Arc<Path>>>(path: P, jump: Arc<Path>) -> Self {
+    pub(super) fn assume_jump<P: AsRef<Path> + Into<Arc<Path>>>(path: P, jump: Arc<Path>) -> Self {
         Self { dir: path.into(), scroll: Some(jump) }
     }
 
     fn initial(list: &TabsList) -> Option<Self> {
+        if OPTIONS.empty && OPTIONS.file_name.is_none() {
+            return None;
+        }
+
         let path = OPTIONS
             .file_name
             .clone()

@@ -407,7 +407,7 @@ impl TabsList {
         Some(id)
     }
 
-    pub(super) fn create_tab(
+    pub fn create_tab(
         &mut self,
         position: TabPosition,
         nav_target: NavTarget,

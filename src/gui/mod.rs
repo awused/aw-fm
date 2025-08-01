@@ -7,6 +7,7 @@ use std::time::Duration;
 use ahash::AHashMap;
 use gnome_desktop::DesktopThumbnailSize;
 use gtk::gdk::{ModifierType, Surface};
+use gtk::gio::OwnerId;
 use gtk::glib::{ControlFlow, ExitCode, SourceId, WeakRef};
 use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::*;
@@ -28,6 +29,7 @@ use crate::state_cache::{STATE, State, save_settings};
 
 mod applications;
 mod clipboard;
+mod dbus;
 mod input;
 mod main_window;
 mod menu;
@@ -122,6 +124,8 @@ struct Gui {
     ongoing_operations: RefCell<Vec<Rc<Operation>>>,
     finished_operations: RefCell<VecDeque<Rc<Operation>>>,
 
+    dbus_owner: DebugIgnore<Cell<Option<OwnerId>>>,
+
     manager_sender: UnboundedSender<ManagerAction>,
 
     warning_timeout: DebugIgnore<Cell<Option<SourceId>>>,
@@ -154,6 +158,7 @@ pub fn run(
             None => a.activate(),
             Some(g) => {
                 let args = cl.arguments();
+                info!("Got new cli args: {args:?}");
 
                 let mut path = if args.len() < 2 {
                     let Some(cwd) = cl.cwd() else {
@@ -253,6 +258,8 @@ impl Gui {
             ongoing_operations: RefCell::default(),
             finished_operations: RefCell::default(),
 
+            dbus_owner: DebugIgnore::default(),
+
             manager_sender,
 
             warning_timeout: DebugIgnore::default(),
@@ -262,6 +269,8 @@ impl Gui {
 
         let g = rc.clone();
         GUI.with(|cell| cell.set(g).unwrap());
+
+        rc.dbus_register();
 
 
         rc.menu.set(menu::GuiMenu::new(&rc)).unwrap();
@@ -273,6 +282,7 @@ impl Gui {
             g.database.destroy();
 
             g.tabs.borrow_mut().cancel_loads();
+            g.dbus_unregister();
             closing::close();
         });
 

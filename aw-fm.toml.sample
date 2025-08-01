@@ -308,3 +308,9 @@ unload_timeout = 0
 # No effect if you do not have any high DPI monitors or don't otherwise trigger UI scaling.
 force_small_thumbnails = false
 
+# Disable the FileManager dbus service.
+#
+# This is used by other programs, such as "Show in Folder" from a browser.
+#
+# Not recommended unless you have a different file manager you want to use with it.
+disable_filemanager_dbus = false

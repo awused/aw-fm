@@ -2,38 +2,50 @@
 
 Awused's personal gui file manager.
 
-It is a simple file manager designed to be fast and efficient at doing what I
-actually do.
+It is a simple file manager designed to be fast and efficient.
 
 ## Features
 
 * Fast and efficient
   * Opening directories containing hundreds of thousands of images shouldn't
       lock up the UI for minutes/hours.
+  * In the default configuration, it uses a tiny fraction of the memory of
+      other GUI file managers in large directories with many thumbnails.
+  * Cloning tabs is instant.
 * Natural sorting, `abc` sorts before `XYZ` and `a2.png` sorts before `a10.png`.
-* Highly customizable, up to a point.
-  * A reasonably complete set of text commands to control the application.
-  * Define custom shortcuts, custom bookmarks, and custom context menu actions.
 * A UI charitably described as minimal.
   * Panes/splits and tab groups function like minimal workspaces.
 * Custom actions showing up in context menus.
   * Just flat scripts, easy to write and back up.
-* Seeking inside a directory or search results without requiring a full search.
+* Seeking without requiring a full search.
+* Shell-like completion - typing `/p/t/f` can complete `/path/to/file`.
 * Session saving and loading.
+* Highly customizable, up to a point.
+  * A reasonably complete set of text commands to control the application.
+  * Define custom shortcuts, custom bookmarks, and custom context menu actions.
+  * Custom context menu actions come with powerful filtering to control when
+      they're visible.
 * Not much more, anything I don't personally use doesn't get implemented.
-  * Will not cover every use case, like mounting external drives.
 
 ## Installation and Usage
 
 Clone the repository and run `make install` to install aw-fm and the extra files
 in the [desktop](desktop) directory to their default locations. Alternately run
 `cargo install --git https://github.com/awused/aw-fm --locked` and install those
-extra files manually.
+extra files manually, or skip them.
 
 Run with `aw-fm` or your application launcher of choice.
 
 Optionally edit the config in [aw-fm.toml.sample](aw-fm.toml.sample) and copy it
 to `~/.config/aw-fm/aw-fm.toml`.
+
+### Setting as the default file manager
+
+If you've copied the desktop files, use
+`xdg-mime default aw-fm-folder.desktop inode/directory` to update your default
+mimetype. Then follow the instructions in
+[the dbus service file](desktop/org.aw-fm.freedesktop.FileManager1.service)
+to disable other dbus file managers from auto-starting.
 
 ### Dependencies
 
@@ -68,7 +80,8 @@ is hardcoded. `ctrl+space` and `ctrl+shift+space` will cycle through matching pa
 
 Custom actions are enabled by scripts in the actions directory, default
 `$HOME/.config/aw-fm/actions/`. Depending on how they are configured
-they do not always appear in the context menu.
+they do not always appear in the context menu and can be triggered based on the number
+of files, types of files (mimetypes or extensions), and the location of the files.
 
 They must be executable text files and options are read from within the file.
 See the [example script](examples/sample-action.sh) for an explanation of the
@@ -100,7 +113,7 @@ specify them.
   * Will _not_ run executable files.
 * `OpenWith`
   * Spawns a fairly standard "Open With" dialog to select the application.
-  * Allows changing the default application. <!-- or defining new applications. -->
+  * Allows changing the default application.
 * `Cut`/`Copy`
   * Cuts or copies the current selection.
   * Will set the clipboard even if nothing is selected.
@@ -110,11 +123,12 @@ specify them.
   * Using this in scripts would be odd.
 * `Trash`
   * Moves the selected items to trash.
-  * aw-fm doesn't have utilities to manage trash.
+  * aw-fm doesn't have utilities to manage trash or restoring files.
 * `Delete`
   * Spawns a confirmation dialog before permanently deleting the selected items.
   * As a special case, `Script`s can only run `Delete` on the _currently_ active
-    tab and it will fail if the active tab has changed without `ClearTarget`.
+    tab and it will fail if the active tab has changed without calling
+    `ClearTargetTab`.
 * `Rename`
   * Spawns a rename dialog for the current file.
 * `Properties`
@@ -210,7 +224,7 @@ specify them.
     files _will_ still be deleted.
   * Not all operations or actions can be undone.
     Deletion is not undoable and trashing is currently not undoable.
-* `ClearTarget`
+* `ClearTargetTab`
   * Changes the target for later commands from whatever the active tab was when
     the script was called to whatever the active tab is currently.
   * Only useful in the context of custom actions or `Script` calls.
@@ -248,7 +262,8 @@ Environment Variable | Explanation
 <!-- AWFM_WINDOW | The window ID for the primary window. Currently only on X11. -->
 
 By default commands run in the context of tab that was active when they spawn.
-Calling `ClearTarget` will instead run them in the context of the currently
+This is to prevent surprises if the user switches tabs while a script is running.
+Calling `ClearTargetTab` will instead run them in the context of the currently
 active tab, even if it changes.
 
 This script will open a new tab and close the previous tab, if any was open,
@@ -263,7 +278,7 @@ This script will open a new tab and then immediately close the new tab,
 leaving whatever tab was open initially untouched.
 
 ```bash
-echo ClearTarget
+echo ClearTargetTab
 echo NewTab
 echo CloseTab
 ```
@@ -279,12 +294,28 @@ unix-only imports are fixed.
 * `GTK_DEBUG=Interactive`
 * `G_MESSAGES_DEBUG=GnomeDesktop` for thumbnailer issues or `G_MESSAGES_DEBUG=All`
 
+## Unplanned Features
+
+While I use aw-fm as my only daily driver file manager, there are a few things I
+don't plan to implement as I do not use them or use them so rarely it is not worth
+implementing them. Aw-fm will not cover every standard file manager feature. If I
+only need to open another file manager once or twice a year, that's acceptable.
+
+* Mounting, unmounting, formatting, or otherwise managing drives and file systems
+* MTP, WebDAV, FTP, or other protocols
+* Browsing inside of archives
+  * Nice to have, but isn't worth the complexity given how infrequently I'd use it
+* Multiple windows in a single process
+  * Aw-fm is very efficient at sharing resources between tabs. This could be
+      extended across multiple windows but I just don't use them myself and find
+      tabs and splits to be more than enough.
+
 ## Why
 
-Gui file managers on Linux are almost all descended from Nautilus and have
-similar characteristics including performance traps and a lack of
-customization. They do, however, support things I probably won't,
-like automount and udev.
+The major gui file managers on Linux are almost all descended from Nautilus and
+have similar characteristics including performance traps and a lack of
+customization and features. Even among more niche projectsI wasn't able to find
+a file manager that fit my use cases while also being performant, so I made one.
 
 ## Screenshots
 

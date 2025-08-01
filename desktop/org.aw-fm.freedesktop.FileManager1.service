@@ -1,0 +1,12 @@
+[D-BUS Service]
+Name=org.freedesktop.FileManager1
+Exec=aw-fm --empty
+
+# Put this in ~/.local/share/dbus-1/services
+# Don't use this if you've disabled the dbus service in the config.
+#
+#
+# You may also want disable all other implementations of org.freedesktop.FileManager1,
+# because dbus never imagined there might be more than one option for a service.
+# Check /usr/share/dbus-1/services and delete or edit the files so they don't implement
+# org.freedesktop.FileManager1 anymore
