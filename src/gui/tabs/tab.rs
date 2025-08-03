@@ -817,9 +817,8 @@ impl Tab {
         self.pane.overwrite_state(PaneState::for_jump(target.scroll));
 
         let old_dir = replace(&mut self.dir, FlatDir::new(target.dir));
-        if let Some((path, watch)) = old_dir.try_into_cached() {
-            cache_open_dir(context.cached, self.contents.cache(path, watch));
-        }
+        let new_cache =
+            old_dir.try_into_cached().map(|(path, watch)| self.contents.cache(path, watch));
 
         let old_settings = self.settings;
         self.settings = gui_run(|g| g.database.get(self.dir.path().clone()));
@@ -843,6 +842,10 @@ impl Tab {
             } else {
                 self.contents.clear(self.settings.sort);
             }
+        }
+
+        if let Some(new) = new_cache {
+            cache_open_dir(context.cached, new);
         }
 
         if was_search {
