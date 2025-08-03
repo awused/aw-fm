@@ -40,6 +40,10 @@ struct TabContext<'a> {
 }
 
 fn cache_open_dir(cache: &mut LinkedHashMap<Arc<Path>, CachedDir>, new: CachedDir) {
+    if MAX_CACHED_FLAT_DIRS == 0 {
+        return;
+    }
+
     while cache.len() >= MAX_CACHED_FLAT_DIRS {
         cache.pop_front();
     }

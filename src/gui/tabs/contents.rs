@@ -103,8 +103,10 @@ impl Contents {
         }
     }
 
-    pub fn cache(&self, path: Arc<Path>, watch: WatchedDir) -> CachedDir {
+    pub fn list_into_cache(&mut self, path: Arc<Path>, watch: WatchedDir) -> CachedDir {
         assert!(!self.stale);
+        // Mark as stale so that we definitely don't reuse self.list
+        self.stale = true;
 
         CachedDir::new(path, watch, self.sort, self.list.clone())
     }
@@ -296,10 +298,6 @@ impl Contents {
     pub fn clear(&mut self, sort: SortSettings) {
         self.stale = false;
         self.sort = sort;
-
-        if self.list.n_items() == 0 {
-            return;
-        }
 
         let new_list = ListStore::new::<EntryObject>();
 

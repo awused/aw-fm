@@ -817,8 +817,9 @@ impl Tab {
         self.pane.overwrite_state(PaneState::for_jump(target.scroll));
 
         let old_dir = replace(&mut self.dir, FlatDir::new(target.dir));
-        let new_cache =
-            old_dir.try_into_cached().map(|(path, watch)| self.contents.cache(path, watch));
+        let new_cache = old_dir
+            .try_into_cached()
+            .map(|(path, watch)| self.contents.list_into_cache(path, watch));
 
         let old_settings = self.settings;
         self.settings = gui_run(|g| g.database.get(self.dir.path().clone()));
@@ -1297,13 +1298,13 @@ impl Tab {
     }
 
     pub fn close(
-        self,
+        mut self,
         after: Option<TabId>,
         cache: &mut LinkedHashMap<Arc<Path>, CachedDir>,
     ) -> ClosedTab {
         let current = self.current_history();
         if let Some((path, watch)) = self.dir.try_into_cached() {
-            cache_open_dir(cache, self.contents.cache(path, watch));
+            cache_open_dir(cache, self.contents.list_into_cache(path, watch));
         }
 
         ClosedTab {
