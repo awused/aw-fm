@@ -1,13 +1,15 @@
-use std::cmp::Ordering;
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
-use gtk::gio::{ListModel, ListStore};
-use gtk::glib::{self, ControlFlow, Object, Priority};
+use gtk::gio::ListStore;
 use gtk::prelude::*;
 use gtk::{CustomFilter, FilterListModel, MultiSelection};
 
-use super::PartiallyAppliedUpdate;
-use crate::com::{Entry, EntryObject, EntryObjectSnapshot, SearchSnapshot, SortSettings};
+use super::flat_dir::WatchedDir;
+use super::{CachedDir, ExistingEntry, PartiallyAppliedUpdate, TotalPos, liststore_drop_batched};
+use crate::com::{Entry, EntryObject, EntryObjectSnapshot, SearchSnapshot, SortSettings, Update};
+use crate::gui::tabs::{listmodel_bsearch, liststore_entry_for_update, liststore_needs_reinsert};
 
 pub struct Contents {
     list: ListStore,
@@ -32,8 +34,6 @@ impl Drop for Contents {
         self.clear(self.sort);
     }
 }
-
-pub struct TotalPos(u32);
 
 impl Contents {
     pub fn new(sort: SortSettings) -> Self {
@@ -85,6 +85,28 @@ impl Contents {
         if sort != source.sort {
             self.list.sort(sort.comparator());
         }
+    }
+
+    pub fn inherit_cached(&mut self, sort: SortSettings, cached: &CachedDir) {
+        self.clear(cached.sort);
+
+        if sort != cached.sort {
+            cached.list.sort(sort.comparator());
+        }
+
+        self.list = cached.list.clone();
+
+        if let Some(filtered) = &self.filtered {
+            filtered.set_model(Some(&self.list));
+        } else {
+            self.selection.set_model(Some(&self.list));
+        }
+    }
+
+    pub fn cache(&self, path: Arc<Path>, watch: WatchedDir) -> CachedDir {
+        assert!(!self.stale);
+
+        CachedDir::new(path, watch, self.sort, self.list.clone())
     }
 
     pub fn apply_snapshot(&mut self, snap: EntryObjectSnapshot) {
@@ -153,40 +175,6 @@ impl Contents {
         );
     }
 
-    // ListStore isn't even a flat array, so binary searching isn't much worse even at small sizes.
-    fn bsearch<L: IsA<ListModel>>(entry: &Entry, sort: SortSettings, list: &L) -> Option<u32> {
-        let mut start = 0;
-        let mut end = list.n_items();
-
-        if end == 0 {
-            return None;
-        }
-
-        while start < end {
-            let mid = start + (end - start) / 2;
-
-            let obj = list.item(mid).unwrap().downcast::<EntryObject>().unwrap();
-
-            let inner = obj.get();
-            if inner.abs_path == entry.abs_path {
-                // The equality check below may fail even with abs_path being equal due to updates.
-                return Some(mid);
-            }
-
-            match entry.cmp(&inner, sort) {
-                Ordering::Equal => unreachable!(),
-                Ordering::Less => end = mid,
-                Ordering::Greater => start = mid + 1,
-            }
-        }
-
-        // All list stores must always be sorted modulo individual updates by the time updates are
-        // being handled.
-        //
-        // The item is not present.
-        None
-    }
-
     // Look for the location in the unfiltered list.
     // The list may no longer be sorted because of an update, but except for the single update to
     // "entry's corresponding EntryObject" the list will be sorted.
@@ -194,7 +182,7 @@ impl Contents {
     pub fn total_position_by_sorted(&self, entry: &Entry) -> Option<TotalPos> {
         assert!(!self.stale);
 
-        Self::bsearch(entry, self.sort, &self.list).map(TotalPos)
+        listmodel_bsearch(&self.list, self.sort, entry).map(TotalPos)
     }
 
     // Look for the location in the filtered list.
@@ -211,29 +199,25 @@ impl Contents {
             //     // Must unset incremental to get an accurate position.
             //     filtered.set_incremental(false);
             // }
-            Self::bsearch(entry, self.sort, filtered)
+            listmodel_bsearch(filtered, self.sort, entry)
         } else {
-            Self::bsearch(entry, self.sort, &self.list)
+            listmodel_bsearch(&self.list, self.sort, entry)
         }
     }
 
-    pub fn find_by_inode(&self, inode: u64) -> Option<EntryObject> {
+    // Gets the EntryObject, even if it doesn't exist in this list, and the local index for it.
+    pub fn entry_for_flat_update(&self, update: &Update) -> ExistingEntry {
         assert!(!self.stale);
 
-        self.list.iter::<EntryObject>().flatten().find(|eo| eo.get().inode == inode)
+        liststore_entry_for_update(&self.list, self.sort, update)
     }
 
     pub fn reinsert_updated(&mut self, pos: TotalPos, new: &EntryObject, old: &Entry) {
         assert!(!self.stale);
 
         let t_pos = pos.0;
-        let comp = self.sort.comparator();
 
-        if (t_pos == 0
-            || comp(&self.list.item(t_pos - 1).unwrap(), new.upcast_ref::<Object>()).is_lt())
-            && (t_pos + 1 == self.list.n_items()
-                || comp(&self.list.item(t_pos + 1).unwrap(), new.upcast_ref::<Object>()).is_gt())
-        {
+        if !liststore_needs_reinsert(&self.list, self.sort, pos, new) {
             trace!("Did not reinsert item as it was already in the correct position");
             return;
         }
@@ -251,7 +235,7 @@ impl Contents {
         // After removing the lone updated item, the list is guaranteed to be sorted.
         // So we can reinsert it much more cheaply than sorting the entire list again.
         self.list.remove(t_pos);
-        let new_t_pos = self.list.insert_sorted(new, comp);
+        let new_t_pos = self.list.insert_sorted(new, self.sort.comparator());
 
 
         if was_selected {
@@ -327,21 +311,9 @@ impl Contents {
 
         let old_list = std::mem::replace(&mut self.list, new_list);
 
-        // Dropping in one go can be glacially slow due to callbacks and notifications.
-        // Especially if we're cleaning up the final references to a lot of items with thumbnails.
-        // 130ms for ~40k items
-        // 160ms for 50k
-        // More with thumbnails
-        let start = Instant::now();
-        let total = old_list.n_items();
-        glib::idle_add_local_full(Priority::LOW, move || {
-            if old_list.n_items() <= 1000 {
-                trace!("Finished dropping {total} items in {:?}", start.elapsed());
-                return ControlFlow::Break;
-            }
-            old_list.splice(0, 1000, &[] as &[EntryObject]);
-            ControlFlow::Continue
-        });
+        if old_list.ref_count() == 1 {
+            liststore_drop_batched(old_list);
+        }
     }
 
     pub fn mark_stale(&mut self, sort: SortSettings) {

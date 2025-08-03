@@ -366,7 +366,7 @@ impl Gui {
                 // Treat it as if it were closed.
                 self.error(&error);
                 error!("Treating {path:?} as closed due to: {error}");
-                self.tabs.borrow_mut().directory_failure(path);
+                self.tabs.borrow_mut().directory_open_failure(path);
             }
             DirectoryError(_, error) | EntryReadError(_, _, error) | ConveyError(error) => {
                 self.error(error);

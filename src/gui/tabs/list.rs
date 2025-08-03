@@ -12,8 +12,11 @@ use gtk::gio::ListStore;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{NoSelection, Orientation, SignalListItemFactory};
+use hashlink::LinkedHashMap;
 
+use super::TabContext;
 use super::element::TabElement;
+use super::flat_dir::CachedDir;
 use super::id::TabId;
 use super::tab::{ClosedTab, Tab};
 use crate::com::{
@@ -62,6 +65,8 @@ pub struct TabsList {
     tabs: Vec<Tab>,
 
     closed: Vec<ClosedTab>,
+
+    cached: LinkedHashMap<Arc<Path>, CachedDir>,
 
     // There is always one active tab or no visible tabs.
     // There may be tabs that are not visible.
@@ -138,6 +143,8 @@ impl TabsList {
             closed: Vec::new(),
             active: None,
 
+            cached: LinkedHashMap::default(),
+
             tab_elements,
             pane_container: window.imp().panes.clone(),
         }
@@ -150,9 +157,17 @@ impl TabsList {
             return;
         };
 
-        let (tab, element) = Tab::new(next_id(), nav_target, &[], default_width as u32, |w| {
-            self.pane_container.append(w)
-        });
+        let (tab, element) = Tab::new(
+            next_id(),
+            nav_target,
+            TabContext {
+                left: &[],
+                right: &[],
+                cached: &mut self.cached,
+            },
+            default_width as u32,
+            |w| self.pane_container.append(w),
+        );
 
         self.tabs.push(tab);
         self.tab_elements.append(&element);
@@ -251,6 +266,15 @@ impl TabsList {
         (left, center, right)
     }
 
+    fn context_for(&mut self, index: usize) -> (&mut Tab, TabContext<'_>) {
+        let (left, rest) = self.tabs.split_at_mut(index);
+        let ([center], right) = rest.split_at_mut(1) else {
+            unreachable!();
+        };
+
+        (center, TabContext { left, right, cached: &mut self.cached })
+    }
+
     pub fn mark_watching(&mut self, id: Arc<AtomicBool>) {
         if let Some(t) = self.tabs.iter().find(|t| t.matches_watch(&id)) {
             t.mark_watch_started(id);
@@ -269,13 +293,15 @@ impl TabsList {
         // Handle the case where a tab's directory is deleted out from underneath it.
         // This is handled immediately, even if the directory is still being loaded.
         if let Update::Removed(path) = &update {
+            self.cached.remove(path);
+
             let mut i = 0;
             while let Some(j) =
                 self.tabs.iter().skip(i).position(|t| t.check_directory_deleted(path))
             {
                 i += j;
-                let (left, tab, right) = self.split_around_mut(i);
-                if !tab.handle_directory_deleted(left, right) {
+                let (tab, ctxt) = self.context_for(i);
+                if !tab.handle_directory_deleted(ctxt) {
                     show_error(format!(
                         "Unexpected failure loading {path:?} and all parent directories"
                     ));
@@ -290,6 +316,10 @@ impl TabsList {
         if let Some(index) = self.tabs.iter().position(|t| t.matches_flat_update(&update)) {
             let (left_tabs, tab, right_tabs) = self.split_around_mut(index);
             tab.flat_update(left_tabs, right_tabs, update);
+        } else if let Some(parent) = update.path().parent()
+            && let Some(cached) = self.cached.get_mut(parent)
+        {
+            cached.apply_update(update, &mut self.tabs);
         }
     }
 
@@ -302,11 +332,16 @@ impl TabsList {
             //
             // NOTE: This must be checked here, even if Sources was piped through from the watcher
             // code, it would allow for races with new searches opening.
-            let overlapping_tabs = self
-                .tabs
-                .iter()
-                .enumerate()
-                .any(|(i, t)| i != pos && t.overlaps_other_search_update(&update));
+            let overlapping_tabs = if let Some(parent) = update.update.path().parent()
+                && self.cached.contains_key(parent)
+            {
+                true
+            } else {
+                self.tabs
+                    .iter()
+                    .enumerate()
+                    .any(|(i, t)| i != pos && t.overlaps_other_search_update(&update))
+            };
 
             self.tabs[pos].apply_search_update(update, !overlapping_tabs);
         } else {
@@ -323,12 +358,12 @@ impl TabsList {
     }
 
     // Unlike with update() above, we know this is going to be the same Arc<>
-    pub fn directory_failure(&mut self, path: Arc<Path>) {
+    pub fn directory_open_failure(&mut self, path: Arc<Path>) {
         let mut i = 0;
         while let Some(j) = self.tabs.iter().skip(i).position(|t| t.matches_arc(&path)) {
             i += j;
-            let (left, tab, right) = self.split_around_mut(i);
-            if !tab.handle_directory_deleted(left, right) {
+            let (tab, context) = self.context_for(i);
+            if !tab.handle_directory_deleted(context) {
                 show_error(format!(
                     "Unexpected failure loading {path:?} and all parent directories"
                 ));
@@ -414,8 +449,17 @@ impl TabsList {
         activate: bool,
     ) -> TabId {
         let width = self.pane_container.width() as u32;
-        let (new_tab, element) =
-            Tab::new(next_id(), nav_target, &self.tabs, width, |w| self.pane_container.append(w));
+        let (new_tab, element) = Tab::new(
+            next_id(),
+            nav_target,
+            TabContext {
+                left: &[],
+                right: &[],
+                cached: &mut self.cached,
+            },
+            width,
+            |w| self.pane_container.append(w),
+        );
 
         let id = new_tab.id();
         self.tabs.push(new_tab);
@@ -447,8 +491,16 @@ impl TabsList {
         let index = closed.after.and_then(|a| self.element_insertion_index(a)).unwrap_or_default();
 
         let width = self.pane_container.width() as u32;
-        let (new_tab, element) =
-            Tab::reopen(closed, &self.tabs, width, |w| self.pane_container.append(w));
+        let (new_tab, element) = Tab::reopen(
+            closed,
+            TabContext {
+                left: &self.tabs,
+                right: &[],
+                cached: &mut self.cached,
+            },
+            width,
+            |w| self.pane_container.append(w),
+        );
 
         let id = new_tab.id();
         self.tabs.push(new_tab);
@@ -594,6 +646,9 @@ impl TabsList {
     }
 
     pub fn refresh(&mut self, target: ActionTarget) {
+        // Don't need to consider cached directories here, since they can't be visible and, right
+        // now, overlapping doesn't consider searching.
+
         let Some((_id, pos)) = self.resolve(target) else {
             return warn!("Refresh called with no valid target tab");
         };
@@ -661,6 +716,8 @@ impl TabsList {
         for t in &mut self.tabs {
             t.unload_unchecked();
         }
+
+        self.cached.clear();
 
         // SAFETY: just unloaded every single tab.
         unsafe {
@@ -805,7 +862,7 @@ impl TabsList {
             self.clear_active();
         }
 
-        let closed = self.tabs.swap_remove(index).close(after);
+        let closed = self.tabs.swap_remove(index).close(after, &mut self.cached);
         self.tab_elements.remove(eindex);
         self.closed.push(closed);
     }
@@ -835,7 +892,7 @@ impl TabsList {
         )
     }
 
-    fn try_resolve_sliced<T, F: FnOnce(&mut Tab, &[Tab], &[Tab]) -> T>(
+    fn try_resolve_context<T, F: FnOnce(&mut Tab, TabContext<'_>) -> T>(
         &mut self,
         target: ActionTarget,
         f: F,
@@ -846,8 +903,8 @@ impl TabsList {
                 None
             },
             |(_target, pos)| {
-                let (left, tab, right) = self.split_around_mut(pos);
-                Some(f(tab, left, right))
+                let (tab, context) = self.context_for(pos);
+                Some(f(tab, context))
             },
         )
     }
@@ -882,8 +939,8 @@ impl TabsList {
         };
 
         let navigated = self
-            .try_resolve_sliced(action_target, |tab, left, right| {
-                tab.navigate(left, right, nav_target);
+            .try_resolve_context(action_target, |tab, context| {
+                tab.navigate(context, nav_target);
             })
             .is_some();
         if !navigated {
@@ -900,8 +957,8 @@ impl TabsList {
             return;
         };
 
-        self.try_resolve_sliced(ActionTarget::Tab(id), |tab, left, right| {
-            tab.navigate(left, right, nav_target)
+        self.try_resolve_context(ActionTarget::Tab(id), |tab, context| {
+            tab.navigate(context, nav_target)
         });
     }
 
@@ -912,8 +969,8 @@ impl TabsList {
 
         let j = jump.clone();
         let navigated = self
-            .try_resolve_sliced(action_target, |tab, left, right| {
-                tab.navigate(left, right, j);
+            .try_resolve_context(action_target, |tab, context| {
+                tab.navigate(context, j);
             })
             .is_some();
         if !navigated {
@@ -922,23 +979,23 @@ impl TabsList {
     }
 
     pub fn forward(&mut self, target: ActionTarget) {
-        self.try_resolve_sliced(target, Tab::forward);
+        self.try_resolve_context(target, Tab::forward);
     }
 
     pub fn back(&mut self, target: ActionTarget) {
-        self.try_resolve_sliced(target, Tab::back);
+        self.try_resolve_context(target, |tab, mut context| tab.back(&mut context));
     }
 
     pub fn parent(&mut self, target: ActionTarget) {
-        self.try_resolve_sliced(target, Tab::parent);
+        self.try_resolve_context(target, Tab::parent);
     }
 
     pub fn back_or_parent(&mut self, target: ActionTarget) {
-        self.try_resolve_sliced(target, Tab::back_or_parent);
+        self.try_resolve_context(target, Tab::back_or_parent);
     }
 
     pub fn child(&mut self, target: ActionTarget) {
-        self.try_resolve_sliced(target, Tab::child);
+        self.try_resolve_context(target, Tab::child);
     }
 
     pub fn close_tab(&mut self, target: ActionTarget) {
@@ -1018,8 +1075,22 @@ impl TabsList {
         let index = self.position(id).unwrap();
         let eindex = self.element_position(id).unwrap();
 
-        self.tabs.swap_remove(index);
+        let after = if eindex > 0 {
+            self.tab_elements
+                .item(eindex - 1)
+                .and_downcast::<TabElement>()
+                .unwrap()
+                .imp()
+                .tab
+                .get()
+                .copied()
+        } else {
+            None
+        };
+
+        let closed = self.tabs.swap_remove(index).close(after, &mut self.cached);
         self.tab_elements.remove(eindex);
+        self.closed.push(closed);
     }
 
     pub fn display_mode(&mut self, target: ActionTarget, mode: DisplayMode) {
@@ -1244,7 +1315,13 @@ impl TabsList {
         env
     }
 
+    pub fn idle_trim(&mut self) {
+        self.cached.clear();
+    }
+
     pub fn idle_unload(&mut self) {
+        self.cached.clear();
+
         let mut visible = AHashSet::new();
         let mut unload = AHashSet::new();
 

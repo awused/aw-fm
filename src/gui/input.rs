@@ -88,9 +88,9 @@ impl Gui {
                 gui.unload_timeout.take();
                 gui.tabs.borrow_mut().idle_unload();
 
-                // Wait a bit for everything to be dropped. 5 seconds is way too much, but
+                // Wait a bit for everything to be dropped. 10 seconds is way too much, but
                 // it can't really hurt anything.
-                glib::timeout_add_local_once(Duration::from_secs(5), || {
+                glib::timeout_add_local_once(Duration::from_secs(10), || {
                     trace!("Explicitly trimming unused memory");
                     unsafe {
                         libc::malloc_trim(0);
@@ -122,6 +122,8 @@ impl Gui {
             let timeout = glib::timeout_add_local_once(Duration::from_secs(600), move || {
                 debug!("Performing idle trim");
                 gui.trim_timeout.take();
+
+                gui.tabs.borrow_mut().idle_trim();
 
                 EntryObject::idle_trim();
 

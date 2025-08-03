@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::ffi::OsString;
+use std::mem::replace;
 use std::ops::{Deref, DerefMut};
-use std::os::linux::fs::MetadataExt;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -15,16 +15,17 @@ use gtk::gio::Cancellable;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{AlertDialog, Bitset, MultiSelection, Orientation, PopoverMenu, Widget, glib};
+use hashlink::LinkedHashMap;
 use tokio::sync::oneshot;
 
-use self::flat_dir::FlatDir;
-use super::contents::{Contents, TotalPos};
+use super::contents::Contents;
 use super::element::TabElement;
+use super::flat_dir::FlatDir;
 use super::id::{TabId, TabUid};
 use super::list::Group;
 use super::pane::Pane;
 use super::search::Search;
-use super::{HistoryEntry, NavTarget, PaneState};
+use super::{CachedDir, HistoryEntry, NavTarget, PaneState, TabContext};
 use crate::com::{
     DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, GetEntry,
     ManagerAction, SearchSnapshot, SearchUpdate, SortDir, SortMode, SortSettings,
@@ -33,7 +34,9 @@ use crate::config::CONFIG;
 use crate::database::SavedGroup;
 use crate::gui::clipboard::{ClipboardOp, SelectionProvider, handle_clipboard, handle_drop};
 use crate::gui::operations::{self, Kind, Outcome};
-use crate::gui::tabs::{FocusState, PartiallyAppliedUpdate, ScrollPosition};
+use crate::gui::tabs::{
+    ExistingEntry, FocusState, PartiallyAppliedUpdate, ScrollPosition, cache_open_dir,
+};
 use crate::gui::{
     CompletionResult, Selected, Update, applications, gui_run, show_error, show_warning, tabs_run,
 };
@@ -312,7 +315,7 @@ impl Tab {
     pub fn new(
         id: TabUid,
         target: NavTarget,
-        existing_tabs: &[Self],
+        mut context: TabContext<'_>,
         initial_width: u32,
         insert: impl FnOnce(&Widget),
     ) -> (Self, TabElement) {
@@ -349,7 +352,7 @@ impl Tab {
             search: None,
         };
 
-        t.copy_flat_from_donor(existing_tabs, &[]);
+        t.copy_flat_from_donor(&mut context);
 
         (t, element)
     }
@@ -423,7 +426,7 @@ impl Tab {
 
     pub fn reopen(
         closed: ClosedTab,
-        existing_tabs: &[Self],
+        mut context: TabContext<'_>,
         initial_width: u32,
         insert: impl FnOnce(&Widget),
     ) -> (Self, TabElement) {
@@ -462,7 +465,7 @@ impl Tab {
             search: None,
         };
 
-        t.copy_flat_from_donor(existing_tabs, &[]);
+        t.copy_flat_from_donor(&mut context);
 
         // Open search, if applicable, after copying flat state.
         if let Some(query) = closed.current.search {
@@ -472,8 +475,8 @@ impl Tab {
         (t, element)
     }
 
-    fn copy_flat_from_donor(&mut self, left: &[Self], right: &[Self]) -> bool {
-        for t in left.iter().chain(right) {
+    fn copy_flat_from_donor(&mut self, context: &mut TabContext<'_>) -> bool {
+        for t in context.left.iter().chain(context.right) {
             // Check for value equality, not reference equality
             if **self.dir.path() == **t.dir.path() {
                 self.dir = t.dir.clone();
@@ -488,7 +491,15 @@ impl Tab {
                 return true;
             }
         }
-        false
+
+        if let Some(mut cached) = context.cached.remove(self.dir.path()) {
+            self.dir = cached.make_flat_once();
+            self.contents.inherit_cached(self.settings.sort, &cached);
+            self.element.stop_spin();
+            true
+        } else {
+            false
+        }
     }
 
     #[must_use]
@@ -729,7 +740,7 @@ impl Tab {
     // Need to handle this to avoid the case where a directory is "Loaded" but no watcher is
     // listening for events.
     // Even if the directory is recreated, the watcher won't work.
-    pub fn handle_directory_deleted(&mut self, left: &[Self], right: &[Self]) -> bool {
+    pub fn handle_directory_deleted(&mut self, mut context: TabContext<'_>) -> bool {
         let cur_path = self.dir.path().clone();
         let mut path = &*cur_path;
         while !path.exists() || !path.is_dir() {
@@ -738,7 +749,7 @@ impl Tab {
 
         if path.exists() {
             // Honestly should just close the tab, but this means something is seriously broken.
-            drop(self.change_location_flat(left, right, NavTarget::assume_dir(path)));
+            drop(self.change_location_flat(&mut context, NavTarget::assume_dir(path)));
             true
         } else {
             false
@@ -787,8 +798,7 @@ impl Tab {
     // Will end a search.
     fn change_location_flat(
         &mut self,
-        left: &[Self],
-        right: &[Self],
+        context: &mut TabContext<'_>,
         target: NavTarget,
     ) -> Option<NavTarget> {
         let was_search = self.search.is_some();
@@ -805,7 +815,11 @@ impl Tab {
         self.element.flat_title(&target.dir);
 
         self.pane.overwrite_state(PaneState::for_jump(target.scroll));
-        self.dir = FlatDir::new(target.dir);
+
+        let old_dir = replace(&mut self.dir, FlatDir::new(target.dir));
+        if let Some((path, watch)) = old_dir.try_into_cached() {
+            cache_open_dir(context.cached, self.contents.cache(path, watch));
+        }
 
         let old_settings = self.settings;
         self.settings = gui_run(|g| g.database.get(self.dir.path().clone()));
@@ -815,7 +829,7 @@ impl Tab {
             self.contents.clear(self.settings.sort);
         }
 
-        if !self.copy_flat_from_donor(left, right) {
+        if !self.copy_flat_from_donor(context) {
             // We couldn't find any state to steal, so we know we're the only matching tab.
 
             if was_search {
@@ -838,7 +852,7 @@ impl Tab {
         // Cannot be a search pane
         debug_assert!(self.search.is_none());
         self.pane.update_location(self.dir.path(), self.settings, &self.contents);
-        self.load(left, right);
+        self.load(context.left, context.right);
         None
     }
 
@@ -970,16 +984,16 @@ impl Tab {
         self.visible_selection().unselect_all();
     }
 
-    pub fn navigate(&mut self, left: &[Self], right: &[Self], target: NavTarget) {
-        self.navigate_inner(left, right, target, true);
+    pub fn navigate(&mut self, context: TabContext<'_>, target: NavTarget) {
+        self.navigate_inner(context, target, true);
     }
 
-    fn navigate_inner(&mut self, left: &[Self], right: &[Self], target: NavTarget, forward: bool) {
+    fn navigate_inner(&mut self, mut context: TabContext<'_>, target: NavTarget, forward: bool) {
         info!("Navigating {:?} from {:?} to {target:?}", self.id, self.dir.path());
 
         let history = self.current_history();
 
-        let Some(unconsumed) = self.change_location_flat(left, right, target) else {
+        let Some(unconsumed) = self.change_location_flat(&mut context, target) else {
             if forward {
                 self.past.push(history);
                 self.future.clear();
@@ -1008,21 +1022,21 @@ impl Tab {
         self.apply_pane_state();
     }
 
-    pub fn parent(&mut self, left: &[Self], right: &[Self]) {
-        self.parent_inner(left, right, true);
+    pub fn parent(&mut self, context: TabContext<'_>) {
+        self.parent_inner(context, true);
     }
 
-    fn parent_inner(&mut self, left: &[Self], right: &[Self], forward: bool) {
+    fn parent_inner(&mut self, context: TabContext<'_>, forward: bool) {
         let Some(parent) = self.dir.path().parent() else {
             warn!("No parent for {:?}", self.dir.path());
             return;
         };
 
         let target = NavTarget::assume_jump(parent, self.dir());
-        self.navigate_inner(left, right, target, forward);
+        self.navigate_inner(context, target, forward);
     }
 
-    pub fn forward(&mut self, left: &[Self], right: &[Self]) {
+    pub fn forward(&mut self, mut context: TabContext<'_>) {
         let Some(next) = self.future.pop() else {
             warn!("No future for {:?} to go forward to", self.id);
             return;
@@ -1032,10 +1046,10 @@ impl Tab {
         let history = self.current_history();
 
         self.past.push(history);
-        self.apply_history(left, right, next);
+        self.apply_history(&mut context, next);
     }
 
-    pub(super) fn back(&mut self, left: &[Self], right: &[Self]) -> bool {
+    pub(super) fn back(&mut self, context: &mut TabContext<'_>) -> bool {
         let Some(prev) = self.past.pop() else {
             warn!("No history for {:?} to go back to", self.id);
             return false;
@@ -1045,11 +1059,11 @@ impl Tab {
         let history = self.current_history();
 
         self.future.push(history);
-        self.apply_history(left, right, prev);
+        self.apply_history(context, prev);
         true
     }
 
-    fn apply_history(&mut self, left: &[Self], right: &[Self], hist: HistoryEntry) {
+    fn apply_history(&mut self, context: &mut TabContext<'_>, hist: HistoryEntry) {
         // Shouldn't be a jump, could be a search starting/ending.
         if hist.location == *self.dir.path() {
             if let Some(query) = hist.search {
@@ -1063,7 +1077,7 @@ impl Tab {
 
         let target = NavTarget::assume_dir(hist.location);
 
-        if let Some(unconsumed) = self.change_location_flat(left, right, target) {
+        if let Some(unconsumed) = self.change_location_flat(context, target) {
             error!(
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
@@ -1081,14 +1095,14 @@ impl Tab {
         self.apply_pane_state();
     }
 
-    pub(super) fn back_or_parent(&mut self, left: &[Self], right: &[Self]) {
-        if !self.back(left, right) {
-            self.parent_inner(left, right, false);
+    pub(super) fn back_or_parent(&mut self, mut context: TabContext<'_>) {
+        if !self.back(&mut context) {
+            self.parent_inner(context, false);
         }
     }
 
     // Goes to the child directory if one was previously open or if there's only one.
-    pub(super) fn child(&mut self, left: &[Self], right: &[Self]) {
+    pub(super) fn child(&mut self, mut context: TabContext<'_>) {
         if self.search.is_some() {
             warn!("Can't move to child in search tab {:?}", self.id);
             return;
@@ -1097,12 +1111,12 @@ impl Tab {
         // Try the past and future first.
         if Some(&**self.dir.path()) == self.past.last().and_then(|h| h.location.parent()) {
             info!("Found past entry for child dir while handling Child in {:?}", self.id);
-            self.back(left, right);
+            self.back(&mut context);
             return;
         }
         if Some(&**self.dir.path()) == self.future.last().and_then(|h| h.location.parent()) {
             info!("Found future entry for child dir while handling Child in {:?}", self.id);
-            return self.forward(left, right);
+            return self.forward(context);
         }
 
         if self.contents.selection.n_items() == 0 {
@@ -1136,7 +1150,7 @@ impl Tab {
         self.past.push(history);
         self.pane.overwrite_state(PaneState::default());
 
-        if let Some(unconsumed) = self.change_location_flat(left, right, target) {
+        if let Some(unconsumed) = self.change_location_flat(&mut context, target) {
             error!(
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
@@ -1279,8 +1293,16 @@ impl Tab {
         self.element.set_pane_visible(false);
     }
 
-    pub fn close(self, after: Option<TabId>) -> ClosedTab {
+    pub fn close(
+        self,
+        after: Option<TabId>,
+        cache: &mut LinkedHashMap<Arc<Path>, CachedDir>,
+    ) -> ClosedTab {
         let current = self.current_history();
+        if let Some((path, watch)) = self.dir.try_into_cached() {
+            cache_open_dir(cache, self.contents.cache(path, watch));
+        }
+
         ClosedTab {
             id: self.id,
             after,
@@ -1310,43 +1332,6 @@ impl Tab {
         });
     }
 
-    fn find_entry_for_flat(&mut self, update: &Update) -> (Option<EntryObject>, Option<TotalPos>) {
-        let path = update.path();
-
-        // If it exists in any tab (search or flat)
-        let mut global = EntryObject::lookup(path);
-
-        if global.is_none()
-            && matches!(update, Update::Removed(_))
-            && path.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".nfs"))
-        {
-            let start = Instant::now();
-            if let Ok(inode) = path.metadata().as_ref().map(MetadataExt::st_ino) {
-                // We got a "deletion" for a silly renamed file. In practice this is fairly
-                // rare, so handle by scanning for the inode number in the current
-                // directory. Only consider the current flat contents, not search contents.
-                //
-                // If performance becomes a concern we'll need a map of inodes somewhere.
-                global = self.contents.find_by_inode(inode);
-                if let Some(eo) = &global {
-                    warn!(
-                        "Got NFS silly rename for {:?}. Scan took {:?}",
-                        eo.get().abs_path,
-                        start.elapsed()
-                    );
-                } else {
-                    warn!("Got NFS silly rename for missing file. Scan took {:?}", start.elapsed());
-                }
-            }
-        }
-
-        // If it exists in flat tabs (which all share the same state).
-        let local =
-            global.as_ref().and_then(|eg| self.contents.total_position_by_sorted(&eg.get()));
-
-        (global, local)
-    }
-
     pub fn flat_update(&mut self, left: &mut [Self], right: &mut [Self], up: Update) {
         assert!(self.matches_flat_update(&up));
 
@@ -1354,15 +1339,13 @@ impl Tab {
             return;
         };
 
-        let (existing_global, local_position) = self.find_entry_for_flat(&update);
+        let existing_entry = self.contents.entry_for_flat_update(&update);
 
         // If something exists globally but not locally, it needs to be applied to search tabs.
         let mut search_mutate = None;
 
-        let partial = match (update, local_position, existing_global) {
-            // It simply can't exist locally but not globally
-            (_, Some(_), None) => unreachable!(),
-            (Update::Entry(entry), Some(pos), Some(obj)) => {
+        let partial = match (update, existing_entry) {
+            (Update::Entry(entry), ExistingEntry::Present(obj, pos)) => {
                 let Some(old) = obj.update(entry) else {
                     // An unimportant update.
                     // No need to check other tabs.
@@ -1374,7 +1357,7 @@ impl Tab {
                 trace!("Updated {:?} from event", old.abs_path);
                 PartiallyAppliedUpdate::Mutate(old, obj)
             }
-            (Update::Entry(entry), None, Some(obj)) => {
+            (Update::Entry(entry), ExistingEntry::NotLocal(obj)) => {
                 // This means the element already existed in a search tab, somewhere else, and
                 // we're updating it.
                 if let Some(old) = obj.update(entry) {
@@ -1382,6 +1365,9 @@ impl Tab {
                     //
                     // This means that a different search tab happened to read a newly created file
                     // before it was inserted into this tab.
+                    //
+                    // The item is potentially missing from other search tabs, but that's not a
+                    // major concern since search snapshots prefer existing entries.
                     warn!(
                         "Search tab read item {:?} before it was inserted into a flat tab. This \
                          should be uncommon.",
@@ -1395,22 +1381,22 @@ impl Tab {
                 trace!("Inserted existing {:?} from event", obj.get().abs_path);
                 PartiallyAppliedUpdate::Insert(obj)
             }
-            (Update::Entry(entry), None, None) => {
+            (Update::Entry(entry), ExistingEntry::Missing) => {
                 let new = EntryObject::new(entry.get_entry(), true);
 
                 self.contents.insert(&new);
                 trace!("Inserted new {:?} from event", new.get().abs_path);
                 PartiallyAppliedUpdate::Insert(new)
             }
-            (Update::Removed(path), Some(i), Some(obj)) => {
+            (Update::Removed(path), ExistingEntry::Present(obj, pos)) => {
                 if self.pane.visible() {
                     self.pane.workaround_focus_before_delete(&obj);
                 }
-                self.contents.remove(i);
+                self.contents.remove(pos);
                 trace!("Removed {path:?} from event");
                 PartiallyAppliedUpdate::Delete(obj)
             }
-            (Update::Removed(path), None, Some(obj)) => {
+            (Update::Removed(path), ExistingEntry::NotLocal(obj)) => {
                 // This case can be hit if a directory is deleted while tabs are open to both it
                 // and its parent. Duplicate events can be dispatched immediately, since they're
                 // removals, before disposals can run.
@@ -1421,18 +1407,13 @@ impl Tab {
                 );
 
                 let search_delete = PartiallyAppliedUpdate::Delete(obj);
-                for t in left
-                    .iter_mut()
+                left.iter_mut()
                     .chain(right.iter_mut())
                     .filter(|t| !t.matches_arc(self.dir.path()))
-                {
-                    if let Some(search) = &mut t.search {
-                        search.handle_subdir_flat_update(&search_delete);
-                    }
-                }
+                    .for_each(|t| t.handle_search_subdir_flat_update(&search_delete));
                 return;
             }
-            (Update::Removed(path), None, None) => {
+            (Update::Removed(path), ExistingEntry::Missing) => {
                 // Unusual case, probably shouldn't happen often.
                 // Maybe if something is removed while loading the directory before we read it.
                 warn!("Got removal for {path:?} which wasn't present");
@@ -1467,14 +1448,15 @@ impl Tab {
             return;
         }
 
-        for t in left
-            .iter_mut()
+        left.iter_mut()
             .chain(right.iter_mut())
             .filter(|t| !t.matches_arc(self.dir.path()))
-        {
-            if let Some(search) = &mut t.search {
-                search.handle_subdir_flat_update(&mutate);
-            }
+            .for_each(|t| t.handle_search_subdir_flat_update(&mutate));
+    }
+
+    pub fn handle_search_subdir_flat_update(&mut self, partial: &PartiallyAppliedUpdate) {
+        if let Some(search) = &mut self.search {
+            search.handle_subdir_flat_update(partial);
         }
     }
 
@@ -1860,207 +1842,5 @@ impl Tab {
     // https://gitlab.gnome.org/GNOME/gtk/-/issues/5670
     pub fn workaround_enable_rubberband(&self) {
         self.pane.workaround_enable_rubberband();
-    }
-}
-
-
-// These must share fate.
-mod flat_dir {
-    use std::cell::{Ref, RefCell};
-    use std::path::Path;
-    use std::rc::Rc;
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::Ordering::Relaxed;
-    use std::time::Instant;
-
-    use crate::com::{ManagerAction, SortSettings, Update};
-    use crate::gui::gui_run;
-
-    #[derive(Debug)]
-    pub struct WatchedDir {
-        path: Arc<Path>,
-        cancel: Arc<AtomicBool>,
-    }
-
-    impl Drop for WatchedDir {
-        fn drop(&mut self) {
-            self.cancel.store(true, Relaxed);
-            debug!("Stopped watching {:?}", self.path);
-            gui_run(|g| {
-                g.send_manager(ManagerAction::Unwatch(self.path.clone()));
-            });
-        }
-    }
-
-    impl WatchedDir {
-        fn start(path: Arc<Path>, sort: SortSettings) -> Self {
-            let cancel: Arc<AtomicBool> = Arc::default();
-            gui_run(|g| {
-                g.send_manager(ManagerAction::Open(path.clone(), sort, cancel.clone()));
-            });
-
-            Self { path, cancel }
-        }
-    }
-
-
-    #[derive(Debug, Default)]
-    pub enum DirState {
-        #[default]
-        Unloaded,
-        Initializating {
-            watch: WatchedDir,
-            start: Instant,
-        },
-        Loading {
-            watch: WatchedDir,
-            pending_updates: Vec<Update>,
-            start: Instant,
-        },
-        // ReOpening{} -- Transitions to Opening once a Start arrives, or Opened with Complete
-        // UnloadedWhileOpening -- takes snapshots and drops them
-        Loaded(WatchedDir),
-    }
-
-    impl DirState {
-        pub const fn watched(&self) -> Option<&WatchedDir> {
-            match self {
-                Self::Unloaded => None,
-                Self::Initializating { watch, .. }
-                | Self::Loading { watch, .. }
-                | Self::Loaded(watch) => Some(watch),
-            }
-        }
-
-        pub const fn unloaded(&self) -> bool {
-            match self {
-                Self::Unloaded => true,
-                Self::Initializating { .. } | Self::Loading { .. } | Self::Loaded(_) => false,
-            }
-        }
-
-        pub const fn loading(&self) -> bool {
-            match self {
-                Self::Unloaded | Self::Loaded(_) => false,
-                Self::Initializating { .. } | Self::Loading { .. } => true,
-            }
-        }
-
-        pub const fn loaded(&self) -> bool {
-            match self {
-                Self::Unloaded | Self::Initializating { .. } | Self::Loading { .. } => false,
-                Self::Loaded(_) => true,
-            }
-        }
-    }
-
-
-    #[derive(Debug, Clone)]
-    pub struct FlatDir {
-        path: Arc<Path>,
-        state: Rc<RefCell<DirState>>,
-    }
-
-    impl FlatDir {
-        pub fn new(path: Arc<Path>) -> Self {
-            Self { path, state: Rc::default() }
-        }
-
-        pub const fn path(&self) -> &Arc<Path> {
-            &self.path
-        }
-
-        pub fn state(&self) -> Ref<'_, DirState> {
-            self.state.borrow()
-        }
-
-        pub fn matches(&self, id: &Arc<AtomicBool>) -> bool {
-            match &*self.state.borrow() {
-                DirState::Unloaded => false,
-                DirState::Initializating { watch, .. }
-                | DirState::Loading { watch, .. }
-                | DirState::Loaded(watch) => Arc::ptr_eq(&watch.cancel, id),
-            }
-        }
-
-        // Returns the update if it wasn't saved for later or dropped
-        pub fn maybe_drop_or_delay(&self, up: Update) -> Option<Update> {
-            let mut sb = self.state.borrow_mut();
-            match &mut *sb {
-                DirState::Unloaded => {
-                    info!("Dropping update {up:?} for unloaded tab.");
-                    None
-                }
-                DirState::Initializating { .. } => {
-                    debug!("Dropping update {up:?} for initializing tab.");
-                    None
-                }
-                DirState::Loading { pending_updates, .. } => {
-                    pending_updates.push(up);
-                    None
-                }
-                DirState::Loaded(_) => Some(up),
-            }
-        }
-
-        // sort can become stale or not match all tabs,
-        // but it's overwhelmingly going to save time in the UI thread.
-        pub fn start_load(&self, sort: SortSettings) -> bool {
-            let mut sb = self.state.borrow_mut();
-            let dstate = &mut *sb;
-            match dstate {
-                DirState::Loading { .. }
-                | DirState::Initializating { .. }
-                | DirState::Loaded(_) => false,
-                DirState::Unloaded => {
-                    let start = Instant::now();
-                    debug!("Opening directory for {:?}", self.path);
-                    let watch = WatchedDir::start(self.path.clone(), sort);
-
-                    *dstate = DirState::Initializating { watch, start };
-                    true
-                }
-            }
-        }
-
-        pub fn mark_watch_started(&self, id: Arc<AtomicBool>) {
-            let mut sb = self.state.borrow_mut();
-            let dstate = &mut *sb;
-            let old = std::mem::take(dstate);
-
-            match old {
-                DirState::Unloaded | DirState::Loading { .. } | DirState::Loaded(_) => {
-                    unreachable!()
-                }
-                DirState::Initializating { watch, start } => {
-                    assert!(Arc::ptr_eq(&watch.cancel, &id));
-                    debug!("Marking watch started in {:?}", self.path);
-
-                    *dstate = DirState::Loading {
-                        watch,
-                        pending_updates: Vec::new(),
-                        start,
-                    };
-                }
-            }
-        }
-
-        pub fn unload(&self) {
-            self.state.take();
-        }
-
-        pub fn take_loaded(&self) -> (Vec<Update>, Instant) {
-            let mut sb = self.state.borrow_mut();
-            match std::mem::take(&mut *sb) {
-                DirState::Unloaded | DirState::Initializating { .. } | DirState::Loaded(_) => {
-                    unreachable!()
-                }
-                DirState::Loading { watch, pending_updates, start } => {
-                    *sb = DirState::Loaded(watch);
-                    (pending_updates, start)
-                }
-            }
-        }
     }
 }
