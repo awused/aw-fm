@@ -165,7 +165,7 @@ impl NatKey {
     }
 }
 
-pub fn lowercase(original: &OsStr) -> Cow<str> {
+pub fn lowercase(original: &OsStr) -> Cow<'_, str> {
     let original = original.to_string_lossy();
 
     if !original.chars().any(char::is_uppercase) {
@@ -175,7 +175,7 @@ pub fn lowercase(original: &OsStr) -> Cow<str> {
     }
 }
 
-pub fn normalize_lowercase(lower: &str) -> Cow<str> {
+pub fn normalize_lowercase(lower: &str) -> Cow<'_, str> {
     if !NORMALIZE.with(|n| *n) || is_nfkc_quick(lower.chars()) == IsNormalized::Yes {
         return Cow::Borrowed(lower);
     }

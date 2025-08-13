@@ -13,9 +13,7 @@ use rusqlite::{Connection, ToSql, params};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use crate::com::{
-    DebugIgnore, DirSettings, DisplayHidden, DisplayMode, SortDir, SortMode, SortSettings,
-};
+use crate::com::{DebugIgnore, DirSettings, DisplayMode, SortDir, SortMode, SortSettings};
 use crate::config::CONFIG;
 use crate::{closing, spawn_thread};
 
@@ -355,19 +353,6 @@ impl FromSql for SortDir {
         value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
     }
 }
-
-impl ToSql for DisplayHidden {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(self.as_ref().into())
-    }
-}
-
-impl FromSql for DisplayHidden {
-    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        value.as_str()?.parse().map_err(|e| FromSqlError::Other(Box::new(e)))
-    }
-}
-
 
 fn get_version(con: &Connection) -> u32 {
     let r = con.query_row(

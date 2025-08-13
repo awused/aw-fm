@@ -709,12 +709,11 @@ impl Tab {
     }
 
     pub fn apply_search_update(&mut self, update: SearchUpdate, allow_mutation: bool) {
-        if self.visible() {
-            if let Update::Removed(path) = &update.update {
-                if let Some(eo) = EntryObject::lookup(path) {
-                    self.pane.workaround_focus_before_delete(&eo);
-                }
-            }
+        if self.visible()
+            && let Update::Removed(path) = &update.update
+            && let Some(eo) = EntryObject::lookup(path)
+        {
+            self.pane.workaround_focus_before_delete(&eo);
         }
 
         self.search.as_mut().unwrap().apply_search_update(update, allow_mutation);
@@ -939,8 +938,7 @@ impl Tab {
                     select: true,
                 });
                 self.pane.overwrite_state(state);
-
-                self.apply_pane_state();
+                self.try_immediate_apply_state();
             }
 
             return true;
@@ -1021,9 +1019,9 @@ impl Tab {
             index: 0,
         });
         state.focus = Some(FocusState { path, select: true });
-        self.pane.overwrite_state(state);
 
-        self.apply_pane_state();
+        self.pane.overwrite_state(state);
+        self.try_immediate_apply_state();
     }
 
     pub fn parent(&mut self, context: TabContext<'_>) {
@@ -1076,7 +1074,7 @@ impl Tab {
                 self.close_search();
             }
             self.pane.overwrite_state(hist.state);
-            return self.apply_pane_state();
+            return self.maybe_start_apply_state();
         }
 
         let target = NavTarget::assume_dir(hist.location);
@@ -1086,7 +1084,7 @@ impl Tab {
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
             self.pane.overwrite_state(hist.state);
-            return self.apply_pane_state();
+            return self.maybe_start_apply_state();
         }
 
         if let Some(query) = hist.search {
@@ -1096,7 +1094,7 @@ impl Tab {
         }
 
         self.pane.overwrite_state(hist.state);
-        self.apply_pane_state();
+        self.maybe_start_apply_state();
     }
 
     pub(super) fn back_or_parent(&mut self, mut context: TabContext<'_>) {
@@ -1160,7 +1158,7 @@ impl Tab {
             );
         }
 
-        self.apply_pane_state()
+        self.maybe_start_apply_state()
     }
 
     fn current_history(&self) -> HistoryEntry {
@@ -1180,11 +1178,22 @@ impl Tab {
         }
 
         if self.loaded() {
-            self.apply_pane_state();
+            self.maybe_start_apply_state();
         }
     }
 
-    fn apply_pane_state(&mut self) {
+    // Only for when we mean to apply state immediately
+    fn try_immediate_apply_state(&mut self) {
+        if !self.loaded() {
+            trace!("Deferring applying pane state to flat pane until loading is done.");
+            return;
+        }
+
+        self.maybe_start_apply_state();
+        self.finish_apply_state();
+    }
+
+    fn maybe_start_apply_state(&mut self) {
         if !self.loaded() {
             trace!("Deferring applying pane state to flat pane until loading is done.");
             return;
@@ -1229,7 +1238,7 @@ impl Tab {
 
         self.load(left, right);
 
-        self.apply_pane_state()
+        self.maybe_start_apply_state()
     }
 
     pub fn start_hide(&mut self) {
@@ -1796,7 +1805,10 @@ impl Tab {
 
         self.pane.overwrite_state(state);
 
-        self.apply_pane_state();
+        // Setting the selection should always force a reallocate, and there's a risk we're going
+        // to actually need it, so try_immediate_apply_state should be unnecessary and is
+        // definitely unsafe.
+        self.maybe_start_apply_state();
     }
 
     pub fn context_menu(&self) -> PopoverMenu {

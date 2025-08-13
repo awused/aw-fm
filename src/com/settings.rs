@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 
+use gtk::SortType;
 use gtk::glib::Object;
 use gtk::prelude::Cast;
-use gtk::SortType;
 use strum_macros::{AsRefStr, EnumString};
 
 use super::EntryObject;
@@ -51,14 +51,14 @@ impl From<SortType> for SortDir {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
-#[strum(serialize_all = "lowercase")]
-pub enum DisplayHidden {
-    // Default, -- would be the global setting, if/when we have one
-    False,
-    #[default]
-    True,
-}
+// #[derive(Debug, Default, Clone, Copy, EnumString, AsRefStr)]
+// #[strum(serialize_all = "lowercase")]
+// pub enum DisplayHidden {
+//     // Default, -- would be the global setting, if/when we have one
+//     False,
+//     #[default]
+//     True,
+// }
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct SortSettings {

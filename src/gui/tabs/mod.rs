@@ -397,11 +397,16 @@ fn liststore_drop_batched(list: ListStore) {
     // 130ms for ~40k items
     // 160ms for 50k
     // More with thumbnails
-    let start = Instant::now();
     let total = list.n_items();
+    if total == 0 {
+        return;
+    }
+
+    let start = Instant::now();
     glib::idle_add_local_full(Priority::LOW, move || {
         if list.n_items() <= 1000 {
-            trace!("Finished dropping {total} items in {:?}", start.elapsed());
+            // Doesn't count the last batch
+            trace!("Finished dropping {total} items in roughly {:?}", start.elapsed());
             return ControlFlow::Break;
         }
         list.splice(0, 1000, &[] as &[EntryObject]);

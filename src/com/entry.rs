@@ -568,7 +568,7 @@ mod internal {
             (old.entry, new_p)
         }
 
-        pub(super) fn get(&self) -> Ref<Entry> {
+        pub(super) fn get(&self) -> Ref<'_, Entry> {
             let b = self.0.borrow();
             Ref::map(b, |o| &o.as_ref().unwrap().entry)
         }
