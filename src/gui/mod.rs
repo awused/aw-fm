@@ -189,7 +189,7 @@ pub fn run(
                 g.tabs.borrow_mut().open_tab(path, TabPosition::End, true);
             }
         });
-        0
+        ExitCode::SUCCESS
     });
 
     let _cod = closing::CloseOnDrop::default();
@@ -222,7 +222,7 @@ impl Gui {
         // We give the CssProvider to the default screen so the CSS rules we added
         // can be applied to our window.
         gtk::style_context_add_provider_for_display(
-            &window.display(),
+            &WidgetExt::display(&window),
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );

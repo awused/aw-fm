@@ -12,7 +12,7 @@ use gstreamer::{Caps, ClockTime};
 use gstreamer_pbutils::prelude::DiscovererStreamInfoExt;
 use gstreamer_pbutils::{Discoverer, DiscovererInfo, DiscovererStreamInfo};
 use gtk::gio::Icon;
-use gtk::glib::{self, Object};
+use gtk::glib::{self, GStr, Object, gstr};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use num_format::{Locale, ToFormattedString};
@@ -23,7 +23,8 @@ use crate::gui::{Gui, show_error, show_warning};
 
 glib::wrapper! {
     pub struct PropDialog(ObjectSubclass<imp::PropDialog>)
-        @extends gtk::Widget, gtk::Window;
+        @extends gtk::Widget, gtk::Window,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::ShortcutManager, gtk::Native, gtk::Root;
 }
 
 static GSTREAMER_INIT: OnceLock<()> = OnceLock::new();
@@ -434,7 +435,7 @@ impl PropDialog {
         // Filter out any thumbnails
         if let Some(v) = videos.iter().find(|v| !v.is_image()).or_else(|| videos.first()) {
             // "video-codec" tag is often more readable
-            if let Some(codec) = get_tag(v, "video-codec") {
+            if let Some(codec) = get_tag(v, gstr!("video-codec")) {
                 imp.codec_text.set_text(&codec);
             } else if let Some(caps) = v.caps() {
                 imp.codec_text.set_text(&cap_str(caps));
@@ -463,7 +464,7 @@ impl PropDialog {
         }
 
         if let Some(a) = audio {
-            if let Some(codec) = get_tag(&a, "audio-codec") {
+            if let Some(codec) = get_tag(&a, gstr!("audio-codec")) {
                 // Steal the main codec box if there's no video
                 if videos.is_empty() {
                     imp.codec_box.set_visible(true);
@@ -485,9 +486,9 @@ impl PropDialog {
             }
 
             if videos.is_empty() {
-                set_text_for_tag(&a, "title", &imp.track_title_text, &imp.track_title_box);
-                set_text_for_tag(&a, "artist", &imp.artist_text, &imp.artist_box);
-                set_text_for_tag(&a, "album", &imp.album_text, &imp.album_box);
+                set_text_for_tag(&a, gstr!("title"), &imp.track_title_text, &imp.track_title_box);
+                set_text_for_tag(&a, gstr!("artist"), &imp.artist_text, &imp.artist_box);
+                set_text_for_tag(&a, gstr!("album"), &imp.album_text, &imp.album_box);
             } else {
                 imp.track_title_box.set_visible(false);
                 imp.artist_box.set_visible(false);
@@ -510,7 +511,7 @@ fn cap_str(caps: Caps) -> glib::GString {
     }
 }
 
-fn get_tag(info: &impl IsA<DiscovererStreamInfo>, tag: &str) -> Option<String> {
+fn get_tag(info: &impl IsA<DiscovererStreamInfo>, tag: &GStr) -> Option<String> {
     let tlist = info.tags()?;
 
     let val = tlist.iter_tag_generic(tag).next()?;
@@ -520,7 +521,7 @@ fn get_tag(info: &impl IsA<DiscovererStreamInfo>, tag: &str) -> Option<String> {
 
 fn set_text_for_tag(
     info: &impl IsA<DiscovererStreamInfo>,
-    tag: &str,
+    tag: &GStr,
     label: &gtk::Label,
     gbox: &gtk::Box,
 ) {

@@ -4,7 +4,8 @@ use gtk::{gio, glib};
 
 glib::wrapper! {
     pub struct Application(ObjectSubclass<imp::Application>)
-        @extends gtk::Widget, gtk::Box;
+        @extends gtk::Widget, gtk::Box,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Default for Application {

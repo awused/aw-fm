@@ -379,7 +379,8 @@ impl Progress {
 
 glib::wrapper! {
     pub struct Tracker(ObjectSubclass<imp::Tracker>)
-        @extends gtk::Widget, gtk::Window;
+        @extends gtk::Widget, gtk::Box,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Tracker {

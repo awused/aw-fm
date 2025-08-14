@@ -17,7 +17,8 @@ use crate::gui::{Gui, Selected, show_error, show_warning};
 
 glib::wrapper! {
     pub struct OpenWith(ObjectSubclass<imp::OpenWith>)
-        @extends gtk::Widget, gtk::Window;
+        @extends gtk::Widget, gtk::Window,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::ShortcutManager, gtk::Native, gtk::Root;
 }
 
 struct PartitionedAppInfos {
@@ -78,7 +79,7 @@ impl OpenWith {
         });
 
         let w = s.downgrade();
-        let display = gui.window.display();
+        let display = WidgetExt::display(&gui.window);
         imp.create.connect_clicked(move |_b| {
             let s = w.upgrade().unwrap();
 
@@ -89,7 +90,7 @@ impl OpenWith {
         });
 
         let w = s.downgrade();
-        let display = gui.window.display();
+        let display = WidgetExt::display(&gui.window);
         let activate = move || {
             let s = w.upgrade().unwrap();
 

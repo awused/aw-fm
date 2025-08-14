@@ -43,9 +43,10 @@ to `~/.config/aw-fm/aw-fm.toml`.
 
 If you've copied the desktop files, use
 `xdg-mime default aw-fm-folder.desktop inode/directory` to update your default
-mimetype. Then follow the instructions in
+handler. Then, if you run into other file managers auto-starting, follow the
+instructions in
 [the dbus service file](desktop/org.aw-fm.freedesktop.FileManager1.service)
-to disable other dbus file managers from auto-starting.
+to disable other dbus file managers.
 
 ### Dependencies
 

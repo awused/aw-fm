@@ -517,11 +517,11 @@ impl GuiMenu {
 
         // When this dies, return focus to where it was before, or just anything.
         // TODO -- do a better hack
-        if let Some(fc) = gui.window.focus() {
+        if let Some(fc) = GtkWindowExt::focus(&gui.window) {
             let g = gui.clone();
             popover.connect_closed(move |_| {
                 // Hack around GTK PopoverMenus taking focus to the grave with them.
-                g.window.set_focus(Some(&fc));
+                GtkWindowExt::set_focus(&g.window, Some(&fc));
             });
         }
 
@@ -679,7 +679,8 @@ impl GuiMenu {
         self.display.change_state(&settings.display_mode.as_ref().to_variant());
         self.sort_mode.change_state(&settings.sort.mode.as_ref().to_variant());
         self.sort_dir.change_state(&settings.sort.direction.as_ref().to_variant());
-        self.paste.set_enabled(clipboard::contains_mimetype(g.window.display()));
+        self.paste
+            .set_enabled(clipboard::contains_mimetype(WidgetExt::display(&g.window)));
 
         for cme in &*self.custom_context.borrow() {
             if cme.settings.rejects_count(entries.len()) {

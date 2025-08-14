@@ -1,10 +1,12 @@
+use gtk::gio::{ActionGroup, ActionMap};
 use gtk::glib::Object;
-use gtk::{glib, Application};
+use gtk::{Application, glib};
 
 
 glib::wrapper! {
     pub struct MainWindow(ObjectSubclass<imp::MainWindow>)
-        @extends gtk::Widget, gtk::ApplicationWindow, gtk::Window;
+        @extends gtk::Widget, gtk::ApplicationWindow, gtk::Window,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::ShortcutManager, gtk::Native, gtk::Root, ActionGroup, ActionMap;
 }
 
 impl MainWindow {
@@ -16,7 +18,7 @@ impl MainWindow {
 
 mod imp {
     use gtk::subclass::prelude::*;
-    use gtk::{glib, CompositeTemplate};
+    use gtk::{CompositeTemplate, glib};
 
 
     #[derive(Default, CompositeTemplate)]

@@ -16,7 +16,8 @@ pub(super) enum EntryString {
 
 glib::wrapper! {
     pub struct StringCell(ObjectSubclass<imp::StringCell>)
-        @extends gtk::Widget, gtk::Fixed;
+        @extends gtk::Widget, gtk::Fixed,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl StringCell {

@@ -46,7 +46,8 @@ pub(super) enum DirChoice {
 
 glib::wrapper! {
     pub struct AskDialog(ObjectSubclass<imp::AskDialog>)
-        @extends gtk::Widget, gtk::Window;
+        @extends gtk::Widget, gtk::Window,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::ShortcutManager, gtk::Native, gtk::Root;
 }
 
 impl AskDialog {

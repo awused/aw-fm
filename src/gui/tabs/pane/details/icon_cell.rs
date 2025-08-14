@@ -7,7 +7,8 @@ use crate::gui::tabs::pane::Bound;
 
 glib::wrapper! {
     pub struct IconCell(ObjectSubclass<imp::IconCell>)
-        @extends gtk::Widget, gtk::Fixed;
+        @extends gtk::Widget, gtk::Fixed,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Default for IconCell {

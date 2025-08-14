@@ -20,7 +20,8 @@ use crate::gui::{Selected, gui_run, tabs_run};
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
-        @extends gtk::Widget;
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 #[derive(AsRefStr, EnumString, Eq, PartialEq)]

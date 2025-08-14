@@ -9,7 +9,8 @@ use crate::gui::tabs::pane::Bound;
 
 glib::wrapper! {
     pub struct IconTile(ObjectSubclass<imp::IconTile>)
-        @extends gtk::Widget;
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl Default for IconTile {

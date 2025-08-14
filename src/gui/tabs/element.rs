@@ -12,7 +12,8 @@ use crate::gui::{ActionTarget, tabs_run};
 
 glib::wrapper! {
     pub struct TabElement(ObjectSubclass<imp::AwFmTab>)
-        @extends gtk::Widget, gtk::Box;
+        @extends gtk::Widget, gtk::Box,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 impl TabElement {
