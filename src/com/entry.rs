@@ -3,28 +3,32 @@ use std::cell::{Ref, RefCell};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, btree_map, hash_map};
 use std::fmt::{self, Formatter};
+use std::os::linux::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, RwLock};
+use std::time::Instant;
 
 use ahash::AHashMap;
 use chrono::{Local, TimeZone};
 use gnome_desktop::DesktopThumbnailSize;
 use gtk::gdk::Texture;
 use gtk::gio::ffi::G_FILE_TYPE_DIRECTORY;
+use gtk::gio::prelude::ListModelExtManual;
 use gtk::gio::{
     self, Cancellable, FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE, FILE_ATTRIBUTE_STANDARD_ALLOCATED_SIZE,
     FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE, FILE_ATTRIBUTE_STANDARD_ICON,
     FILE_ATTRIBUTE_STANDARD_IS_SYMLINK, FILE_ATTRIBUTE_STANDARD_SIZE,
     FILE_ATTRIBUTE_STANDARD_SYMLINK_TARGET, FILE_ATTRIBUTE_STANDARD_TYPE,
     FILE_ATTRIBUTE_TIME_MODIFIED, FILE_ATTRIBUTE_TIME_MODIFIED_USEC, FILE_ATTRIBUTE_UNIX_INODE,
-    FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT, FileQueryInfoFlags, Icon,
+    FILE_ATTRIBUTE_UNIX_IS_MOUNTPOINT, FileQueryInfoFlags, Icon, ListModel, ListStore,
 };
 use gtk::glib::ffi::GVariant;
-use gtk::glib::{self, GStr, GString, Object, Variant, WeakRef};
-use gtk::prelude::{FileExt, IconExt, ObjectExt};
+use gtk::glib::object::{Cast, IsA};
+use gtk::glib::{self, ControlFlow, GStr, GString, Object, Priority, Variant, WeakRef};
+use gtk::prelude::{FileExt, IconExt, ListModelExt, ObjectExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 
-use super::{SortDir, SortMode, SortSettings};
+use super::{SortDir, SortMode, SortSettings, Update};
 use crate::gui::{ThumbPriority, queue_thumb};
 use crate::natsort::{self, NatKey};
 
@@ -1035,4 +1039,137 @@ fn intern_icon(icon: Icon) -> Variant {
             v.insert(variant).clone()
         }
     }
+}
+
+
+// ListStore isn't even a flat array, so binary searching isn't much worse even at small sizes.
+pub fn listmodel_bsearch<L: IsA<ListModel>>(
+    list: &L,
+    sort: SortSettings,
+    entry: &Entry,
+) -> Option<u32> {
+    let mut start = 0;
+    let mut end = list.n_items();
+
+    if end == 0 {
+        return None;
+    }
+
+    while start < end {
+        let mid = start + (end - start) / 2;
+
+        let obj = list.item(mid).unwrap().downcast::<EntryObject>().unwrap();
+
+        let inner = obj.get();
+        if inner.abs_path == entry.abs_path {
+            // The equality check below may fail even with abs_path being equal due to updates.
+            return Some(mid);
+        }
+
+        match entry.cmp(&inner, sort) {
+            Ordering::Equal => unreachable!(),
+            Ordering::Less => end = mid,
+            Ordering::Greater => start = mid + 1,
+        }
+    }
+
+    // All list stores must always be sorted modulo individual updates by the time updates are
+    // being handled.
+    //
+    // The item is not present.
+    None
+}
+
+pub struct TotalPos(pub u32);
+
+pub enum ExistingEntry {
+    Present(EntryObject, TotalPos),
+    NotLocal(EntryObject),
+    Missing,
+}
+
+pub fn liststore_entry_for_update(
+    list: &ListStore,
+    sort: SortSettings,
+    update: &Update,
+) -> ExistingEntry {
+    let path = update.path();
+
+    // If it exists in any tab (search or flat)
+    let mut global = EntryObject::lookup(path);
+
+    if global.is_none()
+        && matches!(update, Update::Removed(_))
+        && path.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".nfs"))
+    {
+        let start = Instant::now();
+        if let Ok(inode) = path.metadata().as_ref().map(MetadataExt::st_ino) {
+            // We got a "deletion" for a silly renamed file. In practice this is fairly
+            // rare, so handle by scanning for the inode number in the current
+            // directory. Only consider the current flat contents, not search contents.
+            //
+            // If performance becomes a concern we'll need a map of inodes somewhere.
+            global = list.iter::<EntryObject>().flatten().find(|eo| eo.get().inode == inode);
+            if let Some(eo) = &global {
+                warn!(
+                    "Got NFS silly rename for {:?}. Scan took {:?}",
+                    eo.get().abs_path,
+                    start.elapsed()
+                );
+            } else {
+                warn!("Got NFS silly rename for missing file. Scan took {:?}", start.elapsed());
+            }
+        }
+    }
+
+    // If it exists in flat tabs (which all share the same state).
+    if let Some(global) = global {
+        let local = listmodel_bsearch(list, sort, &global.get());
+        if let Some(local) = local {
+            ExistingEntry::Present(global, TotalPos(local))
+        } else {
+            ExistingEntry::NotLocal(global)
+        }
+    } else {
+        ExistingEntry::Missing
+    }
+}
+
+
+pub fn liststore_needs_reinsert(
+    list: &ListStore,
+    sort: SortSettings,
+    pos: TotalPos,
+    new: &EntryObject,
+) -> bool {
+    let pos = pos.0;
+    let comp = sort.comparator();
+    let greater_than_left =
+        pos == 0 || comp(&list.item(pos - 1).unwrap(), new.upcast_ref::<Object>()).is_lt();
+    let less_than_right = pos + 1 == list.n_items()
+        || comp(new.upcast_ref::<Object>(), &list.item(pos + 1).unwrap()).is_lt();
+    !greater_than_left || !less_than_right
+}
+
+pub fn liststore_drop_batched(list: ListStore) {
+    // Dropping in one go can be glacially slow due to callbacks and notifications.
+    // Especially if we're cleaning up the final references to a lot of items with thumbnails.
+    // 130ms for ~40k items
+    // 160ms for 50k
+    // More with thumbnails
+    let total = list.n_items();
+    if total == 0 {
+        return;
+    }
+
+    let start = Instant::now();
+    glib::idle_add_local_full(Priority::LOW, move || {
+        if list.n_items() <= 1000 {
+            // Doesn't count the last batch
+            trace!("Finished dropping {total} items in roughly {:?}", start.elapsed());
+            return ControlFlow::Break;
+        }
+        list.splice(0, 1000, &[] as &[EntryObject]);
+        ControlFlow::Continue
+    });
 }

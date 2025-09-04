@@ -7,9 +7,12 @@ use gtk::prelude::*;
 use gtk::{CustomFilter, FilterListModel, MultiSelection};
 
 use super::flat_dir::WatchedDir;
-use super::{CachedDir, ExistingEntry, PartiallyAppliedUpdate, TotalPos, liststore_drop_batched};
-use crate::com::{Entry, EntryObject, EntryObjectSnapshot, SearchSnapshot, SortSettings, Update};
-use crate::gui::tabs::{listmodel_bsearch, liststore_entry_for_update, liststore_needs_reinsert};
+use super::{CachedDir, PartiallyAppliedUpdate};
+use crate::com::{
+    Entry, EntryObject, EntryObjectSnapshot, ExistingEntry, SearchSnapshot, SortSettings, TotalPos,
+    Update, listmodel_bsearch, liststore_drop_batched, liststore_entry_for_update,
+    liststore_needs_reinsert,
+};
 
 pub struct Contents {
     list: ListStore,

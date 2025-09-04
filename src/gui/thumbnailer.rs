@@ -91,8 +91,6 @@ impl PendingThumbs {
     ) -> Job {
         let entry = obj.get();
         let path = entry.abs_path.clone();
-        let mtime = entry.mtime;
-        let mime = entry.mime;
 
         let (cancel, lock) = match self.ongoing.entry(path.clone()) {
             btree_map::Entry::Vacant(v) => v.insert((Arc::default(), Arc::default())),
@@ -108,8 +106,8 @@ impl PendingThumbs {
             path,
             priority,
             from_event,
-            mime,
-            mtime,
+            mime: entry.mime,
+            mtime: entry.mtime,
             size,
             factory,
             cancel,
@@ -627,15 +625,15 @@ pub fn generate_and_save_thumbnail(
             // Don't store failed thumbnails for updates from events, as the second-level
             // precision causes problems. This means it will be retried later, but that's
             // fine.
-            if !from_event && !cancel_save.load(Ordering::Relaxed) {
-                if let Err(e) =
+            if !from_event
+                && !cancel_save.load(Ordering::Relaxed)
+                && let Err(e) =
                     factory.create_failed_thumbnail(uri, mtime_sec as i64, Cancellable::NONE)
-                {
-                    // Not a serious error for aw-fm, we will still skip trying multiple
-                    // times, but it will be retried
-                    // unnecessarily in the future.
-                    error!("Failed to save failed thumbnail for {uri:?}: {e}");
-                }
+            {
+                // Not a serious error for aw-fm, we will still skip trying multiple
+                // times, but it will be retried
+                // unnecessarily in the future.
+                error!("Failed to save failed thumbnail for {uri:?}: {e}");
             }
             return None;
         }

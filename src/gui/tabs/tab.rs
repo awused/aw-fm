@@ -27,16 +27,14 @@ use super::pane::Pane;
 use super::search::Search;
 use super::{CachedDir, HistoryEntry, NavTarget, PaneState, TabContext};
 use crate::com::{
-    DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, GetEntry,
-    ManagerAction, SearchSnapshot, SearchUpdate, SortDir, SortMode, SortSettings,
+    DirSettings, DirSnapshot, DisplayMode, EntryObject, EntryObjectSnapshot, ExistingEntry,
+    GetEntry, ManagerAction, SearchSnapshot, SearchUpdate, SortDir, SortMode, SortSettings,
 };
 use crate::config::CONFIG;
 use crate::database::SavedGroup;
 use crate::gui::clipboard::{ClipboardOp, SelectionProvider, handle_clipboard, handle_drop};
 use crate::gui::operations::{self, Kind, Outcome};
-use crate::gui::tabs::{
-    ExistingEntry, FocusState, PartiallyAppliedUpdate, ScrollPosition, cache_open_dir,
-};
+use crate::gui::tabs::{FocusState, PartiallyAppliedUpdate, ScrollPosition, cache_open_dir};
 use crate::gui::{
     CompletionResult, Selected, Update, applications, gui_run, show_error, show_warning, tabs_run,
 };
@@ -1225,8 +1223,7 @@ impl Tab {
 
     pub fn make_visible(&mut self, left: &[Self], right: &[Self]) {
         if self.visible() {
-            error!("Pane {:?} already displayed", self.id);
-            return;
+            return error!("Pane {:?} already displayed", self.id);
         }
 
         if self.group.is_some() {
@@ -1441,10 +1438,10 @@ impl Tab {
 
         // None of the tabs in `left` are an exact match.
         for t in self.matching_mut(right) {
-            if t.visible() {
-                if let PartiallyAppliedUpdate::Delete(eo) = &partial {
-                    t.pane.workaround_focus_before_delete(eo);
-                }
+            if t.visible()
+                && let PartiallyAppliedUpdate::Delete(eo) = &partial
+            {
+                t.pane.workaround_focus_before_delete(eo);
             }
 
             t.contents.finish_update(&partial);

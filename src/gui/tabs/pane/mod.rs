@@ -302,22 +302,20 @@ impl Pane {
 
             let initial: String = entry.text().to_string();
 
-            if let Some(mut res) = existing.take() {
-                if res.candidates[res.position].to_string_lossy() == initial {
-                    if mods.contains(ModifierType::SHIFT_MASK) {
-                        res.position = min(
-                            res.position.wrapping_sub(1),
-                            res.candidates.len().saturating_sub(1),
-                        );
-                    } else {
-                        res.position = (res.position + 1) % res.candidates.len();
-                    }
-
-                    entry.set_text(&res.candidates[res.position].to_string_lossy());
-                    entry.set_position(-1);
-                    existing.set(Some(res));
-                    return Propagation::Proceed;
+            if let Some(mut res) = existing.take()
+                && res.candidates[res.position].to_string_lossy() == initial
+            {
+                if mods.contains(ModifierType::SHIFT_MASK) {
+                    res.position =
+                        min(res.position.wrapping_sub(1), res.candidates.len().saturating_sub(1));
+                } else {
+                    res.position = (res.position + 1) % res.candidates.len();
                 }
+
+                entry.set_text(&res.candidates[res.position].to_string_lossy());
+                entry.set_position(-1);
+                existing.set(Some(res));
+                return Propagation::Proceed;
             }
 
             if mods != ModifierType::CONTROL_MASK {
@@ -804,7 +802,17 @@ impl Pane {
                     vadjust.upper()
                 );
 
-                vadjust.set_value(precise.position);
+                if self.view.current_display_mode() == DisplayMode::Columns {
+                    // Don't ask, it's just broken. The GTK experience.
+                    // As far as I can tell, this isn't a problem for the grid view. Probably.
+                    // Worth considering
+                    let precise = precise.clone();
+                    glib::idle_add_local_once(move || {
+                        vadjust.set_value(precise.position);
+                    });
+                } else {
+                    vadjust.set_value(precise.position);
+                }
             }
         }
     }

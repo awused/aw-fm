@@ -10,10 +10,12 @@ use gtk::gio::ListStore;
 use gtk::glib::object::ObjectExt;
 
 use super::tab::Tab;
-use super::{ExistingEntry, liststore_drop_batched, liststore_entry_for_update};
-use crate::com::{EntryObject, GetEntry, ManagerAction, SortSettings, Update};
+use crate::com::{
+    EntryObject, ExistingEntry, GetEntry, ManagerAction, SortSettings, Update,
+    liststore_drop_batched, liststore_entry_for_update, liststore_needs_reinsert,
+};
 use crate::gui::gui_run;
-use crate::gui::tabs::{PartiallyAppliedUpdate, liststore_needs_reinsert};
+use crate::gui::tabs::PartiallyAppliedUpdate;
 
 #[derive(Debug)]
 pub struct WatchedDir {
