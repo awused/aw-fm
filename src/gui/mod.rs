@@ -8,7 +8,7 @@ use ahash::AHashMap;
 use gnome_desktop::DesktopThumbnailSize;
 use gtk::gdk::{ModifierType, Surface};
 use gtk::gio::OwnerId;
-use gtk::glib::{ControlFlow, ExitCode, SourceId, WeakRef};
+use gtk::glib::{ControlFlow, ExitCode, SourceId, WeakRef, timeout_future_seconds};
 use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
@@ -298,6 +298,14 @@ impl Gui {
             }
         });
 
+        let g = rc.clone();
+        ctx.spawn_local_with_priority(glib::Priority::HIGH, async move {
+            closing::closed_fut().await;
+            timeout_future_seconds(10).await;
+            error!("Gui failed to close within 10 seconds of application closing");
+            g.window.close();
+        });
+
         rc.setup();
 
         rc
@@ -386,12 +394,12 @@ impl Gui {
     }
 
     fn send_manager(&self, val: ManagerAction) {
-        if let Err(e) = self.manager_sender.send(val) {
-            if !closing::closed() {
-                // This should never happen
-                closing::fatal(format!("Sending to manager unexpectedly failed. {e}"));
-                self.window.close();
-            }
+        if let Err(e) = self.manager_sender.send(val)
+            && !closing::closed()
+        {
+            // This should never happen
+            closing::fatal(format!("Sending to manager unexpectedly failed. {e}"));
+            self.window.close();
         }
     }
 

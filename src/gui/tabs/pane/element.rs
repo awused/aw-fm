@@ -134,13 +134,12 @@ impl PaneElement {
 
             tabs_run(|tlist| {
                 let tab = tlist.find(tab).unwrap();
-                if let Some(dragging_tab) = DRAGGING_TAB.get() {
-                    if let Some(dragging) = tlist.find(dragging_tab) {
-                        if dragging.matches_arc(&tab.dir()) {
-                            info!("Ignoring drag into same directory");
-                            return false;
-                        }
-                    }
+                if let Some(dragging_tab) = DRAGGING_TAB.get()
+                    && let Some(dragging) = tlist.find(dragging_tab)
+                    && dragging.matches_arc(&tab.dir())
+                {
+                    info!("Ignoring drag into same directory");
+                    return false;
                 }
                 tab.accepts_paste()
             })

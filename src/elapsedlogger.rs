@@ -69,10 +69,10 @@ const MAX_WIDTH: usize = 20;
 
 // Strips all but the last two modules.
 fn shrink_target(target: &str) -> &str {
-    if let Some(x) = target.rfind("::") {
-        if let Some(x) = target[0..x].rfind("::") {
-            return &target[x + 2..];
-        }
+    if let Some(x) = target.rfind("::")
+        && let Some(x) = target[0..x].rfind("::")
+    {
+        return &target[x + 2..];
     }
     target
 }

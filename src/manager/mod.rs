@@ -93,10 +93,10 @@ impl Manager {
 
         let sender = notify_sender.clone();
         let watcher = notify::recommended_watcher(move |res| {
-            if let Err(e) = sender.send((res, None)) {
-                if !closing::closed() {
-                    closing::fatal(format!("Error sending from notify watcher: {e}"));
-                }
+            if let Err(e) = sender.send((res, None))
+                && !closing::closed()
+            {
+                closing::fatal(format!("Error sending from notify watcher: {e}"));
             }
         })
         .unwrap();
@@ -108,10 +108,10 @@ impl Manager {
                 Some(
                     notify::PollWatcher::new(
                         move |res| {
-                            if let Err(e) = sender.send((res, None)) {
-                                if !closing::closed() {
-                                    closing::fatal(format!("Error sending from poll watcher: {e}"));
-                                }
+                            if let Err(e) = sender.send((res, None))
+                                && !closing::closed()
+                            {
+                                closing::fatal(format!("Error sending from poll watcher: {e}"));
                             }
                         },
                         // 30s default polling, but all options are very bad
@@ -248,7 +248,7 @@ impl Manager {
                     info!(
                         "Synchronously reading {p:?} for completed operation with no notification."
                     );
-                    Self::send_update(&self.gui_sender, p.into(), Sources::new_flat());
+                    Self::send_update(&self.gui_sender, p, Sources::new_flat());
                 }
 
                 let _ignored = finished.send(all_paths);

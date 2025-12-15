@@ -93,10 +93,10 @@ impl TabsList {
                     "Workaround: unbinding already bound tab {:?} before setting parent",
                     tab.imp().tab.get().unwrap()
                 );
-                if let Some(old_tab) = old_item.item().and_downcast::<TabElement>() {
-                    if old_tab.imp().tab.get() == tab.imp().tab.get() {
-                        old_item.set_child(None::<&TabElement>);
-                    }
+                if let Some(old_tab) = old_item.item().and_downcast::<TabElement>()
+                    && old_tab.imp().tab.get() == tab.imp().tab.get()
+                {
+                    old_item.set_child(None::<&TabElement>);
                 }
                 tab.unparent();
             }
@@ -110,15 +110,12 @@ impl TabsList {
 
             let tab = item.item().unwrap().downcast::<TabElement>().unwrap();
             // println!("unbinding {:?}", tab.imp().tab.get().unwrap());
-            if let Some(new_item) = tab.imp().list_item.take() {
-                if &new_item != item {
-                    warn!(
-                        "Unbound tab {:?} from item it was no longer bound to",
-                        tab.imp().tab.get()
-                    );
-                    tab.imp().list_item.set(Some(new_item));
-                    return;
-                }
+            if let Some(new_item) = tab.imp().list_item.take()
+                && &new_item != item
+            {
+                warn!("Unbound tab {:?} from item it was no longer bound to", tab.imp().tab.get());
+                tab.imp().list_item.set(Some(new_item));
+                return;
             }
 
             item.set_child(None::<&TabElement>);
@@ -453,7 +450,7 @@ impl TabsList {
             next_id(),
             nav_target,
             TabContext {
-                left: &[],
+                left: &self.tabs,
                 right: &[],
                 cached: &mut self.cached,
             },
@@ -597,13 +594,13 @@ impl TabsList {
         // With delayed output in scripts, the user can split any visible tab.
         let splitting_active = Some(source) == self.active;
 
-        if let Some(id) = tab {
-            if self.find(id).unwrap().visible() {
-                if splitting_active {
-                    self.set_active(id);
-                }
-                return;
+        if let Some(id) = tab
+            && self.find(id).unwrap().visible()
+        {
+            if splitting_active {
+                self.set_active(id);
             }
+            return;
         }
 
         let Some((paned, group)) = self.tabs[source_pos].split(orient, false) else {

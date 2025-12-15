@@ -235,7 +235,9 @@ fn recurse_dir_sync(
             .git_ignore(!show_all)
             .git_global(!show_all)
             .git_exclude(!show_all)
-            .parents(!show_all)
+            // Do not read from parent directories, so that a search starting in an ignored
+            // directory will not completely block searches.
+            .parents(false)
             .build_parallel();
 
         // Must defer
@@ -413,11 +415,10 @@ async fn consume_entries(
                     ReadResult::DirUnreadable(e) => {
                         if let Err(e) =
                             gui_sender.send(
-                                GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
-                            if !closing::closed() {
+                                GuiAction::DirectoryOpenError(path.clone(), e.to_string()))
+                            && !closing::closed() {
                                 error!("{e}");
                             }
-                        }
                         return false;
                     }
                     ReadResult::DirError(e) => drop(
@@ -433,13 +434,13 @@ async fn consume_entries(
             }
 
             drop(receiver);
-            trace!("Fast directory completed in {:?} with {} entries", start.elapsed(), entries.len());
+            trace!(
+                "Fast directory completed in {:?} with {} entries", start.elapsed(), entries.len());
             // Send off a full snapshot
-            if let Err(e) = gui_sender.send(snap(&path, &cancel, SnapshotKind::Complete, entries)) {
-                if !closing::closed() {
+            if let Err(e) = gui_sender.send(snap(&path, &cancel, SnapshotKind::Complete, entries))
+                && !closing::closed() {
                     error!("{e}");
                 }
-            }
         }
         _ = sleep_until(fast_deadline) => {
             trace!("Starting slow directory handling at {} entries", entries.len());
@@ -517,11 +518,10 @@ async fn read_slow_dir(
                         }
                         ReadResult::DirUnreadable(e) => {
                             if let Err(e) = sender.send(
-                                GuiAction::DirectoryOpenError(path.clone(), e.to_string())) {
-                                if !closing::closed() {
+                                GuiAction::DirectoryOpenError(path.clone(), e.to_string()))
+                                && !closing::closed() {
                                     error!("{e}");
                                 }
-                            }
                             break Failed;
                         }
                         ReadResult::DirError(e) => drop(
@@ -544,11 +544,10 @@ async fn read_slow_dir(
                         batch.len()
                     );
 
-                    if let Err(e) = sender.send(snap(&path, &cancel, SnapshotKind::End, batch)) {
-                        if !closing::closed() {
+                    if let Err(e) = sender.send(snap(&path, &cancel, SnapshotKind::End, batch))
+                        && !closing::closed() {
                             error!("{e}");
                         }
-                    }
 
                     return
                 } else if status == Failed {
@@ -609,11 +608,10 @@ async fn read_slow_dir(
                             start.elapsed(),
                             batch.len()
                         );
-                        if let Err(e) = sender.send(snap(&path, &cancel, SnapshotKind::End, batch)) {
-                            if !closing::closed() {
+                        if let Err(e) = sender.send(snap(&path, &cancel, SnapshotKind::End, batch))
+                            && !closing::closed() {
                                 error!("{e}");
                             }
-                        }
                         // Send final snapshot
                         return
                     }
@@ -829,7 +827,7 @@ fn recurse_children(
                 acc.unsent += 1;
 
 
-                if acc.unsent % 1000 == 0 {
+                if acc.unsent.is_multiple_of(1000) {
                     acc.send();
                 }
                 WalkState::Continue

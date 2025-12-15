@@ -279,10 +279,10 @@ impl Thumbnailer {
 
         let job = 'find_job: {
             while let Some((weak, from_event)) = pending.high_priority.pop_front() {
-                if let Some(strong) = weak.upgrade() {
-                    if strong.imp().mark_thumbnail_loading(ThumbPriority::High, size) {
-                        break 'find_job Some((strong, ThumbPriority::High, from_event));
-                    }
+                if let Some(strong) = weak.upgrade()
+                    && strong.imp().mark_thumbnail_loading(ThumbPriority::High, size)
+                {
+                    break 'find_job Some((strong, ThumbPriority::High, from_event));
                 }
             }
 
@@ -292,10 +292,10 @@ impl Thumbnailer {
             }
 
             while let Some((weak, from_event)) = pending.med_priority.pop_front() {
-                if let Some(strong) = weak.upgrade() {
-                    if strong.imp().mark_thumbnail_loading(ThumbPriority::Medium, size) {
-                        break 'find_job Some((strong, ThumbPriority::Medium, from_event));
-                    }
+                if let Some(strong) = weak.upgrade()
+                    && strong.imp().mark_thumbnail_loading(ThumbPriority::Medium, size)
+                {
+                    break 'find_job Some((strong, ThumbPriority::Medium, from_event));
                 }
             }
 
@@ -304,18 +304,18 @@ impl Thumbnailer {
             }
 
             while let Some((weak, from_event)) = pending.low_priority.pop() {
-                if let Some(strong) = weak.upgrade() {
-                    if strong.imp().mark_thumbnail_loading(ThumbPriority::Low, size) {
-                        break 'find_job Some((strong, ThumbPriority::Low, from_event));
-                    }
+                if let Some(strong) = weak.upgrade()
+                    && strong.imp().mark_thumbnail_loading(ThumbPriority::Low, size)
+                {
+                    break 'find_job Some((strong, ThumbPriority::Low, from_event));
                 }
             }
 
             while let Some((weak, from_event)) = pending.generate_only.pop() {
-                if let Some(strong) = weak.upgrade() {
-                    if strong.imp().mark_thumbnail_loading(ThumbPriority::Generate, size) {
-                        break 'find_job Some((strong, ThumbPriority::Generate, from_event));
-                    }
+                if let Some(strong) = weak.upgrade()
+                    && strong.imp().mark_thumbnail_loading(ThumbPriority::Generate, size)
+                {
+                    break 'find_job Some((strong, ThumbPriority::Generate, from_event));
                 }
             }
 

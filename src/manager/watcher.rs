@@ -102,10 +102,9 @@ impl Manager {
             error!("Failed to open directory {path:?}: {e}");
             if let Err(e) =
                 self.gui_sender.send(GuiAction::DirectoryOpenError(path.clone(), e.to_string()))
+                && !closing::closed()
             {
-                if !closing::closed() {
-                    closing::fatal(format!("Gui channel unexpectedly closed: {e}"));
-                }
+                closing::fatal(format!("Gui channel unexpectedly closed: {e}"));
             }
             false
         } else {
@@ -121,10 +120,9 @@ impl Manager {
             error!("Failed to open directory for polling {path:?}: {e}");
             if let Err(e) =
                 self.gui_sender.send(GuiAction::DirectoryOpenError(path.clone(), e.to_string()))
+                && !closing::closed()
             {
-                if !closing::closed() {
-                    closing::fatal(format!("Gui channel unexpectedly closed: {e}"));
-                }
+                closing::fatal(format!("Gui channel unexpectedly closed: {e}"));
             }
             false
         } else {
@@ -212,14 +210,14 @@ impl Manager {
 
     fn jump_queue(&mut self, path: &Path) {
         // Jump the queue and change it to dedupe mode
-        if let Some(PendingUpdates { expiry, state, .. }) = self.recent_mutations.get_mut(path) {
-            if *state != State::Deduping {
-                *state = State::Deduping;
-                *expiry = Instant::now() + DEDUPE_DELAY;
-                let next = *expiry + BATCH_GRACE;
+        if let Some(PendingUpdates { expiry, state, .. }) = self.recent_mutations.get_mut(path)
+            && *state != State::Deduping
+        {
+            *state = State::Deduping;
+            *expiry = Instant::now() + DEDUPE_DELAY;
+            let next = *expiry + BATCH_GRACE;
 
-                self.next_tick = self.next_tick.map_or(Some(next), |nt| Some(nt.min(next)));
-            }
+            self.next_tick = self.next_tick.map_or(Some(next), |nt| Some(nt.min(next)));
         }
     }
 
@@ -457,10 +455,10 @@ impl Manager {
                 }
             }
 
-            if let Err(e) = sender.send((res, Some(id.clone()))) {
-                if !closing::closed() {
-                    closing::fatal(format!("Error sending from notify watcher: {e}"));
-                }
+            if let Err(e) = sender.send((res, Some(id.clone())))
+                && !closing::closed()
+            {
+                closing::fatal(format!("Error sending from notify watcher: {e}"));
             }
         });
 
