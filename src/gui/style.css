@@ -102,18 +102,23 @@ listview.tabs-list>* {
 .tab,
 .bookmark {
   padding-left: 3px;
-  padding-bottom: 10px;
 }
 
 .bookmark {
   border-top: 1px solid black;
   padding-top: 8px;
+  padding-bottom: 10px;
 }
 
 .tab {
   outline: 1px solid black;
   margin-top: 1px;
-  padding-top: 7px;
+  padding-top: 6px;
+  padding-bottom: 9px;
+}
+
+.tab>label {
+  min-height: 30px;
 }
 
 .tab:hover,
