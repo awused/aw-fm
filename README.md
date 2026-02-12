@@ -315,7 +315,7 @@ only need to open another file manager once or twice a year, that's acceptable.
 
 The major gui file managers on Linux are almost all descended from Nautilus and
 have similar characteristics including performance traps and a lack of
-customization and features. Even among more niche projectsI wasn't able to find
+customization and features. Even among more niche projects I wasn't able to find
 a file manager that fit my use cases while also being performant, so I made one.
 
 ## Screenshots

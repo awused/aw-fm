@@ -164,7 +164,7 @@ pub(super) struct Pane {
     selection: MultiSelection,
 
     // This is a workaround for GTK not providing ways to better segment clicks.
-    // If a click is handled on an item, don't handle it again on the
+    // If a click is handled on an item, don't handle it again on the pane.
     deny_view_click: Rc<Cell<bool>>,
 
     _signals: PaneSignals,

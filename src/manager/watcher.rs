@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use ahash::AHashSet;
 use notify::RecursiveMode::NonRecursive;
-use notify::event::{ModifyKind, RenameMode};
+use notify::event::{ModifyKind, RemoveKind, RenameMode};
 use notify::{Event, Watcher};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedSender;
@@ -246,6 +246,11 @@ impl Manager {
                 assert_eq!(event.paths.len(), 1);
 
                 self.jump_queue(&event.paths[0]);
+            }
+            Remove(RemoveKind::Other) if event.info() == Some("unmount") => {
+                let e = format!("Got unmount event for {:?}, updates will be missed", event.paths);
+                warn!("{e}");
+                return self.send(GuiAction::ConveyWarning(e));
             }
             Remove(_) | Modify(ModifyKind::Name(RenameMode::From)) => {
                 trace!("Remove {:?} {:?}", event.kind, event.paths);

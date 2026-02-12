@@ -203,7 +203,7 @@ mod imp {
             }
 
             let size_string = entry.long_size_string();
-            if !matches!(self.size.text(), Some(existing) if existing.as_str() == size_string) {
+            if self.size.text().is_none_or(|text| text.as_str() != size_string) {
                 self.size.set_text(Some(&size_string));
             }
         }
