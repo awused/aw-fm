@@ -150,6 +150,7 @@ mod imp {
                     badge.set_halign(gtk::Align::Start);
 
                     self.overlay.add_overlay(&badge);
+                    self.symlink_badge.set(Some(badge));
                 });
             }
         }

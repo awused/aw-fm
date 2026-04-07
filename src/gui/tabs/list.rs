@@ -60,7 +60,8 @@ pub enum TabPosition {
 #[derive(Debug)]
 pub struct TabsList {
     // Assume the number of tabs is small enough and sane.
-    // We iterate over all tabs a lot, and we assume a linear scan is going to be fast enough.
+    // We iterate over all tabs a lot and want to split the list mutably.
+    // Assume a linear scan is going to be fast enough.
     // If that stops being the case it's annoying but not infeasible to use a map.
     tabs: Vec<Tab>,
 

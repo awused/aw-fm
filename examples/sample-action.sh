@@ -52,6 +52,7 @@
 # extensions=
 #
 ## Allowed paths, as a regular expression.
+## Matches against the absolute file path.
 ## All files/directories must match this regex if set.
 #
 # regex=
@@ -125,7 +126,6 @@
 #**aw-fm-settings-end**
 
 # A script that can run on anything inside a user's Downloads folder.
-# The glob and regular expression should behave the same.
 # Shows up in the context menu as "Remove Downloads"
 #**aw-fm-settings-begin**
 # name=Remove Downloads
