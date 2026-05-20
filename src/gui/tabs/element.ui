@@ -24,6 +24,7 @@
       <object class="GtkSpinner" id="spinner">
           <property name="visible">false</property>
           <property name="spinning">false</property>
+          <property name="margin-end">8px</property>
       </object>
     </child>
 

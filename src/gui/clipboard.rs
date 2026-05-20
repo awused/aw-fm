@@ -69,7 +69,13 @@ impl SelectionProvider {
     }
 }
 
-fn bytes_to_operation(tab: TabId, path: Arc<Path>, uri_list: bool, bytes: &[u8]) {
+fn bytes_to_operation(
+    tab: TabId,
+    path: Arc<Path>,
+    uri_list: bool,
+    drag_action: DragAction,
+    bytes: &[u8],
+) {
     let Ok(text) = from_utf8(bytes) else {
         return error!("Invalid utf-8 in contents");
     };
@@ -88,8 +94,10 @@ fn bytes_to_operation(tab: TabId, path: Arc<Path>, uri_list: bool, bytes: &[u8])
                 return;
             }
         }
-    } else {
+    } else if drag_action.contains(DragAction::MOVE) || !drag_action.contains(DragAction::COPY) {
         ClipboardOp::Cut
+    } else {
+        ClipboardOp::Copy
     };
 
     // for_uri can panic
@@ -115,6 +123,7 @@ fn stream_to_operation(
     tab: TabId,
     path: Arc<Path>,
     uri_list: bool,
+    drag_action: DragAction,
     finished: impl FnOnce() + 'static,
 ) -> impl FnOnce(Result<(InputStream, GString), glib::Error>) {
     move |res| {
@@ -137,7 +146,7 @@ fn stream_to_operation(
                 match res {
                     Ok(_bytes) => {
                         let bytes = output.steal_as_bytes();
-                        bytes_to_operation(tab, path, uri_list, &bytes)
+                        bytes_to_operation(tab, path, uri_list, drag_action, &bytes)
                     }
                     Err(e) => {
                         error!("Failed to read contents: {e}");
@@ -159,6 +168,7 @@ pub fn contains_mimetype(display: Display) -> bool {
 
 pub fn handle_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
     let formats = display.clipboard().formats();
+    debug!("Received clipboard with mimetypes: {:?}", formats.mime_types());
 
     let mime = if formats.contain_mime_type(SPECIAL) {
         SPECIAL
@@ -176,12 +186,13 @@ pub fn handle_clipboard(display: Display, tab: TabId, path: Arc<Path>) {
         &[mime],
         Priority::LOW,
         Cancellable::NONE,
-        stream_to_operation(tab, path, false, || {}),
+        stream_to_operation(tab, path, false, DragAction::empty(), || {}),
     );
 }
 
 pub fn handle_drop(drop_ev: &gdk::Drop, tab: TabId, path: Arc<Path>) -> bool {
     let formats = drop_ev.formats();
+    debug!("Received drop with mimetypes: {:?}", formats.mime_types());
 
     let (mime, uris) = if formats.contain_mime_type(SPECIAL) {
         (SPECIAL, false)
@@ -203,6 +214,7 @@ pub fn handle_drop(drop_ev: &gdk::Drop, tab: TabId, path: Arc<Path>) -> bool {
     } else if actions.contains(DragAction::COPY) {
         DragAction::COPY
     } else {
+        warn!("Drag with no supported action. Got {actions:?}");
         actions
     };
 
@@ -211,7 +223,7 @@ pub fn handle_drop(drop_ev: &gdk::Drop, tab: TabId, path: Arc<Path>) -> bool {
         &[mime],
         Priority::LOW,
         Cancellable::NONE,
-        stream_to_operation(tab, path, uris, move || dr.finish(action)),
+        stream_to_operation(tab, path, uris, action, move || dr.finish(action)),
     );
     true
 }

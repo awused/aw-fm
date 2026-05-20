@@ -450,6 +450,7 @@ async fn consume_entries(
                 sleep(BATCH_TIMEOUT).await;
             }
 
+            // Send off an initial batch, the gui may elect not to show anything if it's tiny
             if let Err(e) = gui_sender.send(snap(&path, &cancel, SnapshotKind::Start, entries)) {
                 if !closing::closed() {
                     error!("{e}");
@@ -457,7 +458,6 @@ async fn consume_entries(
                 return;
             }
 
-            // Send off an initial batch, the gui may elect not to show anything if it's tiny
             read_slow_dir(path.clone(), cancel, receiver, gui_sender, snap).await;
         }
     };
