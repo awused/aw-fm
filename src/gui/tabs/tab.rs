@@ -32,6 +32,7 @@ use crate::com::{
 };
 use crate::config::CONFIG;
 use crate::database::SavedGroup;
+use crate::gui::chooser::chooser_run;
 use crate::gui::clipboard::{ClipboardOp, SelectionProvider, handle_clipboard, handle_drop};
 use crate::gui::operations::{self, Kind, Outcome};
 use crate::gui::tabs::{FocusState, PartiallyAppliedUpdate, ScrollPosition, cache_open_dir};
@@ -320,6 +321,7 @@ impl Tab {
         debug!("Opening tab {id:?} to {target:?}");
         // fetch metatada synchronously, even with a donor
         let settings = gui_run(|g| g.database.get(target.dir.clone()));
+        chooser_run(|c| c.root(&target.dir));
 
         let element = TabElement::new(id.copy(), &target.dir);
         let dir = FlatDir::new(target.dir);
@@ -514,6 +516,7 @@ impl Tab {
     fn open_search(&mut self, query: String) {
         trace!("Creating Search for {:?}", self.id);
         let mut search = Search::new(self.dir.path().clone(), &self.contents, query);
+        chooser_run(|c| c.root(self.dir.path()));
 
         self.element.search_title(self.dir.path());
 
@@ -803,6 +806,7 @@ impl Tab {
         if *self.dir.path() == target.dir {
             if was_search {
                 self.close_search();
+                chooser_run(|c| c.root(&target.dir));
                 return None;
             }
             return Some(target);
@@ -854,6 +858,7 @@ impl Tab {
         debug_assert!(self.search.is_none());
         self.pane.update_location(self.dir.path(), self.settings, &self.contents);
         self.load(context.left, context.right);
+        chooser_run(|c| c.root(&self.dir.path()));
         None
     }
 

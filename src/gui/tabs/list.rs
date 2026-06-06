@@ -833,6 +833,10 @@ impl TabsList {
     }
 
     pub(super) fn close_tab_id(&mut self, id: TabId) {
+        if OPTIONS.chooser_mode.is_some() {
+            return;
+        }
+
         let mut eindex = self.element_position(id).unwrap();
         let index = self.position(id).unwrap();
 

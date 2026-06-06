@@ -14,6 +14,7 @@ use strum_macros::{AsRefStr, EnumString};
 
 use super::DRAGGING_TAB;
 use crate::com::{ActionTarget, SignalHolder};
+use crate::gui::chooser::chooser_run;
 use crate::gui::clipboard::URIS;
 use crate::gui::tabs::id::TabId;
 use crate::gui::{Selected, gui_run, tabs_run};
@@ -273,6 +274,9 @@ impl PaneElement {
             if removed > 0 {
                 s.defer_selected_text_update(list)
             }
+
+            // Could update chooser here but the chooser is more about the user picking things than
+            // responding to updates.
         });
 
         let count_signal = SignalHolder::new(selection, count_signal);
@@ -281,7 +285,8 @@ impl PaneElement {
 
         let w = self.downgrade();
         let selection_signal = selection.connect_selection_changed(move |list, _p, _n| {
-            w.upgrade().unwrap().update_selected_text(list)
+            w.upgrade().unwrap().update_selected_text(list);
+            chooser_run(|c| c.selection(list));
         });
         let selection_signal = SignalHolder::new(selection, selection_signal);
 

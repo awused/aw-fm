@@ -44,6 +44,9 @@ mod imp {
 
         #[template_child]
         pub bookmarks: TemplateChild<gtk::Box>,
+
+        #[template_child]
+        pub main_wrapper: TemplateChild<gtk::Box>,
     }
 
     #[glib::object_subclass]

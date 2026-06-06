@@ -14,104 +14,111 @@
       <class name="main"/>
     </style>
 
-
     <child>
-      <object class="GtkOverlay" id="overlay">
+      <object class="GtkBox" id="main_wrapper">
+        <property name="orientation">vertical</property>
+        <property name="spacing">0</property>
 
         <child>
-          <object class="GtkBox">
-            <property name="orientation">horizontal</property>
-            <property name="spacing">0</property>
-
-            <child>
-              <object class="GtkBox" id="left_bar">
-                <property name="orientation">vertical</property>
-                <property name="spacing">0</property>
-                <property name="width-request">200</property>
-                <style>
-                  <class name="left-bar"/>
-                </style>
-
-                <child>
-                  <object class="GtkBox" id="bookmarks">
-                    <property name="orientation">vertical</property>
-                    <property name="spacing">0</property>
-                    <property name="width-request">200</property>
-                  </object>
-                </child>
-
-                <child>
-                  <object class="GtkScrolledWindow">
-                    <property name="hscrollbar_policy">never</property>
-                    <!-- <property name="overlay_scrolling">false</property> -->
-                    <property name="vexpand">true</property>
-
-                    <child>
-                      <object class="GtkListView" id="tabs">
-                        <property name="orientation">vertical</property>
-                        <property name="vexpand">true</property>
-                        <style>
-                          <class name="tabs-list"/>
-                        </style>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
+          <object class="GtkOverlay" id="overlay">
 
             <child>
               <object class="GtkBox">
                 <property name="orientation">horizontal</property>
                 <property name="spacing">0</property>
 
+                <child>
+                  <object class="GtkBox" id="left_bar">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">0</property>
+                    <property name="width-request">200</property>
+                    <style>
+                      <class name="left-bar"/>
+                    </style>
+
+                    <child>
+                      <object class="GtkBox" id="bookmarks">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">0</property>
+                        <property name="width-request">200</property>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="GtkScrolledWindow">
+                        <property name="hscrollbar_policy">never</property>
+                        <!-- <property name="overlay_scrolling">false</property> -->
+                        <property name="vexpand">true</property>
+
+                        <child>
+                          <object class="GtkListView" id="tabs">
+                            <property name="orientation">vertical</property>
+                            <property name="vexpand">true</property>
+                            <style>
+                              <class name="tabs-list"/>
+                            </style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
 
                 <child>
-                  <object class="GtkBox" id="panes">
+                  <object class="GtkBox">
                     <property name="orientation">horizontal</property>
                     <property name="spacing">0</property>
-                    <property name="hexpand">true</property>
-                    <property name="vexpand">true</property>
-                    <style>
-                      <class name="panes"/>
-                    </style>
-                    <!-- Put Boxes in here, and render the panes into those boxes, not Panes directly -->
+
+
+                    <child>
+                      <object class="GtkBox" id="panes">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">0</property>
+                        <property name="hexpand">true</property>
+                        <property name="vexpand">true</property>
+                        <style>
+                          <class name="panes"/>
+                        </style>
+                        <!-- Put Boxes in here, and render the panes into those boxes, not Panes directly -->
+                      </object>
+                    </child>
+
                   </object>
                 </child>
 
               </object>
+            </child> <!-- horizontal box -->
+
+
+            <child type="overlay">
+              <object class="GtkLabel" id="toast">
+                <property name="visible">false</property>
+                <property name="halign">start</property>
+                <property name="valign">end</property>
+                <property name="wrap">true</property>
+                <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
+
+                <attributes>
+                  <attribute name="insert-hyphens" value="false"></attribute>
+                </attributes>
+
+                <style>
+                  <class name="toast"/>
+                </style>
+              </object>
+            </child>
+
+            <child type="overlay">
+              <object class="GtkBox" id="progress_trackers">
+                <property name="orientation">vertical</property>
+                <property name="spacing">0</property>
+                <property name="halign">end</property>
+                <property name="valign">end</property>
+              </object>
             </child>
 
           </object>
-        </child> <!-- horizontal box -->
-
-
-        <child type="overlay">
-          <object class="GtkLabel" id="toast">
-            <property name="visible">false</property>
-            <property name="halign">start</property>
-            <property name="valign">end</property>
-            <property name="wrap">true</property>
-            <property name="wrap-mode">PANGO_WRAP_WORD_CHAR</property>
-
-            <attributes>
-              <attribute name="insert-hyphens" value="false"></attribute>
-            </attributes>
-
-            <style>
-              <class name="toast"/>
-            </style>
-          </object>
-        </child>
-
-        <child type="overlay">
-          <object class="GtkBox" id="progress_trackers">
-            <property name="orientation">vertical</property>
-            <property name="spacing">0</property>
-            <property name="halign">end</property>
-            <property name="valign">end</property>
-          </object>
-        </child>
+        </child> <!-- Main overlay section -->
 
       </object>
     </child>

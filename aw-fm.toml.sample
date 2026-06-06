@@ -156,6 +156,16 @@ bookmarks = [
   {name = "Home", action = "Home"},
 ]
 
+
+# An alternate set of bookmarks for the file picker.
+#
+# This will completely replace the choices in bookmarks if present.
+# Comment out (not leave empty) to use the regular bookmarks.
+chooser_bookmarks = [
+  {name = "Home", action = "Home"},
+  {name = "Downloads", action = "Navigate /usr/home/me/Downloads"},
+]
+
 # Context Menu
 # All context menu items need a name and an action.
 # Context menu entries are placed in the context menu in order.

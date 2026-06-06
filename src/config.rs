@@ -232,6 +232,8 @@ pub struct Config {
     #[serde(default)]
     pub bookmarks: Vec<Bookmark>,
     #[serde(default)]
+    pub chooser_bookmarks: Option<Vec<Bookmark>>,
+    #[serde(default)]
     pub context_menu: Vec<ContextMenuEntry>,
     #[serde(default)]
     pub mouse_buttons: Vec<MouseButtonAction>,

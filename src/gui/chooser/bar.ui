@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="ChooserBar" parent="GtkBox">
+    <property name="orientation">horizontal</property>
+    <property name="spacing">8</property>
+    <property name="height-request">40</property>
+    <style>
+      <class name="action-box"/>
+    </style>
+
+    <child>
+      <object class="GtkEntry" id="text_entry">
+        <property name="hexpand">true</property>
+        <style>
+          <class name="location-bar"/>
+        </style>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkButton" id="cancel">
+        <property name="label">Cancel</property>
+        <property name="width-request">96</property>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkButton" id="accept">
+        <property name="label">Open</property>
+        <property name="width-request">96</property>
+      </object>
+    </child>
+
+  </template>
+</interface>
+
+

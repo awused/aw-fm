@@ -20,7 +20,7 @@ use super::tabs::id::TabId;
 use super::{ActionTarget, Gui, label_attributes};
 use crate::closing;
 use crate::com::{DisplayMode, EntryObject, ManagerAction, SortDir, SortMode};
-use crate::config::CONFIG;
+use crate::config::{CONFIG, OPTIONS};
 use crate::gui::operations::Kind;
 use crate::gui::tabs::list::TabPosition;
 use crate::gui::{gui_run, show_warning};
@@ -146,7 +146,15 @@ impl Gui {
     }
 
     fn setup_bookmarks(self: &Rc<Self>) {
-        if CONFIG.bookmarks.is_empty() {
+        let bookmarks = if OPTIONS.chooser_mode.is_some() {
+            CONFIG.chooser_bookmarks.as_ref().unwrap_or(&CONFIG.bookmarks)
+        } else {
+            &CONFIG.bookmarks
+        };
+        if bookmarks.is_empty() {
+            if OPTIONS.chooser_mode.is_some() {
+                self.window.imp().left_bar.set_visible(false);
+            }
             return;
         }
 
@@ -159,7 +167,7 @@ impl Gui {
             .build();
         container.append(&header);
 
-        for book in &CONFIG.bookmarks {
+        for book in bookmarks {
             let label = gtk::Label::builder()
                 .label(&book.name)
                 .tooltip_text(&book.action)
@@ -371,7 +379,7 @@ impl Gui {
         let mut shortcuts = AHashMap::new();
 
         for s in &CONFIG.shortcuts {
-            let mut modifiers: ModifierType = ModifierType::from_bits(0).unwrap();
+            let mut modifiers: ModifierType = ModifierType::empty();
             if let Some(m) = &s.modifiers {
                 let m = m.to_lowercase();
                 if m.contains("control") {
@@ -400,6 +408,26 @@ impl Gui {
                 .unwrap_or_else(|| panic!("Could not decode Key: {}", &s.key));
             inner.insert(k, s.action.clone());
         }
+
+
+        // In chooser mode, escape also quits if the user hasn't bound it
+        if OPTIONS.chooser_mode.is_some() {
+            let inner = match shortcuts.entry(ModifierType::empty()) {
+                hash_map::Entry::Occupied(inner) => inner.into_mut(),
+                hash_map::Entry::Vacant(vacant) => vacant.insert(AHashMap::new()),
+            };
+
+            match inner.entry(Key::Escape) {
+                hash_map::Entry::Occupied(_) => {
+                    debug!("Couldn't insert Escape shortcut for file chooser");
+                }
+                hash_map::Entry::Vacant(vacant) => {
+                    debug!("Inserted default quit command");
+                    vacant.insert("Quit".to_owned());
+                }
+            }
+        }
+
         shortcuts
     }
 
@@ -407,7 +435,7 @@ impl Gui {
         let mut actions = AHashMap::new();
 
         for s in &CONFIG.mouse_buttons {
-            let mut modifiers: ModifierType = ModifierType::from_bits(0).unwrap();
+            let mut modifiers: ModifierType = ModifierType::empty();
             if let Some(m) = &s.modifiers {
                 let m = m.to_lowercase();
                 if m.contains("control") {
@@ -545,6 +573,9 @@ impl Gui {
 
         let _ = match cmd {
             "Quit" => {
+                if OPTIONS.chooser_mode.is_some() {
+                    println!("cancelled");
+                }
                 closing::close();
                 return self.window.close();
             }
@@ -558,6 +589,13 @@ impl Gui {
             "Paste" => return tabs.paste(target),
 
             "Cancel" => {
+                // Same as Quit in chooser mode.
+                if OPTIONS.chooser_mode.is_some() {
+                    println!("cancelled");
+                    closing::close();
+                    return self.window.close();
+                }
+
                 drop(tabs);
                 return self.cancel_operations();
             }

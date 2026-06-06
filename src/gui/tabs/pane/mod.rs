@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use ahash::AHashMap;
-use gtk::gdk::{DragAction, Key, MODIFIER_MASK, ModifierType, Rectangle};
+use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
 use gtk::gio::Icon;
 use gtk::glib::{self, Propagation, WeakRef};
 use gtk::graphene::Point;

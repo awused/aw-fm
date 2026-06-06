@@ -3,10 +3,9 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
+use std::vec::Vec;
 
 use ahash::AHashMap;
-use gdk4_x11::ffi::gdk_x11_display_get_xdisplay;
-use gdk4_x11::x11_get_xatom_by_name_for_display;
 use gnome_desktop::DesktopThumbnailSize;
 use gtk::gdk::{ModifierType, Surface};
 use gtk::gio::OwnerId;
@@ -17,7 +16,12 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{Bitset, MultiSelection, gdk, gio, glib};
 use path_clean::PathClean;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use x11::xlib::{PropModeReplace, XA_ATOM, XChangeProperty, XSetTransientForHint};
+#[cfg(feature = "x11")]
+use {
+    gdk4_x11::ffi::gdk_x11_display_get_xdisplay,
+    gdk4_x11::x11_get_xatom_by_name_for_display,
+    x11::xlib::{PropModeReplace, XA_ATOM, XChangeProperty, XSetTransientForHint},
+};
 
 use self::main_window::MainWindow;
 use self::operations::Operation;
@@ -31,6 +35,7 @@ use crate::gui::tabs::list::TabPosition;
 use crate::state_cache::{STATE, State, save_settings};
 
 mod applications;
+mod chooser;
 mod clipboard;
 mod dbus;
 mod input;
@@ -121,6 +126,7 @@ struct Gui {
     thumbnailer: Thumbnailer,
 
     open_dialogs: RefCell<input::OpenDialogs>,
+    chooser: RefCell<Option<chooser::Chooser>>,
     shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, String>>,
     mouse_actions: AHashMap<ModifierType, AHashMap<u32, String>>,
 
@@ -227,11 +233,8 @@ impl Gui {
                 window.set_title(Some(title));
             }
 
+            // May make this configurable
             window.set_default_size(1280, 900);
-
-            if CONFIG.bookmarks.is_empty() {
-                window.imp().left_bar.set_visible(false);
-            }
         }
 
         let provider = gtk::CssProvider::new();
@@ -279,6 +282,7 @@ impl Gui {
             thumbnailer: Thumbnailer::new(),
 
             open_dialogs: RefCell::default(),
+            chooser: RefCell::default(),
             shortcuts: Self::parse_shortcuts(),
             mouse_actions: Self::parse_mouse_actions(),
 
@@ -340,6 +344,7 @@ impl Gui {
     }
 
     fn setup(self: &Rc<Self>) {
+        *self.chooser.borrow_mut() = chooser::Chooser::setup(self);
         self.tabs.borrow_mut().initial_setup(self.window.default_width());
         self.setup_interaction();
 
@@ -356,7 +361,6 @@ impl Gui {
         });
 
         self.window.set_visible(true);
-
 
         self.filechooser_set_parent();
 
@@ -471,6 +475,7 @@ impl Gui {
     }
 
     fn filechooser_set_parent(&self) {
+        #[cfg(any(feature = "wayland", feature = "x11"))]
         if let Some(mode) = &OPTIONS.chooser_mode
             && let args = mode.args()
             && let Some(parent) = &args.parent_window
@@ -480,14 +485,18 @@ impl Gui {
             let disp = RootExt::display(&self.window);
             let back = disp.backend();
 
+            #[cfg(feature = "wayland")]
             if back.is_wayland() {
-                let top = surf.downcast::<gdk4_wayland::WaylandToplevel>().unwrap();
+                let top = surf.downcast_ref::<gdk4_wayland::WaylandToplevel>().unwrap();
                 if let Some(_xparent) = parent.strip_prefix("x11:") {
                     info!("TODO -- handle xwayland parent")
                 } else {
                     top.set_transient_for_exported(parent);
                 }
-            } else if back.is_x11()
+            }
+
+            #[cfg(feature = "x11")]
+            if back.is_x11()
                 && let Some(parent) = parent.strip_prefix("x11:")
                 && let Ok(parent) = parent.parse::<u64>()
             {
