@@ -12,7 +12,7 @@ use gtk::{MultiSelection, gio};
 use crate::closing;
 use crate::config::{ChooserCommand, OPTIONS};
 use crate::gui::chooser::bar::ChooserBar;
-use crate::gui::{Gui, Selected, gui_run};
+use crate::gui::{Gui, Selected, gui_run, show_error};
 
 pub mod bar;
 
@@ -49,10 +49,10 @@ impl Chooser {
         g.window.imp().main_wrapper.append(&bar);
 
         Some(Self {
+            last_text: bar.imp().text_entry.text().into(),
             bar,
             root: None,
             files: Vec::new(),
-            last_text: String::new(),
         })
     }
 
@@ -105,20 +105,20 @@ impl Chooser {
         let cmd = OPTIONS.chooser_mode.as_ref().unwrap();
 
         let files = if !self.files.is_empty() {
+            // We can assume these exist for opening, at least.
             self.files.clone()
         } else if let Some(root) = &self.root {
             let path: Arc<Path> = root.join(Path::new(&self.last_text)).into();
 
             if path.is_dir() && !cmd.open_dir() {
-                warn!("Can't open directory {path:?}");
+                return warn!("Can't open directory {path:?}");
             } else if !path.exists() && cmd.open() {
-                warn!("Can't open file that doesn't exist {path:?}");
+                return warn!("Can't open file that doesn't exist {path:?}");
             }
 
-            vec![root.join(Path::new(&self.last_text)).into()]
+            vec![path]
         } else {
-            warn!("Tried to accept empty choice");
-            return;
+            return show_error("Tried to accept empty choice, this shouldn't happen");
         };
 
         if cmd.open() {

@@ -9,6 +9,12 @@
 # Leave empty to use your default GTK theme.
 # background_colour = '#000000be'
 
+# Default resolution for some dialogs and the file chooser
+#
+# Affects the help dialog and file chooser mode.
+# Falls back to 800, 600 if not set or too small
+dialog_resolution = [1280, 960]
+
 # How many concurrent thumbnail processes to allow.
 # There are tradeoffs between how fast thumbnails are generated and how responsive the UI remains.
 # Thumbnailing is done in separate threads but GTK still limits performance.
@@ -69,6 +75,9 @@ tab_completion = true
 #
 # These shortcuts run against the active tab, even if the mouse is hovering over a
 # different tab.
+#
+# Shortcuts are processed top to bottom, with later shortcuts
+# replacing earlier ones if they overlap.
 #
 # Use uppercase letters.
 # Defaults and Examples:
@@ -145,6 +154,14 @@ shortcuts = [
   {key = "F3", modifiers="Alt", action = "DeleteSession three"},
 ]
 
+# An alternate set of shortcuts for file picker mode.
+#
+# This will be processed after `shortcuts`, replacing any identical shortcuts.
+chooser_shortcuts = [
+  # Quitting the file chooser will cancel the action
+  {key = "Escape", action = "Quit"},
+]
+
 # Bookmarks
 # These show up on the left, as buttons above the list of tabs, and are always visible.
 #
@@ -159,7 +176,7 @@ bookmarks = [
 
 # An alternate set of bookmarks for the file picker.
 #
-# This will completely replace the choices in bookmarks if present.
+# This list will entirely _replace_ the choices in bookmarks if present.
 # Comment out (not leave empty) to use the regular bookmarks.
 chooser_bookmarks = [
   {name = "Home", action = "Home"},
@@ -243,6 +260,7 @@ directory_collisions = "ask"
 # How to handle file collisions when moving files.
 #
 # Allowed values are ask, overwrite, skip, newer, and rename.
+#
 # newer will overwrite if the destination is strictly older and skip otherwise.
 # rename will keep the existing destination file as-is but add a suffix to the file name.
 # rename is assumed when copying a file on top of itself.
@@ -252,7 +270,7 @@ file_collisions = "ask"
 # All executable contents with proper headers (see examples/sample-action.sh) are added as context
 # menu entries.
 #
-# Defaults to ~/.config/aw-fm/actions/, or ${XDG_CONFIG_HOME}/aw-fm/actions/
+# Defaults to ${XDG_CONFIG_HOME}/aw-fm/actions/ or ${HOME}/.config/aw-fm/actions/
 actions_directory = ""
 
 # Normalize file names for seek/search

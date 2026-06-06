@@ -193,7 +193,8 @@ impl NavTarget {
     }
 
     fn initial(list: &TabsList) -> Option<Self> {
-        if OPTIONS.empty && OPTIONS.file_name.is_none() {
+        // In chooser mode we _need_ a tab no matter what
+        if OPTIONS.empty && OPTIONS.file_name.is_none() && OPTIONS.chooser_mode.is_none() {
             return None;
         }
 
@@ -202,7 +203,23 @@ impl NavTarget {
             .clone()
             .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()));
 
-        Self::open_or_jump(path, list)
+        if OPTIONS.chooser_mode.is_none() {
+            Self::open_or_jump(path, list)
+        } else {
+            let mut target = &*path;
+            while !target.as_os_str().is_empty()
+                && !target.exists()
+                && let Some(parent) = target.parent()
+            {
+                target = parent;
+            }
+
+            if !target.exists() {
+                Self::open_or_jump(current_dir().unwrap_or_else(|_| "/".into()), list)
+            } else {
+                Self::open_or_jump(target, list)
+            }
+        }
     }
 
     fn cleaned_abs(p: &Path, list: &TabsList) -> Option<PathBuf> {

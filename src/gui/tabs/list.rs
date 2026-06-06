@@ -23,7 +23,7 @@ use crate::com::{
     DirSnapshot, DisplayMode, EntryObject, SearchSnapshot, SearchUpdate, SortDir, SortMode,
     SortSettings, Update,
 };
-use crate::config::OPTIONS;
+use crate::config::{CONFIG, OPTIONS};
 use crate::database::{SavedSplit, Session, SplitChild};
 use crate::gui::clipboard::ClipboardOp;
 use crate::gui::main_window::MainWindow;
@@ -1254,6 +1254,10 @@ impl TabsList {
     }
 
     pub fn get_session(&self) -> Option<Session> {
+        if OPTIONS.chooser_mode.is_some() {
+            return None;
+        }
+
         if self.tabs.is_empty() {
             info!("No tabs to save as session");
             return None;

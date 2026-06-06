@@ -20,7 +20,7 @@ use super::tabs::id::TabId;
 use super::{ActionTarget, Gui, label_attributes};
 use crate::closing;
 use crate::com::{DisplayMode, EntryObject, ManagerAction, SortDir, SortMode};
-use crate::config::{CONFIG, OPTIONS};
+use crate::config::{CONFIG, OPTIONS, Shortcut};
 use crate::gui::operations::Kind;
 use crate::gui::tabs::list::TabPosition;
 use crate::gui::{gui_run, show_warning};
@@ -368,36 +368,18 @@ impl Gui {
         w.add_controller(key);
     }
 
-    fn shortcut_from_key(self: &Rc<Self>, k: Key, mods: ModifierType) -> Option<&String> {
+    fn shortcut_from_key(self: &Rc<Self>, k: Key, mods: ModifierType) -> Option<&'static str> {
         let mods = mods & !ModifierType::LOCK_MASK;
         let upper = k.to_upper();
 
-        self.shortcuts.get(&mods)?.get(&upper)
+        self.shortcuts.get(&mods)?.get(&upper).map(|v| &**v)
     }
 
-    pub(super) fn parse_shortcuts() -> AHashMap<ModifierType, AHashMap<Key, String>> {
+    pub(super) fn parse_shortcuts() -> AHashMap<ModifierType, AHashMap<Key, &'static str>> {
         let mut shortcuts = AHashMap::new();
 
-        for s in &CONFIG.shortcuts {
-            let mut modifiers: ModifierType = ModifierType::empty();
-            if let Some(m) = &s.modifiers {
-                let m = m.to_lowercase();
-                if m.contains("control") {
-                    modifiers |= ModifierType::CONTROL_MASK;
-                }
-                if m.contains("alt") {
-                    modifiers |= ModifierType::ALT_MASK;
-                }
-                if m.contains("shift") {
-                    modifiers |= ModifierType::SHIFT_MASK;
-                }
-                if m.contains("super") {
-                    modifiers |= ModifierType::SUPER_MASK;
-                }
-                if m.contains("command") {
-                    modifiers |= ModifierType::META_MASK;
-                }
-            };
+        let mut handle = |s: &'static Shortcut| {
+            let modifiers = parse_modifiers(&s.modifiers);
 
             let inner = match shortcuts.entry(modifiers) {
                 hash_map::Entry::Occupied(inner) => inner.into_mut(),
@@ -406,61 +388,31 @@ impl Gui {
 
             let k = Key::from_name(&s.key)
                 .unwrap_or_else(|| panic!("Could not decode Key: {}", &s.key));
-            inner.insert(k, s.action.clone());
-        }
+            inner.insert(k, &*s.action);
+        };
+
+        CONFIG.shortcuts.iter().for_each(&mut handle);
 
 
-        // In chooser mode, escape also quits if the user hasn't bound it
         if OPTIONS.chooser_mode.is_some() {
-            let inner = match shortcuts.entry(ModifierType::empty()) {
-                hash_map::Entry::Occupied(inner) => inner.into_mut(),
-                hash_map::Entry::Vacant(vacant) => vacant.insert(AHashMap::new()),
-            };
-
-            match inner.entry(Key::Escape) {
-                hash_map::Entry::Occupied(_) => {
-                    debug!("Couldn't insert Escape shortcut for file chooser");
-                }
-                hash_map::Entry::Vacant(vacant) => {
-                    debug!("Inserted default quit command");
-                    vacant.insert("Quit".to_owned());
-                }
-            }
+            CONFIG.chooser_shortcuts.iter().for_each(&mut handle);
         }
 
         shortcuts
     }
 
-    pub(super) fn parse_mouse_actions() -> AHashMap<ModifierType, AHashMap<u32, String>> {
+    pub(super) fn parse_mouse_actions() -> AHashMap<ModifierType, AHashMap<u32, &'static str>> {
         let mut actions = AHashMap::new();
 
         for s in &CONFIG.mouse_buttons {
-            let mut modifiers: ModifierType = ModifierType::empty();
-            if let Some(m) = &s.modifiers {
-                let m = m.to_lowercase();
-                if m.contains("control") {
-                    modifiers |= ModifierType::CONTROL_MASK;
-                }
-                if m.contains("alt") {
-                    modifiers |= ModifierType::ALT_MASK;
-                }
-                if m.contains("shift") {
-                    modifiers |= ModifierType::SHIFT_MASK;
-                }
-                if m.contains("super") {
-                    modifiers |= ModifierType::SUPER_MASK;
-                }
-                if m.contains("command") {
-                    modifiers |= ModifierType::META_MASK;
-                }
-            };
+            let modifiers = parse_modifiers(&s.modifiers);
 
             let inner = match actions.entry(modifiers) {
                 hash_map::Entry::Occupied(inner) => inner.into_mut(),
                 hash_map::Entry::Vacant(vacant) => vacant.insert(AHashMap::new()),
             };
 
-            inner.insert(s.button, s.action.clone());
+            inner.insert(s.button, &*s.action);
         }
         actions
     }
@@ -589,13 +541,6 @@ impl Gui {
             "Paste" => return tabs.paste(target),
 
             "Cancel" => {
-                // Same as Quit in chooser mode.
-                if OPTIONS.chooser_mode.is_some() {
-                    println!("cancelled");
-                    closing::close();
-                    return self.window.close();
-                }
-
                 drop(tabs);
                 return self.cancel_operations();
             }
@@ -681,4 +626,27 @@ pub(super) fn wrap_in_box_with_close_button(
     dialog.set_child(Some(&dialog_box));
 
     action_box
+}
+
+fn parse_modifiers(modifiers: &Option<String>) -> ModifierType {
+    let mut mods: ModifierType = ModifierType::empty();
+    if let Some(m) = modifiers {
+        let m = m.to_lowercase();
+        if m.contains("control") {
+            mods |= ModifierType::CONTROL_MASK;
+        }
+        if m.contains("alt") {
+            mods |= ModifierType::ALT_MASK;
+        }
+        if m.contains("shift") {
+            mods |= ModifierType::SHIFT_MASK;
+        }
+        if m.contains("super") {
+            mods |= ModifierType::SUPER_MASK;
+        }
+        if m.contains("command") {
+            mods |= ModifierType::META_MASK;
+        }
+    };
+    mods
 }

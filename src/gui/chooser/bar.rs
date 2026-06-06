@@ -15,16 +15,6 @@ glib::wrapper! {
 }
 
 
-impl ChooserCommand {
-    const fn default_accept(&self) -> &'static str {
-        match self {
-            Self::OpenFile { .. } => "Open",
-            Self::SaveFile { .. } => "Save",
-            Self::SaveFiles { .. } => "Save Here",
-        }
-    }
-}
-
 impl ChooserBar {
     pub(super) fn new(cmd: &ChooserCommand) -> Self {
         let s: Self = glib::Object::new();
@@ -40,13 +30,22 @@ impl ChooserBar {
             chooser_run(Chooser::accept);
         });
 
-        imp.accept
-            .set_label(args.label.as_deref().unwrap_or_else(|| cmd.default_accept()));
+        let label = args.label.as_ref().map(|label| label.replace('_', ""));
+        let label = label.as_deref().unwrap_or_else(|| cmd.default_accept());
+        imp.accept.set_label(label);
 
 
         if matches!(cmd, ChooserCommand::SaveFiles { .. }) {
             imp.text_entry.set_visible(false);
         } else {
+            if let ChooserCommand::SaveFile { name, file, .. } = cmd
+                && let Some(file) = file.as_ref().or(name.as_ref())
+                && let Some(file) = file.file_name()
+            {
+                // TODO -- ensure round-tripping works
+                imp.text_entry.set_text(&file.to_string_lossy());
+            }
+
             imp.text_entry.connect_activate(|_| {
                 chooser_run(Chooser::accept);
             });
@@ -54,7 +53,6 @@ impl ChooserBar {
                 chooser_run(|c| c.text(text.text()));
             });
         }
-
 
         s
     }

@@ -1,14 +1,17 @@
 use std::cell::Ref;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
+use ahash::AHashSet;
 use gtk::gdk::Key;
 use gtk::glib::prelude::*;
 use gtk::glib::{BoxedAnyObject, Propagation};
 use gtk::prelude::*;
 
 use super::wrap_in_box_with_close_button;
-use crate::config::{Shortcut, CONFIG};
-use crate::gui::{label_attributes, Gui};
+use crate::config::{CONFIG, DIALOG_RES, OPTIONS, Shortcut};
+use crate::gui::input::parse_modifiers;
+use crate::gui::{Gui, label_attributes};
 
 impl Gui {
     pub(super) fn help_dialog(self: &Rc<Self>) {
@@ -19,16 +22,31 @@ impl Gui {
         }
 
         let dialog = gtk::Window::builder().title("Help").transient_for(&self.window).build();
-        dialog.set_default_width(800);
-        dialog.set_default_height(600);
+        let res = *DIALOG_RES;
+        dialog.set_default_width(res.0);
+        dialog.set_default_height(res.1);
 
         self.close_on_quit_or_esc(&dialog);
 
         let store = gtk::gio::ListStore::new::<BoxedAnyObject>();
 
-        for s in &CONFIG.shortcuts {
-            store.append(&BoxedAnyObject::new(s));
+        let mut shortcuts = VecDeque::with_capacity(CONFIG.shortcuts.len());
+        // We want to match the order of the bookmarks in the config, but ignore later duplicates.
+        let mut seen = AHashSet::with_capacity(CONFIG.shortcuts.len());
+
+        let mut handle = |s: &'static Shortcut| {
+            let key = (parse_modifiers(&s.modifiers), &s.key);
+            if seen.insert(key) {
+                shortcuts.push_front(s);
+            }
+        };
+
+        if OPTIONS.chooser_mode.is_some() {
+            CONFIG.chooser_shortcuts.iter().rev().for_each(&mut handle);
         }
+        CONFIG.shortcuts.iter().rev().for_each(handle);
+        shortcuts.into_iter().for_each(|s| store.append(&BoxedAnyObject::new(s)));
+
 
         let modifier_factory = gtk::SignalListItemFactory::new();
         modifier_factory.connect_setup(move |_fact, item| {

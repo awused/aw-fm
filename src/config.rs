@@ -46,7 +46,11 @@ pub enum ChooserCommand {
     },
     /// Spawn a save file dialog
     SaveFile {
-        name: PathBuf,
+        #[arg(long)]
+        name: Option<PathBuf>,
+
+        #[arg(long)]
+        file: Option<PathBuf>,
 
         #[command(flatten)]
         args: ChooserArgs,
@@ -66,6 +70,27 @@ impl ChooserCommand {
             Self::OpenFile { args, .. }
             | Self::SaveFile { args, .. }
             | Self::SaveFiles { args, .. } => args,
+        }
+    }
+
+    pub const fn default_title(&self) -> &str {
+        match self {
+            Self::OpenFile { multiple, directory, .. } if *multiple && *directory => {
+                "aw-fm - Open Folders"
+            }
+            Self::OpenFile { multiple, .. } if *multiple => "aw-fm - Open Files",
+            Self::OpenFile { directory, .. } if *directory => "aw-fm - Open Folder",
+            Self::OpenFile { .. } => "aw-fm - Open File",
+            Self::SaveFile { .. } => "aw-fm - Save File",
+            Self::SaveFiles { .. } => "aw-fm - Save Files",
+        }
+    }
+
+    pub const fn default_accept(&self) -> &str {
+        match self {
+            Self::OpenFile { .. } => "Open",
+            Self::SaveFile { .. } => "Save",
+            Self::SaveFiles { .. } => "Save Here",
         }
     }
 }
@@ -223,12 +248,17 @@ pub struct Config {
     pub background_colour: Option<gdk::RGBA>,
 
     #[serde(default)]
+    pub dialog_resolution: Option<(i32, i32)>,
+
+    #[serde(default)]
     pub seek_wraparound: bool,
     #[serde(default)]
     pub tab_completion: bool,
 
     #[serde(default)]
     pub shortcuts: Vec<Shortcut>,
+    #[serde(default)]
+    pub chooser_shortcuts: Vec<Shortcut>,
     #[serde(default)]
     pub bookmarks: Vec<Bookmark>,
     #[serde(default)]
@@ -332,6 +362,20 @@ pub static ACTIONS_DIR: LazyLock<Arc<PathBuf>> = LazyLock::new(|| {
             .join("actions")
             .into()
     })
+});
+
+pub static DIALOG_RES: LazyLock<(i32, i32)> = LazyLock::new(|| {
+    let res = CONFIG.dialog_resolution.unwrap_or((800, 600));
+
+    if res.0 >= 100 && res.1 >= 100 { res } else { (800, 600) }
+});
+
+// TODO -- force single selection
+pub static SINGLE_SELECTION: LazyLock<bool> = LazyLock::new(|| {
+    OPTIONS
+        .chooser_mode
+        .as_ref()
+        .is_some_and(|m| matches!(m, ChooserCommand::OpenFile { multiple,.. } if *multiple))
 });
 
 static DEFAULT_CONFIG: &str = include_str!("../aw-fm.toml.sample");

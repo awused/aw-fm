@@ -29,7 +29,7 @@ use self::tabs::list::TabsList;
 use self::thumbnailer::Thumbnailer;
 use super::com::*;
 use crate::closing::{self, close};
-use crate::config::{CONFIG, ChooserCommand, OPTIONS};
+use crate::config::{CONFIG, ChooserCommand, DIALOG_RES, OPTIONS};
 use crate::database::DBCon;
 use crate::gui::tabs::list::TabPosition;
 use crate::state_cache::{STATE, State, save_settings};
@@ -127,8 +127,8 @@ struct Gui {
 
     open_dialogs: RefCell<input::OpenDialogs>,
     chooser: RefCell<Option<chooser::Chooser>>,
-    shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, String>>,
-    mouse_actions: AHashMap<ModifierType, AHashMap<u32, String>>,
+    shortcuts: AHashMap<ModifierType, AHashMap<gdk::Key, &'static str>>,
+    mouse_actions: AHashMap<ModifierType, AHashMap<u32, &'static str>>,
 
     ongoing_operations: RefCell<Vec<Rc<Operation>>>,
     finished_operations: RefCell<VecDeque<Rc<Operation>>>,
@@ -224,17 +224,12 @@ impl Gui {
             if let Some(title) = &args.title {
                 window.set_title(Some(title));
             } else {
-                let title = match mode {
-                    ChooserCommand::OpenFile { multiple, .. } if *multiple => "aw-fm - Open Files",
-                    ChooserCommand::OpenFile { .. } => "aw-fm - Open File",
-                    ChooserCommand::SaveFile { .. } => "aw-fm - Save File",
-                    ChooserCommand::SaveFiles { .. } => "aw-fm - Save Files",
-                };
-                window.set_title(Some(title));
+                window.set_title(Some(mode.default_title()));
             }
 
+            let res = *DIALOG_RES;
             // May make this configurable
-            window.set_default_size(1280, 900);
+            window.set_default_size(res.0, res.1);
         }
 
         let provider = gtk::CssProvider::new();
@@ -362,7 +357,7 @@ impl Gui {
 
         self.window.set_visible(true);
 
-        self.filechooser_set_parent();
+        self.filechooser_finish_setup();
 
         if !CONFIG.force_small_thumbnails {
             let g = self.clone();
@@ -474,10 +469,13 @@ impl Gui {
         self.window.imp().toast.set_visible(true);
     }
 
-    fn filechooser_set_parent(&self) {
+    fn filechooser_finish_setup(&self) {
+        let Some(mode) = &OPTIONS.chooser_mode else {
+            return;
+        };
+
         #[cfg(any(feature = "wayland", feature = "x11"))]
-        if let Some(mode) = &OPTIONS.chooser_mode
-            && let args = mode.args()
+        if let args = mode.args()
             && let Some(parent) = &args.parent_window
         {
             let surf = self.window.surface().unwrap();
@@ -524,6 +522,11 @@ impl Gui {
                 }
             }
         }
+
+        GtkWindowExt::set_focus(
+            &self.window,
+            Some(&self.chooser.borrow().as_ref().unwrap().bar.imp().text_entry.get()),
+        );
     }
 }
 
