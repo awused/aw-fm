@@ -10,6 +10,8 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::OPTIONS;
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct State {
     pub size: (u32, u32),
@@ -25,6 +27,10 @@ static CACHE_FILE: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
 });
 
 pub static STATE: LazyLock<Option<State>> = LazyLock::new(|| {
+    if OPTIONS.chooser_mode.is_some() {
+        return None;
+    }
+
     let cache = (*CACHE_FILE).as_ref()?;
     if !cache.is_file() {
         return None;
@@ -48,6 +54,10 @@ pub static STATE: LazyLock<Option<State>> = LazyLock::new(|| {
 });
 
 pub fn save_settings(s: State) {
+    if OPTIONS.chooser_mode.is_some() {
+        return;
+    }
+
     if Some(&s) == STATE.as_ref() {
         return;
     }

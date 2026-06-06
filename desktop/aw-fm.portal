@@ -1,0 +1,11 @@
+[portal]
+DBusName=org.freedesktop.impl.portal.desktop.aw-fm
+Interfaces=org.freedesktop.impl.portal.FileChooser;
+UseIn=i3;wlroots;sway;Wayfire;river;mate;lxde;openbox;unity;pantheon;hyprland
+
+# Put this in ~/.local/share/xdg-desktop-portal/portals/
+# Also need to configure ~/.config/xdg-desktop-portal/portals.conf,
+# or your specific environment (e.g. hyprland-portals.conf), to include this under [preferred]
+
+# org.freedesktop.impl.portal.FileChooser = aw-fm
+

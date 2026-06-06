@@ -5,6 +5,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use ahash::AHashMap;
+use gdk4_x11::ffi::gdk_x11_display_get_xdisplay;
+use gdk4_x11::x11_get_xatom_by_name_for_display;
 use gnome_desktop::DesktopThumbnailSize;
 use gtk::gdk::{ModifierType, Surface};
 use gtk::gio::OwnerId;
@@ -15,6 +17,7 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{Bitset, MultiSelection, gdk, gio, glib};
 use path_clean::PathClean;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use x11::xlib::{PropModeReplace, XA_ATOM, XChangeProperty, XSetTransientForHint};
 
 use self::main_window::MainWindow;
 use self::operations::Operation;
@@ -22,7 +25,7 @@ use self::tabs::list::TabsList;
 use self::thumbnailer::Thumbnailer;
 use super::com::*;
 use crate::closing::{self, close};
-use crate::config::CONFIG;
+use crate::config::{CONFIG, ChooserCommand, OPTIONS};
 use crate::database::DBCon;
 use crate::gui::tabs::list::TabPosition;
 use crate::state_cache::{STATE, State, save_settings};
@@ -137,7 +140,7 @@ pub fn run(
     manager_sender: UnboundedSender<ManagerAction>,
     gui_receiver: UnboundedReceiver<GuiAction>,
 ) {
-    let flags = if CONFIG.single_window {
+    let flags = if CONFIG.single_window && OPTIONS.chooser_mode.is_none() {
         gio::ApplicationFlags::HANDLES_COMMAND_LINE
     } else {
         gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::NON_UNIQUE
@@ -208,6 +211,29 @@ impl Gui {
     ) -> Rc<Self> {
         let window = MainWindow::new(application);
 
+        if let Some(mode) = &OPTIONS.chooser_mode {
+            let args = mode.args();
+            window.set_modal(args.modal);
+
+            if let Some(title) = &args.title {
+                window.set_title(Some(title));
+            } else {
+                let title = match mode {
+                    ChooserCommand::OpenFile { multiple, .. } if *multiple => "aw-fm - Open Files",
+                    ChooserCommand::OpenFile { .. } => "aw-fm - Open File",
+                    ChooserCommand::SaveFile { .. } => "aw-fm - Save File",
+                    ChooserCommand::SaveFiles { .. } => "aw-fm - Save Files",
+                };
+                window.set_title(Some(title));
+            }
+
+            window.set_default_size(1280, 900);
+
+            if CONFIG.bookmarks.is_empty() {
+                window.imp().left_bar.set_visible(false);
+            }
+        }
+
         let provider = gtk::CssProvider::new();
         let style = include_str!("style.css");
         if let Some(bg) = CONFIG.background_colour {
@@ -243,6 +269,7 @@ impl Gui {
 
         let rc = Rc::new(Self {
             window,
+
             // win_state: Cell::default(),
             menu: OnceCell::default(),
 
@@ -270,8 +297,9 @@ impl Gui {
         let g = rc.clone();
         GUI.with(|cell| cell.set(g).unwrap());
 
-        rc.dbus_register();
-
+        if OPTIONS.chooser_mode.is_none() {
+            rc.dbus_register();
+        }
 
         rc.menu.set(menu::GuiMenu::new(&rc)).unwrap();
 
@@ -328,6 +356,9 @@ impl Gui {
         });
 
         self.window.set_visible(true);
+
+
+        self.filechooser_set_parent();
 
         if !CONFIG.force_small_thumbnails {
             let g = self.clone();
@@ -437,6 +468,53 @@ impl Gui {
 
         self.window.imp().toast.set_text(msg.as_ref());
         self.window.imp().toast.set_visible(true);
+    }
+
+    fn filechooser_set_parent(&self) {
+        if let Some(mode) = &OPTIONS.chooser_mode
+            && let args = mode.args()
+            && let Some(parent) = &args.parent_window
+        {
+            let surf = self.window.surface().unwrap();
+
+            let disp = RootExt::display(&self.window);
+            let back = disp.backend();
+
+            if back.is_wayland() {
+                let top = surf.downcast::<gdk4_wayland::WaylandToplevel>().unwrap();
+                if let Some(_xparent) = parent.strip_prefix("x11:") {
+                    info!("TODO -- handle xwayland parent")
+                } else {
+                    top.set_transient_for_exported(parent);
+                }
+            } else if back.is_x11()
+                && let Some(parent) = parent.strip_prefix("x11:")
+                && let Ok(parent) = parent.parse::<u64>()
+            {
+                let xdisp = disp.downcast::<gdk4_x11::X11Display>().unwrap();
+                let xsurf = surf.downcast::<gdk4_x11::X11Surface>().unwrap();
+
+                let window_type = x11_get_xatom_by_name_for_display(&xdisp, "_NET_WM_WINDOW_TYPE");
+                let dialog =
+                    x11_get_xatom_by_name_for_display(&xdisp, "_NET_WM_WINDOW_TYPE_DIALOG");
+                assert!(dialog != 0);
+
+                unsafe {
+                    let xdisp = gdk_x11_display_get_xdisplay(xdisp.as_ptr());
+                    XSetTransientForHint(xdisp.cast(), xsurf.xid(), parent);
+                    XChangeProperty(
+                        xdisp.cast(),
+                        xsurf.xid(),
+                        window_type,
+                        XA_ATOM,
+                        32,
+                        PropModeReplace,
+                        (&raw const dialog).cast(),
+                        1,
+                    );
+                }
+            }
+        }
     }
 }
 

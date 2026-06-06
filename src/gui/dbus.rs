@@ -8,11 +8,6 @@ use crate::config::CONFIG;
 use crate::gui::tabs::NavTarget;
 use crate::gui::tabs::list::TabPosition;
 
-thread_local! {
-    static DBUS_INFO: DBusNodeInfo =
-        DBusNodeInfo::for_xml(include_str!("FileManager1.xml")).unwrap();
-}
-
 impl Gui {
     pub(super) fn dbus_register(self: &Rc<Self>) {
         if CONFIG.disable_filemanager_dbus {

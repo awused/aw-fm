@@ -48,7 +48,12 @@ single_window = false
 # Whether seeking (tab/shift-tab) wraps around.
 #
 # This can be useful when trying to find the last matching file, but also disorientating.
-seek_wraparound = false
+seek_wraparound = true
+
+# Whether completion in the location bar can be triggered by tab/shift-tab.
+#
+# It can always be triggered by ctrl+space and ctrl+shift+space.
+tab_completion = true
 
 # Shortcuts
 #

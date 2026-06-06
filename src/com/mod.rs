@@ -66,7 +66,7 @@ pub enum ActionTarget {
     /// A specific tab, if this tab is closed the action will not run.
     Tab(TabId),
     /// The active tab, whatever it _currently_ is.
-    /// Only useful for scripts when they call ClearTarget, otherwise it'll be
+    /// Only useful for scripts when they call `ClearTarget`, otherwise it'll be
     /// Tab with a specific ID.
     Active,
 }

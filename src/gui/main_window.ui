@@ -24,7 +24,7 @@
             <property name="spacing">0</property>
 
             <child>
-              <object class="GtkBox">
+              <object class="GtkBox" id="left_bar">
                 <property name="orientation">vertical</property>
                 <property name="spacing">0</property>
                 <property name="width-request">200</property>

@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use ahash::AHashMap;
-use gtk::gdk::{DragAction, Key, ModifierType, Rectangle};
+use gtk::gdk::{DragAction, Key, MODIFIER_MASK, ModifierType, Rectangle};
 use gtk::gio::Icon;
 use gtk::glib::{self, Propagation, WeakRef};
 use gtk::graphene::Point;
@@ -25,6 +25,7 @@ use super::id::TabId;
 use super::tab::Tab;
 use super::{Contents, PaneState, PrecisePosition};
 use crate::com::{DirSettings, DisplayMode, EntryObject, SignalHolder};
+use crate::config::{CONFIG, OPTIONS};
 use crate::database::{SavedSplit, SplitChild};
 use crate::gui::clipboard::{ClipboardOp, URIS};
 use crate::gui::tabs::list::TabPosition;
@@ -283,20 +284,28 @@ impl Pane {
         let existing = self.completion_result.clone();
         completion.connect_key_pressed(move |kc, key, _, mods| {
             let mods = mods & !ModifierType::LOCK_MASK;
-            if (mods & !ModifierType::SHIFT_MASK) != ModifierType::CONTROL_MASK {
+            let shift = mods.contains(ModifierType::SHIFT_MASK);
+            let other_mods = mods & !ModifierType::SHIFT_MASK;
+            let ctrl = other_mods.contains(ModifierType::CONTROL_MASK);
+            let allow_tab = CONFIG.tab_completion;
+
+            if !(ctrl || allow_tab && other_mods == ModifierType::empty()) {
                 return Propagation::Proceed;
             }
 
             let entry = kc.widget().unwrap().downcast::<gtk::Entry>().unwrap();
 
-            if key == Key::z {
+            if ctrl && key == Key::z {
                 if let Some(res) = existing.take() {
                     // This undoes the completion, not all changes from original_text
                     entry.set_text(&res.initial);
                     entry.set_position(-1);
                 }
-                return Propagation::Proceed;
-            } else if key != Key::space {
+                return Propagation::Stop;
+            } else if key != Key::space
+                && !(allow_tab
+                    && (key == Key::Tab || key == Key::ISO_Left_Tab || key == Key::KP_Tab))
+            {
                 return Propagation::Proceed;
             }
 
@@ -305,7 +314,7 @@ impl Pane {
             if let Some(mut res) = existing.take()
                 && res.candidates[res.position].to_string_lossy() == initial
             {
-                if mods.contains(ModifierType::SHIFT_MASK) {
+                if shift {
                     res.position =
                         min(res.position.wrapping_sub(1), res.candidates.len().saturating_sub(1));
                 } else {
@@ -315,10 +324,10 @@ impl Pane {
                 entry.set_text(&res.candidates[res.position].to_string_lossy());
                 entry.set_position(-1);
                 existing.set(Some(res));
-                return Propagation::Proceed;
+                return Propagation::Stop;
             }
 
-            if mods != ModifierType::CONTROL_MASK {
+            if !(ctrl || allow_tab) {
                 return Propagation::Proceed;
             }
 
@@ -332,7 +341,7 @@ impl Pane {
             }
 
             gui_run(|g| g.send_manager(ManagerAction::Complete(path, initial, tab)));
-            Propagation::Proceed
+            Propagation::Stop
         });
         // Needed to catch ctrl+z
         completion.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -1108,9 +1117,13 @@ fn setup_item_controllers<W: IsA<Widget>, B: IsA<Widget> + Bound, P: IsA<Widget>
         if c.current_button() == 1 {
             tabs_run(|t| t.find(tab).unwrap().workaround_disable_rubberband());
         } else if c.current_button() == 2 {
-            let path = eo.get().abs_path.clone();
-            if let Some(nav) = NavTarget::open_or_jump_abs(path) {
-                tabs_run(|t| t.create_tab(TabPosition::After(ActionTarget::Tab(tab)), nav, false));
+            if OPTIONS.chooser_mode.is_none() {
+                let path = eo.get().abs_path.clone();
+                if let Some(nav) = NavTarget::open_or_jump_abs(path) {
+                    tabs_run(|t| {
+                        t.create_tab(TabPosition::After(ActionTarget::Tab(tab)), nav, false)
+                    });
+                }
             }
         } else if c.current_event().unwrap().triggers_context_menu() {
             c.set_state(gtk::EventSequenceState::Claimed);

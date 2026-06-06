@@ -14,6 +14,7 @@ use super::tabs::id::TabId;
 use super::tabs::list::TabPosition;
 use super::{ActionTarget, Gui, Selected, show_error, show_warning, tabs_run};
 use crate::com::{EntryKind, EntryObject, ManagerAction};
+use crate::config::OPTIONS;
 use crate::gui::gui_run;
 
 mod application;
@@ -107,10 +108,16 @@ pub(super) fn open(
         } else {
             files.push(eo);
         }
+    }
 
-        if !files.is_empty() && !directories.is_empty() {
-            return show_warning(BOTH_ERROR);
-        }
+    if let Some(chooser) = &OPTIONS.chooser_mode
+        && !(directories.len() == 1 && files.is_empty())
+    {
+        todo!()
+    }
+
+    if !files.is_empty() && !directories.is_empty() {
+        return show_warning(BOTH_ERROR);
     }
 
     if execute && files.len() == 1 {

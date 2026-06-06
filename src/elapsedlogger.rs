@@ -61,6 +61,7 @@ pub fn init_logging() {
                  {args}",
             )
         })
+        .target(env_logger::Target::Stderr)
         .init();
 }
 

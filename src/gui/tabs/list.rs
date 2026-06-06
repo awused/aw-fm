@@ -23,6 +23,7 @@ use crate::com::{
     DirSnapshot, DisplayMode, EntryObject, SearchSnapshot, SearchUpdate, SortDir, SortMode,
     SortSettings, Update,
 };
+use crate::config::OPTIONS;
 use crate::database::{SavedSplit, Session, SplitChild};
 use crate::gui::clipboard::ClipboardOp;
 use crate::gui::main_window::MainWindow;
@@ -273,7 +274,7 @@ impl TabsList {
         (center, TabContext { left, right, cached: &mut self.cached })
     }
 
-    pub fn mark_watching(&mut self, id: Arc<AtomicBool>) {
+    pub fn mark_watching(&self, id: Arc<AtomicBool>) {
         if let Some(t) = self.tabs.iter().find(|t| t.matches_watch(&id)) {
             t.mark_watch_started(id);
         }
@@ -446,6 +447,10 @@ impl TabsList {
         nav_target: NavTarget,
         activate: bool,
     ) -> TabId {
+        if OPTIONS.chooser_mode.is_some() {
+            error!("Create_tab in file chooser mode, this shouldn't happen");
+        }
+
         let width = self.pane_container.width() as u32;
         let (new_tab, element) = Tab::new(
             next_id(),
@@ -511,6 +516,10 @@ impl TabsList {
     // For now, tabs always open after the active tab
     // !activate -> background tab
     pub fn open_tab<P: AsRef<Path>>(&mut self, path: P, pos: TabPosition, activate: bool) {
+        if OPTIONS.chooser_mode.is_some() {
+            return;
+        }
+
         let Some(nav_target) = NavTarget::open_or_jump(path, self) else {
             return;
         };
@@ -520,6 +529,10 @@ impl TabsList {
 
     // Clones the active tab or opens a new tab to the user's home directory.
     pub fn new_tab(&mut self, action_target: ActionTarget, activate: bool) {
+        if OPTIONS.chooser_mode.is_some() {
+            return;
+        }
+
         if let Some(id) = self.clone_tab(action_target, false) {
             if activate {
                 self.switch_active_tab(id)
@@ -577,6 +590,10 @@ impl TabsList {
     }
 
     pub fn visible_split(&mut self, target: ActionTarget, orient: Orientation, tab: Option<TabId>) {
+        if OPTIONS.chooser_mode.is_some() {
+            return;
+        }
+
         if self.active.is_none() && matches!(target, ActionTarget::Active | ActionTarget::NoTab) {
             show_warning("Split called with no panes to split");
             return self.new_tab(target, true);
@@ -971,7 +988,7 @@ impl TabsList {
                 tab.navigate(context, j);
             })
             .is_some();
-        if !navigated {
+        if !navigated && OPTIONS.chooser_mode.is_none() {
             self.create_tab(TabPosition::After(action_target), jump, true);
         }
     }
@@ -1009,6 +1026,10 @@ impl TabsList {
     // Doesn't open a new pane to replace it, but does find the next sibling to promote to being
     // active if this was the active tab.
     pub fn close_pane(&mut self, target: ActionTarget) {
+        if OPTIONS.chooser_mode.is_some() {
+            return;
+        }
+
         let Some((tab, _pos)) = self.resolve(target) else {
             return warn!("ClosePane called with no valid target tab");
         };
@@ -1017,6 +1038,10 @@ impl TabsList {
     }
 
     pub fn hide_all_visible(&mut self, target: ActionTarget) {
+        if OPTIONS.chooser_mode.is_some() {
+            return;
+        }
+
         let Some((_tab, pos)) = self.resolve(target) else {
             return debug!("HidePanes called with no valid target tab");
         };
@@ -1063,6 +1088,10 @@ impl TabsList {
     // Closes a specific tab. If it was the only visible tab, does _not_ promote another tab to
     // being visible.
     pub fn close_tab_no_replacement(&mut self, target: ActionTarget) {
+        if OPTIONS.chooser_mode.is_some() {
+            return;
+        }
+
         let Some((id, _pos)) = self.resolve(target) else {
             return warn!("CloseTabNoReplacement called with no valid target");
         };
@@ -1254,6 +1283,10 @@ impl TabsList {
     }
 
     pub fn load_session(&mut self, session: Session) {
+        if OPTIONS.chooser_mode.is_some() {
+            return;
+        }
+
         // Take advantage of existing data if we can.
         let old_tabs = self.tabs.len();
         for path in session.paths {

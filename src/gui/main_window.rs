@@ -28,6 +28,9 @@ mod imp {
         pub overlay: TemplateChild<gtk::Overlay>,
 
         #[template_child]
+        pub left_bar: TemplateChild<gtk::Box>,
+
+        #[template_child]
         pub tabs: TemplateChild<gtk::ListView>,
 
         #[template_child]

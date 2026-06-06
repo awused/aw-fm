@@ -11,6 +11,65 @@ use gtk::gdk;
 use serde::{Deserialize, Deserializer, de};
 
 
+// TODO -- filters, choices
+#[derive(Debug, Parser)]
+pub struct ChooserArgs {
+    // TODO -- just remove?
+    #[arg(long)]
+    pub parent_window: Option<String>,
+
+    #[arg(long)]
+    pub app_id: Option<String>,
+
+    #[arg(long)]
+    pub title: Option<String>,
+
+    #[arg(long)]
+    pub label: Option<String>,
+
+    #[arg(long, default_value_t = true)]
+    pub modal: bool,
+}
+
+#[derive(Debug, Parser)]
+pub enum ChooserCommand {
+    /// Spawn an open file dialog
+    OpenFile {
+        #[arg(long)]
+        multiple: bool,
+
+        #[arg(long)]
+        directory: bool,
+
+        #[command(flatten)]
+        args: ChooserArgs,
+    },
+    /// Spawn a save file dialog
+    SaveFile {
+        name: PathBuf,
+
+        #[command(flatten)]
+        args: ChooserArgs,
+    },
+    /// Spawn a save files dialog to save multiple files in one directory
+    SaveFiles {
+        names: Vec<PathBuf>,
+
+        #[command(flatten)]
+        args: ChooserArgs,
+    },
+}
+
+impl ChooserCommand {
+    pub const fn args(&self) -> &ChooserArgs {
+        match self {
+            Self::OpenFile { args, .. }
+            | Self::SaveFile { args, .. }
+            | Self::SaveFiles { args, .. } => args,
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "aw-fm", about = "Awused's file manager.")]
 pub struct Opt {
@@ -23,6 +82,9 @@ pub struct Opt {
     /// Start with no default tab
     #[arg(long)]
     pub empty: bool,
+
+    #[command(subcommand)]
+    pub chooser_mode: Option<ChooserCommand>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +224,8 @@ pub struct Config {
 
     #[serde(default)]
     pub seek_wraparound: bool,
+    #[serde(default)]
+    pub tab_completion: bool,
 
     #[serde(default)]
     pub shortcuts: Vec<Shortcut>,
