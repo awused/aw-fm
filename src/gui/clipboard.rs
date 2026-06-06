@@ -9,7 +9,7 @@ use gtk::gio::{Cancellable, InputStream, MemoryOutputStream, OutputStreamSpliceF
 use gtk::glib::{GString, Priority};
 use gtk::prelude::{DisplayExt, FileExt, MemoryOutputStreamExt, OutputStreamExt};
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{MultiSelection, gdk, gio, glib};
+use gtk::{SelectionModel, gdk, gio, glib};
 use strum_macros::{EnumString, IntoStaticStr};
 
 use super::tabs::id::TabId;
@@ -44,7 +44,7 @@ impl ClipboardOp {
 
 impl SelectionProvider {
     // It's fine if the selection is empty.
-    pub fn new(operation: ClipboardOp, selection: &MultiSelection) -> Self {
+    pub fn new(operation: ClipboardOp, selection: &SelectionModel) -> Self {
         let s: Self = glib::Object::new();
 
         let files: Vec<_> = Selected::from(selection).collect();

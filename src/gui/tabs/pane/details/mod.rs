@@ -4,8 +4,8 @@ use std::rc::Rc;
 use gtk::glib::Object;
 use gtk::prelude::*;
 use gtk::{
-    ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, ListScrollFlags, MultiSelection,
-    ScrolledWindow, SignalListItemFactory, Widget,
+    ColumnView, ColumnViewColumn, ColumnViewSorter, CustomSorter, ListScrollFlags, ScrolledWindow,
+    SelectionModel, SignalListItemFactory, Widget,
 };
 
 use self::icon_cell::IconCell;
@@ -32,7 +32,7 @@ pub(super) struct DetailsView {
 impl Drop for DetailsView {
     fn drop(&mut self) {
         trace!("Working around GTK crash by setting model to null");
-        self.column_view.set_model(None::<&MultiSelection>);
+        self.column_view.set_model(None::<&SelectionModel>);
     }
 }
 
@@ -44,7 +44,7 @@ impl DetailsView {
         scroller: &ScrolledWindow,
         tab: TabId,
         settings: DirSettings,
-        selection: &MultiSelection,
+        selection: &SelectionModel,
         deny_view_click: Rc<Cell<bool>>,
     ) -> Self {
         let column_view = ColumnView::new(Some(selection.clone()));
@@ -83,7 +83,7 @@ impl DetailsView {
 
         column_view.connect_activate(move |cv, _a| {
             let display = cv.display();
-            let model = &cv.model().and_downcast::<MultiSelection>().unwrap();
+            let model = &cv.model().and_downcast::<SelectionModel>().unwrap();
 
             // It should be impossible for this to be missing.
             let path = tabs_run(|list| list.find(tab).unwrap().dir());
@@ -157,7 +157,7 @@ impl DetailsView {
         Some((focus_row, eo))
     }
 
-    pub(super) fn change_model(&mut self, selection: &MultiSelection) {
+    pub(super) fn change_model(&mut self, selection: &SelectionModel) {
         self.column_view.set_model(Some(selection));
     }
 

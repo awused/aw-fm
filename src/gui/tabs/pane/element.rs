@@ -8,7 +8,7 @@ use gtk::glib::Propagation;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{
-    DropTargetAsync, EventControllerFocus, GestureClick, MultiSelection, PropagationPhase, glib,
+    DropTargetAsync, EventControllerFocus, GestureClick, PropagationPhase, SelectionModel, glib,
 };
 use strum_macros::{AsRefStr, EnumString};
 
@@ -46,10 +46,10 @@ impl Deref for StackChild {
 // Contains signals attached to something else, not tied to the lifecycle of this Pane.
 #[derive(Debug)]
 #[allow(dead_code)]
-pub(super) struct PaneSignals(SignalHolder<MultiSelection>, SignalHolder<MultiSelection>);
+pub(super) struct PaneSignals(SignalHolder<SelectionModel>, SignalHolder<SelectionModel>);
 
 impl PaneElement {
-    pub(super) fn new(tab: TabId, selection: &MultiSelection) -> (Self, PaneSignals) {
+    pub(super) fn new(tab: TabId, selection: &SelectionModel) -> (Self, PaneSignals) {
         let s: Self = glib::Object::new();
         s.imp().tab.set(tab).unwrap();
 
@@ -174,7 +174,7 @@ impl PaneElement {
         self.imp().scroller.add_controller(seek_controller);
     }
 
-    fn update_selected_text(&self, list: &MultiSelection) {
+    fn update_selected_text(&self, list: &SelectionModel) {
         let imp = self.imp();
 
         if let Some(id) = imp.selection_text_update.take() {
@@ -218,7 +218,7 @@ impl PaneElement {
         }
     }
 
-    fn defer_selected_text_update(&self, list: &MultiSelection) {
+    fn defer_selected_text_update(&self, list: &SelectionModel) {
         let imp = self.imp();
 
         if imp.stack.visible_child_name().is_none_or(|n| n != *Selection) {
@@ -260,7 +260,7 @@ impl PaneElement {
         )));
     }
 
-    pub(super) fn setup_signals(&self, selection: &MultiSelection) -> PaneSignals {
+    pub(super) fn setup_signals(&self, selection: &SelectionModel) -> PaneSignals {
         self.imp().count.set_text(&format!("{} items", selection.n_items()));
 
         let w = self.downgrade();
@@ -293,7 +293,7 @@ impl PaneElement {
         PaneSignals(count_signal, selection_signal)
     }
 
-    fn maybe_close_seek(&self, list: &MultiSelection) {
+    fn maybe_close_seek(&self, list: &SelectionModel) {
         let imp = self.imp();
         if imp.stack.visible_child_name().is_none_or(|n| n != *Seek) {
             return;

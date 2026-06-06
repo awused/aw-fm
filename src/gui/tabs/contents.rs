@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use gtk::gio::ListStore;
 use gtk::prelude::*;
-use gtk::{CustomFilter, FilterListModel, MultiSelection};
+use gtk::{CustomFilter, FilterListModel, MultiSelection, SelectionModel, SingleSelection};
 
 use super::flat_dir::WatchedDir;
 use super::{CachedDir, PartiallyAppliedUpdate};
@@ -13,6 +13,7 @@ use crate::com::{
     Update, listmodel_bsearch, liststore_drop_batched, liststore_entry_for_update,
     liststore_needs_reinsert,
 };
+use crate::config::SINGLE_SELECTION;
 
 pub struct Contents {
     list: ListStore,
@@ -22,7 +23,7 @@ pub struct Contents {
     // Stale means the entries in this list are for the previous directory.
     // They remain visible for up to the ~1s it takes for a snapshot of a slow directory to arrive.
     stale: bool,
-    pub selection: MultiSelection,
+    pub selection: SelectionModel,
 }
 
 impl std::fmt::Debug for Contents {
@@ -41,7 +42,13 @@ impl Drop for Contents {
 impl Contents {
     pub fn new(sort: SortSettings) -> Self {
         let list = ListStore::new::<EntryObject>();
-        let selection = MultiSelection::new(Some(list.clone()));
+
+        let selection = if *SINGLE_SELECTION {
+            SingleSelection::new(Some(list.clone())).upcast()
+        } else {
+            MultiSelection::new(Some(list.clone())).upcast()
+        };
+
         Self {
             list,
             filtered: None,
@@ -55,7 +62,12 @@ impl Contents {
         let list = ListStore::new::<EntryObject>();
         let filter = CustomFilter::new(|_eo| false);
         let filtered = FilterListModel::new(Some(list.clone()), Some(filter.clone()));
-        let selection = MultiSelection::new(Some(filtered.clone()));
+
+        let selection = if *SINGLE_SELECTION {
+            SingleSelection::new(Some(filtered.clone())).upcast()
+        } else {
+            MultiSelection::new(Some(filtered.clone())).upcast()
+        };
 
         // Causes annoying flickering, but as an optimization incremental mode is used occasionally
         // elsewhere.
@@ -102,7 +114,17 @@ impl Contents {
         if let Some(filtered) = &self.filtered {
             filtered.set_model(Some(&self.list));
         } else {
-            self.selection.set_model(Some(&self.list));
+            if *SINGLE_SELECTION {
+                self.selection
+                    .downcast_ref::<SingleSelection>()
+                    .unwrap()
+                    .set_model(Some(&self.list));
+            } else {
+                self.selection
+                    .downcast_ref::<MultiSelection>()
+                    .unwrap()
+                    .set_model(Some(&self.list));
+            }
         }
     }
 
@@ -307,7 +329,17 @@ impl Contents {
         if let Some(filtered) = &self.filtered {
             filtered.set_model(Some(&new_list));
         } else {
-            self.selection.set_model(Some(&new_list));
+            if *SINGLE_SELECTION {
+                self.selection
+                    .downcast_ref::<SingleSelection>()
+                    .unwrap()
+                    .set_model(Some(&new_list));
+            } else {
+                self.selection
+                    .downcast_ref::<MultiSelection>()
+                    .unwrap()
+                    .set_model(Some(&new_list));
+            }
         }
 
         let old_list = std::mem::replace(&mut self.list, new_list);

@@ -14,7 +14,7 @@ use ahash::{AHashMap, AHashSet};
 use gtk::gio::Cancellable;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{AlertDialog, Bitset, MultiSelection, Orientation, PopoverMenu, Widget, glib};
+use gtk::{AlertDialog, Bitset, Orientation, PopoverMenu, SelectionModel, Widget, glib};
 use hashlink::LinkedHashMap;
 use tokio::sync::oneshot;
 
@@ -295,7 +295,7 @@ impl Tab {
         if let Some(search) = &self.search { search.contents() } else { &self.contents }
     }
 
-    const fn visible_selection(&self) -> &MultiSelection {
+    const fn visible_selection(&self) -> &SelectionModel {
         if let Some(search) = &self.search {
             &search.contents().selection
         } else {

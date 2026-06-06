@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{GestureClick, GridView, ListScrollFlags, MultiSelection, ScrolledWindow, Widget};
+use gtk::{GestureClick, GridView, ListScrollFlags, ScrolledWindow, SelectionModel, Widget};
 
 use self::icon_tile::IconTile;
 use super::{Bound, get_last_visible_child, setup_item_controllers, setup_view_controllers};
@@ -23,7 +23,7 @@ pub(super) struct IconView {
 impl Drop for IconView {
     fn drop(&mut self) {
         trace!("Working around GTK crash by setting model to null");
-        self.grid.set_model(None::<&MultiSelection>);
+        self.grid.set_model(None::<&SelectionModel>);
     }
 }
 
@@ -31,7 +31,7 @@ impl IconView {
     pub(super) fn new(
         scroller: &ScrolledWindow,
         tab: TabId,
-        selection: &MultiSelection,
+        selection: &SelectionModel,
         deny_view_click: Rc<Cell<bool>>,
         initial_width: u32,
     ) -> Self {
@@ -107,7 +107,7 @@ impl IconView {
 
         grid.connect_activate(move |gv, _a| {
             let display = gv.display();
-            let model = &gv.model().and_downcast::<MultiSelection>().unwrap();
+            let model = &gv.model().and_downcast::<SelectionModel>().unwrap();
 
             // It should be impossible for this to be missing.
             let path = tabs_run(|list| list.find(tab).unwrap().dir());
@@ -145,7 +145,7 @@ impl IconView {
             .and_then(|c| c.bound_object())
     }
 
-    pub(super) fn change_model(&mut self, selection: &MultiSelection) {
+    pub(super) fn change_model(&mut self, selection: &SelectionModel) {
         self.grid.set_model(Some(selection));
     }
 

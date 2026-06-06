@@ -15,7 +15,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{
     CustomFilter, DragSource, DropTargetAsync, EventControllerKey, FilterChange, FilterListModel,
-    GestureClick, ListScrollFlags, MultiSelection, Orientation, Widget, WidgetPaintable,
+    GestureClick, ListScrollFlags, Orientation, SelectionModel, Widget, WidgetPaintable,
 };
 
 use self::details::DetailsView;
@@ -162,7 +162,7 @@ pub(super) struct Pane {
 
     element: PaneElement,
     tab: TabId,
-    selection: MultiSelection,
+    selection: SelectionModel,
 
     // This is a workaround for GTK not providing ways to better segment clicks.
     // If a click is handled on an item, don't handle it again on the pane.
@@ -200,7 +200,7 @@ impl Pane {
     fn create(
         tab: TabId,
         settings: DirSettings,
-        selection: &MultiSelection,
+        selection: &SelectionModel,
         initial_width: u32,
     ) -> Self {
         let (element, signals) = PaneElement::new(tab, selection);
@@ -474,7 +474,7 @@ impl Pane {
         tab: TabId,
         path: &Path,
         settings: DirSettings,
-        selection: &MultiSelection,
+        selection: &SelectionModel,
         initial_width: u32,
         insert: impl FnOnce(&Widget),
     ) -> Self {
@@ -492,7 +492,7 @@ impl Pane {
         tab: TabId,
         queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
         settings: DirSettings,
-        selection: &MultiSelection,
+        selection: &SelectionModel,
         filter: CustomFilter,
         filtered: FilterListModel,
         initial_width: u32,
@@ -508,7 +508,7 @@ impl Pane {
         pane
     }
 
-    pub(super) fn search_to_flat(&mut self, path: &Path, selection: &MultiSelection) {
+    pub(super) fn search_to_flat(&mut self, path: &Path, selection: &SelectionModel) {
         match &mut self.view {
             View::Icons(ic) => ic.change_model(selection),
             View::Columns(cv) => cv.change_model(selection),
@@ -522,7 +522,7 @@ impl Pane {
     pub(super) fn flat_to_search(
         &mut self,
         queries: (Rc<RefCell<String>>, Rc<RefCell<String>>),
-        selection: &MultiSelection,
+        selection: &SelectionModel,
         filter: CustomFilter,
         filtered: FilterListModel,
     ) {

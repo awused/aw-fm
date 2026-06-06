@@ -7,7 +7,7 @@ use gtk::gio::prelude::FileExt;
 use gtk::glib::subclass::types::ObjectSubclassIsExt;
 use gtk::glib::{self, GString};
 use gtk::prelude::{BoxExt, EditableExt};
-use gtk::{MultiSelection, gio};
+use gtk::{SelectionModel, gio};
 
 use crate::closing;
 use crate::config::{ChooserCommand, OPTIONS};
@@ -56,7 +56,7 @@ impl Chooser {
         })
     }
 
-    pub(super) fn selection(&mut self, selection: &MultiSelection) {
+    pub(super) fn selection(&mut self, selection: &SelectionModel) {
         let cmd = OPTIONS.chooser_mode.as_ref().unwrap();
 
         let files = Selected::from(selection);

@@ -23,7 +23,7 @@ use crate::com::{
     DirSnapshot, DisplayMode, EntryObject, SearchSnapshot, SearchUpdate, SortDir, SortMode,
     SortSettings, Update,
 };
-use crate::config::{CONFIG, OPTIONS};
+use crate::config::OPTIONS;
 use crate::database::{SavedSplit, Session, SplitChild};
 use crate::gui::clipboard::ClipboardOp;
 use crate::gui::main_window::MainWindow;
@@ -88,7 +88,6 @@ impl TabsList {
         factory.connect_bind(|_factory, obj| {
             let item = obj.downcast_ref::<gtk::ListItem>().unwrap();
             let tab = item.item().unwrap().downcast::<TabElement>().unwrap();
-            // println!("binding {:?}", tab.imp().tab.get().unwrap());
 
             if let Some(old_item) = tab.imp().list_item.take() {
                 warn!(

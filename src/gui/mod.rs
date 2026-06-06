@@ -13,11 +13,12 @@ use gtk::glib::{ControlFlow, ExitCode, SourceId, WeakRef, timeout_future_seconds
 use gtk::pango::{AttrInt, AttrList};
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use gtk::{Bitset, MultiSelection, gdk, gio, glib};
+use gtk::{Bitset, SelectionModel, gdk, gio, glib};
 use path_clean::PathClean;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 #[cfg(feature = "x11")]
 use {
+    gdk4_x11::X11Display,
     gdk4_x11::ffi::gdk_x11_display_get_xdisplay,
     gdk4_x11::x11_get_xatom_by_name_for_display,
     x11::xlib::{PropModeReplace, XA_ATOM, XChangeProperty, XSetTransientForHint},
@@ -29,7 +30,7 @@ use self::tabs::list::TabsList;
 use self::thumbnailer::Thumbnailer;
 use super::com::*;
 use crate::closing::{self, close};
-use crate::config::{CONFIG, ChooserCommand, DIALOG_RES, OPTIONS};
+use crate::config::{CONFIG, DIALOG_RES, OPTIONS};
 use crate::database::DBCon;
 use crate::gui::tabs::list::TabPosition;
 use crate::state_cache::{STATE, State, save_settings};
@@ -230,6 +231,11 @@ impl Gui {
             let res = *DIALOG_RES;
             // May make this configurable
             window.set_default_size(res.0, res.1);
+
+            #[cfg(feature = "x11")]
+            if let Ok(xdisp) = RootExt::display(&window).downcast::<X11Display>() {
+                xdisp.set_program_class("aw-fm-chooser");
+            }
         }
 
         let provider = gtk::CssProvider::new();
@@ -470,6 +476,7 @@ impl Gui {
     }
 
     fn filechooser_finish_setup(&self) {
+        #[allow(unused)]
         let Some(mode) = &OPTIONS.chooser_mode else {
             return;
         };
@@ -498,7 +505,7 @@ impl Gui {
                 && let Some(parent) = parent.strip_prefix("x11:")
                 && let Ok(parent) = parent.parse::<u64>()
             {
-                let xdisp = disp.downcast::<gdk4_x11::X11Display>().unwrap();
+                let xdisp = disp.downcast::<X11Display>().unwrap();
                 let xsurf = surf.downcast::<gdk4_x11::X11Surface>().unwrap();
 
                 let window_type = x11_get_xatom_by_name_for_display(&xdisp, "_NET_WM_WINDOW_TYPE");
@@ -532,14 +539,14 @@ impl Gui {
 
 
 struct Selected<'a> {
-    selection: &'a MultiSelection,
+    selection: &'a SelectionModel,
     selected: Bitset,
     pos: u32,
     end: u32,
 }
 
-impl<'a> From<&'a MultiSelection> for Selected<'a> {
-    fn from(selection: &'a MultiSelection) -> Self {
+impl<'a> From<&'a SelectionModel> for Selected<'a> {
+    fn from(selection: &'a SelectionModel) -> Self {
         let selected = selection.selection();
         let size = selected.size();
         if size > 0 && size <= u32::MAX as u64 {

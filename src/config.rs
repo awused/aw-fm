@@ -375,7 +375,7 @@ pub static SINGLE_SELECTION: LazyLock<bool> = LazyLock::new(|| {
     OPTIONS
         .chooser_mode
         .as_ref()
-        .is_some_and(|m| matches!(m, ChooserCommand::OpenFile { multiple,.. } if *multiple))
+        .is_some_and(|m| !matches!(m, ChooserCommand::OpenFile { multiple,.. } if *multiple))
 });
 
 static DEFAULT_CONFIG: &str = include_str!("../aw-fm.toml.sample");
