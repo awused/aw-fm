@@ -3,11 +3,12 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gtk::gio::Cancellable;
 use gtk::gio::prelude::FileExt;
 use gtk::glib::subclass::types::ObjectSubclassIsExt;
 use gtk::glib::{self, GString};
 use gtk::prelude::{BoxExt, EditableExt};
-use gtk::{SelectionModel, gio};
+use gtk::{AlertDialog, SelectionModel, gio};
 
 use crate::closing;
 use crate::config::{ChooserCommand, OPTIONS};
@@ -104,7 +105,9 @@ impl Chooser {
     pub(super) fn accept(&mut self) {
         let cmd = OPTIONS.chooser_mode.as_ref().unwrap();
 
-        let files = if !self.files.is_empty() {
+        let files = if let ChooserCommand::SaveFiles { .. } = cmd {
+            return show_error("TODO -- unimplemented");
+        } else if !self.files.is_empty() {
             // We can assume these exist for opening, at least.
             self.files.clone()
         } else if let Some(root) = &self.root {
@@ -130,9 +133,53 @@ impl Chooser {
             return;
         }
 
-        info!("TODO save things");
-        println!("cancelled");
-        closing::close();
+        let existing: Vec<_> = files
+            .iter()
+            .filter(|f| f.exists())
+            .map(|f| {
+                self.root
+                    .as_ref()
+                    .and_then(|r| f.strip_prefix(r).ok())
+                    .unwrap_or(f)
+                    .to_string_lossy()
+            })
+            .collect();
+
+        if existing.is_empty() {
+            for f in files {
+                println!("{}", gio::File::for_path(f).uri());
+            }
+            closing::close();
+            return;
+        }
+
+
+        let message = format!(
+            "Confirm overwriting file{} within {:?}\n",
+            if existing.len() > 1 { "s" } else { "" },
+            self.root.as_deref().unwrap_or_else(|| Path::new("/"))
+        );
+
+        let alert = AlertDialog::builder()
+            .buttons(["Cancel", "Overwrite"])
+            .default_button(1)
+            .cancel_button(0)
+            .message(message)
+            .detail(existing.join("\n"))
+            .modal(true)
+            .build();
+
+        let parent = gui_run(|g| g.window.clone());
+        alert.choose(Some(&parent), Cancellable::NONE, move |res| {
+            if !matches!(res, Ok(1)) {
+                return;
+            }
+
+            for f in files {
+                println!("{}", gio::File::for_path(f).uri());
+            }
+            closing::close();
+        });
     }
 
     fn text(&mut self, text: GString) {

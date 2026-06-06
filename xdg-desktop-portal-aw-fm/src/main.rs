@@ -260,7 +260,7 @@ impl FileChooserImpl for Server {
         }
 
 
-        Err(ashpd::PortalError::Cancelled("TODO".to_owned()))
+        Ok(selected)
     }
 
     async fn save_files(

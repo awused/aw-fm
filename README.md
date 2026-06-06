@@ -9,9 +9,11 @@ It is a simple file manager designed to be fast and efficient.
 * Fast and efficient
   * Opening directories containing hundreds of thousands of images shouldn't
       lock up the UI for minutes/hours.
-  * In the default configuration, it uses a tiny fraction of the memory of
-      other GUI file managers in large directories with many thumbnails.
+  * By default, it uses a tiny fraction of the memory of other GUI file managers
+      in large directories with many thumbnails.
   * Cloning tabs is instant.
+* Usable as a file picker.
+  * See [xdg-desktop-portal-aw-fm](xdg-desktop-portal-aw-fm).
 * Natural sorting, `abc` sorts before `XYZ` and `a2.png` sorts before `a10.png`.
 * A UI charitably described as minimal.
   * Panes/splits and tab groups function like minimal workspaces.
