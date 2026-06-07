@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 async-trait = "0.1.89"
 color-eyre = "0.6.5"
-ashpd = { version = "0.13.11", features = ["tokio", "backend", "file_chooser"] }
+# ashpd = { version = "0.13.11", features = ["tokio", "backend", "file_chooser"] }
+ashpd = { git = "https://github.com/awused/ashpd", branch = "handle-token", features = ["tokio", "backend", "file_chooser"] }
 futures-util = { version = "0.3.32", default-features = false }
 tokio = { version = "1.52.3", features = ["macros", "process", "rt", "sync", "time"] }
