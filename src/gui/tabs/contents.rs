@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use gtk::gio::ListStore;
+use gtk::gio::{ListModel, ListStore};
 use gtk::prelude::*;
 use gtk::{CustomFilter, FilterListModel, MultiSelection, SelectionModel, SingleSelection};
 
@@ -39,15 +39,22 @@ impl Drop for Contents {
     }
 }
 
+fn new_selection(list: impl IsA<ListModel>) -> SelectionModel {
+    if *SINGLE_SELECTION {
+        let single = SingleSelection::new(Some(list));
+        single.set_can_unselect(true);
+        single.set_autoselect(false);
+        single.upcast()
+    } else {
+        MultiSelection::new(Some(list)).upcast()
+    }
+}
+
 impl Contents {
     pub fn new(sort: SortSettings) -> Self {
         let list = ListStore::new::<EntryObject>();
 
-        let selection = if *SINGLE_SELECTION {
-            SingleSelection::new(Some(list.clone())).upcast()
-        } else {
-            MultiSelection::new(Some(list.clone())).upcast()
-        };
+        let selection = new_selection(list.clone());
 
         Self {
             list,
@@ -63,11 +70,7 @@ impl Contents {
         let filter = CustomFilter::new(|_eo| false);
         let filtered = FilterListModel::new(Some(list.clone()), Some(filter.clone()));
 
-        let selection = if *SINGLE_SELECTION {
-            SingleSelection::new(Some(filtered.clone())).upcast()
-        } else {
-            MultiSelection::new(Some(filtered.clone())).upcast()
-        };
+        let selection = new_selection(filtered.clone());
 
         // Causes annoying flickering, but as an optimization incremental mode is used occasionally
         // elsewhere.
