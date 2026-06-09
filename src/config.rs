@@ -14,7 +14,6 @@ use serde::{Deserialize, Deserializer, de};
 // TODO -- filters, choices
 #[derive(Debug, Parser)]
 pub struct ChooserArgs {
-    // TODO -- just remove?
     #[arg(long)]
     pub parent_window: Option<String>,
 
@@ -57,7 +56,9 @@ pub enum ChooserCommand {
     },
     /// Spawn a save files dialog to save multiple files in one directory
     SaveFiles {
-        names: Vec<PathBuf>,
+        // These might be full paths but we cut them down to file names
+        // If the list is empty, return the directory? That is what gtk does.
+        paths: Vec<PathBuf>,
 
         #[command(flatten)]
         args: ChooserArgs,

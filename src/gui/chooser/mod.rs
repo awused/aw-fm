@@ -104,13 +104,29 @@ impl Chooser {
 
     pub(super) fn accept(&mut self) {
         let cmd = OPTIONS.chooser_mode.as_ref().unwrap();
+        let Some(root) = &self.root else {
+            return show_error("Root is not set for chooser, this should never happen");
+        };
 
-        let files = if let ChooserCommand::SaveFiles { .. } = cmd {
-            return show_error("TODO -- unimplemented");
+        let files = if let ChooserCommand::SaveFiles { paths, .. } = cmd {
+            if paths.is_empty() {
+                return show_error("TODO -- unimplemented: SaveFiles with no names");
+            }
+
+            let mut files = Vec::with_capacity(paths.len());
+            for f in paths {
+                let Some(name) = f.file_name() else {
+                    return show_error(format!(
+                        "Asked to save nameless file {f:?}, this will not work"
+                    ));
+                };
+                files.push(root.join(name).into());
+            }
+            files
         } else if !self.files.is_empty() {
             // We can assume these exist for opening, at least.
             self.files.clone()
-        } else if let Some(root) = &self.root {
+        } else {
             let path: Arc<Path> = root.join(Path::new(&self.last_text)).into();
 
             if path.is_dir() && !cmd.open_dir() {
@@ -120,8 +136,6 @@ impl Chooser {
             }
 
             vec![path]
-        } else {
-            return show_error("Tried to accept empty choice, this shouldn't happen");
         };
 
         if cmd.open() {
@@ -153,11 +167,9 @@ impl Chooser {
             return;
         }
 
-
         let message = format!(
-            "Confirm overwriting file{} within {:?}\n",
+            "Confirm overwriting file{} within {root:?}\n",
             if existing.len() > 1 { "s" } else { "" },
-            self.root.as_deref().unwrap_or_else(|| Path::new("/"))
         );
 
         let alert = AlertDialog::builder()

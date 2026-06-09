@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use gtk::glib;
 use gtk::glib::subclass::types::ObjectSubclassIsExt;
 use gtk::prelude::{ButtonExt, EditableExt, EntryExt, WidgetExt};
@@ -42,8 +44,14 @@ impl ChooserBar {
                 && let Some(file) = file.as_ref().or(name.as_ref())
                 && let Some(file) = file.file_name()
             {
+                let file = file.to_string_lossy();
+                let end_pos = Path::new(&*file)
+                    .file_stem()
+                    .map_or(-1, |f| f.to_string_lossy().chars().count() as _);
+
                 // TODO -- ensure round-tripping works
-                imp.text_entry.set_text(&file.to_string_lossy());
+                imp.text_entry.set_text(&file);
+                imp.text_entry.select_region(0, end_pos);
             }
 
             imp.text_entry.connect_activate(|_| {

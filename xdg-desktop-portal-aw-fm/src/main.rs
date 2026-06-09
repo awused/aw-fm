@@ -271,8 +271,90 @@ impl FileChooserImpl for Server {
         title: &str,
         options: SaveFilesOptions,
     ) -> backend::Result<SelectedFiles> {
-        println!("save_files: {token}");
-        Err(ashpd::PortalError::NotFound("oh no".to_owned()))
+        let mut cmd = Command::new("aw-fm");
+        if let Some(folder) = options.current_folder() {
+            cmd.arg(folder.as_ref());
+        }
+
+        cmd.arg("save-files");
+
+        if !title.is_empty() {
+            cmd.arg("--title").arg(title);
+        }
+
+        if options.modal() == Some(true) {
+            cmd.arg("--modal");
+        }
+
+        if let Some(label) = options.accept_label() {
+            cmd.arg("--label").arg(label);
+        }
+
+        match window_identifier {
+            Some(WindowIdentifierType::X11(x)) => {
+                cmd.arg("--parent-window").arg(format!("x11:{x}"));
+            }
+            Some(WindowIdentifierType::Wayland(w)) => {
+                cmd.arg("--parent-window").arg(w);
+            }
+            None => {}
+        }
+
+        if let Some(app_id) = app_id {
+            cmd.arg("--app-id").arg(app_id.to_string());
+        }
+
+        for f in options.files() {
+            cmd.arg(f.as_ref());
+        }
+
+        cmd.kill_on_drop(true);
+        println!("SaveFiles: {cmd:?}");
+        let (sender, receiver) = oneshot::channel();
+
+        self.commands.lock().unwrap().insert(token.clone(), sender);
+        let _clean = ClearOnDrop(&self, token);
+
+        let out = pin!(cmd.output());
+
+        let out = match select(out, receiver).await {
+            Either::Left((Ok(out), _)) => out,
+            Either::Right((..)) => {
+                return Err(ashpd::PortalError::Cancelled("Cancelled".to_owned()));
+            }
+            Either::Left((Err(e), _)) => {
+                return Err(ashpd::PortalError::Failed(e.to_string()));
+            }
+        };
+
+        if !out.status.success() {
+            println!("stderr: {}", String::from_utf8_lossy(&out.stderr));
+            return Err(ashpd::PortalError::Failed("Failed".to_owned()));
+        }
+
+        // We expect this to be utf-8 encoded URIs
+        let lines = match String::from_utf8(out.stdout) {
+            Ok(good) => good,
+            Err(e) => return Err(ashpd::PortalError::Failed(e.to_string())),
+        };
+
+        let uris: Vec<_> = lines.trim().lines().map(str::trim).filter(|s| !s.is_empty()).collect();
+        if uris.is_empty() || (uris.len() == 1 && uris[0].eq_ignore_ascii_case("cancelled")) {
+            println!("Cancelled");
+            return Err(ashpd::PortalError::Cancelled("Cancelled".to_owned()));
+        }
+
+        let mut selected = SelectedFiles::default();
+        for uri in uris {
+            match Uri::parse(uri) {
+                Ok(uri) => {
+                    selected = selected.uri(uri);
+                }
+                Err(e) => return Err(ashpd::PortalError::Failed(e.to_string())),
+            }
+        }
+
+        Ok(selected)
     }
 }
 

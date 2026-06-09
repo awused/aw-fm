@@ -530,10 +530,15 @@ impl Gui {
             }
         }
 
-        GtkWindowExt::set_focus(
-            &self.window,
-            Some(&self.chooser.borrow().as_ref().unwrap().bar.imp().text_entry.get()),
-        );
+        self.chooser
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .bar
+            .imp()
+            .text_entry
+            .get()
+            .grab_focus_without_selecting();
     }
 }
 

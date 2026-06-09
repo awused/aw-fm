@@ -11,6 +11,7 @@
     <child>
       <object class="GtkEntry" id="text_entry">
         <property name="hexpand">true</property>
+        <property name="enable-undo">true</property>
         <style>
           <class name="location-bar"/>
         </style>
