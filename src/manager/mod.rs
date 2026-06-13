@@ -18,7 +18,7 @@ use tokio::time::{Instant, sleep_until, timeout};
 
 use self::watcher::PendingUpdates;
 use crate::com::{CompletionResult, GuiAction, ManagerAction};
-use crate::config::{CONFIG, NfsPolling};
+use crate::config::{CONFIG, NfsPolling, OPTIONS};
 use crate::manager::watcher::Sources;
 use crate::{closing, spawn_thread};
 
@@ -79,9 +79,13 @@ async fn run_local(f: impl Future<Output = ()>) {
     let local = LocalSet::new();
     local.run_until(f).await;
 
+    // In chooser mode, do not wait for anything.
+    if OPTIONS.chooser_mode.is_some() {
+        return;
+    }
+
     // Unlike with aw-man, tasks being left in the LocalSet aren't an error.
     // Most tasks do not write to any temporary directories at all.
-
     if let Err(e) = timeout(Duration::from_secs(600), local).await {
         error!("Unable to finishing cleaning up in {e}, something is stuck.");
     }

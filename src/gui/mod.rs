@@ -229,7 +229,6 @@ impl Gui {
             }
 
             let res = *DIALOG_RES;
-            // May make this configurable
             window.set_default_size(res.0, res.1);
 
             #[cfg(feature = "x11")]
