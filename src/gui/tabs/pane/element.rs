@@ -447,6 +447,9 @@ mod imp {
         #[template_child]
         pub(super) clipboard: TemplateChild<gtk::Label>,
 
+        #[template_child]
+        pub spinner: TemplateChild<gtk::Spinner>,
+
         pub active: Cell<bool>,
         pub original_text: RefCell<String>,
         pub tab: OnceCell<TabId>,

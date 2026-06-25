@@ -978,6 +978,16 @@ impl Pane {
         save_tree(parent, ids)
     }
 
+    pub fn spin(&self) {
+        self.element.imp().spinner.start();
+        self.element.imp().spinner.set_visible(true);
+    }
+
+    pub fn stop_spin(&self) {
+        self.element.imp().spinner.stop();
+        self.element.imp().spinner.set_visible(false);
+    }
+
     pub fn workaround_focus_before_delete(&self, eo: &EntryObject) {
         match &self.view {
             View::Icons(grid) => grid.fix_focus_before_delete(eo),

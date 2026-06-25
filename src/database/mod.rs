@@ -400,7 +400,7 @@ fn update_to_current(con: &mut Connection) {
     let initial_version = get_version(con);
 
     // For now, assume all dir settings are always set.
-    // This only needs to change if default globakl options become configurable, and even then we
+    // This only needs to change if default global options become configurable, and even then we
     // can just make the default parameter the global option.
     update_to(
         con,

@@ -370,15 +370,6 @@ impl Tab {
         contents.clone_from(&source.contents, source.settings.sort);
         element.clone_from(&source.element);
 
-        // Spinner will start spinning for search when pane is attached
-        // It's possible for this spinner to be shown, then stop spinning, then start spinning
-        // again once the tab is selected.
-        if source.dir.state().loading() {
-            element.spin();
-        } else {
-            element.stop_spin();
-        }
-
         let search = source.search.as_ref().map(|s| s.clone_for(&contents));
 
         let pane = if let Some(search) = &search {
@@ -402,6 +393,17 @@ impl Tab {
                 insert,
             )
         };
+
+        // Spinner will start spinning for search when pane is attached
+        // It's possible for this spinner to be shown, then stop spinning, then start spinning
+        // again once the tab is selected.
+        if source.dir.state().loading() {
+            element.spin();
+            pane.spin();
+        } else {
+            element.stop_spin();
+            pane.stop_spin();
+        }
 
         let state = source.pane.clone_state(&source.contents);
 
@@ -483,9 +485,9 @@ impl Tab {
                 self.contents.clone_from(&t.contents, self.settings.sort);
 
                 if self.dir.state().loading() {
-                    self.element.spin();
+                    self.spin();
                 } else {
-                    self.element.stop_spin();
+                    self.stop_spin();
                 }
 
                 return true;
@@ -495,7 +497,7 @@ impl Tab {
         if let Some(mut cached) = context.cached.remove(self.dir.path()) {
             self.dir = cached.make_flat_once();
             self.contents.inherit_cached(self.settings.sort, &cached);
-            self.element.stop_spin();
+            self.stop_spin();
             true
         } else {
             false
@@ -521,7 +523,7 @@ impl Tab {
         self.element.search_title(self.dir.path());
 
         search.start_load();
-        self.element.spin();
+        self.spin();
 
         self.pane.flat_to_search(
             search.query(),
@@ -540,7 +542,7 @@ impl Tab {
         trace!("Closing Search for {:?}", self.id);
 
         if !self.loading() {
-            self.element.stop_spin();
+            self.stop_spin();
         }
 
         self.element.flat_title(self.dir.path());
@@ -566,14 +568,24 @@ impl Tab {
         let search_load = self.search.as_mut().is_some_and(Search::start_load);
 
         if self_load || search_load {
-            self.element.spin();
+            self.spin();
         }
 
         if self_load {
             for t in self.matching(left).chain(self.matching(right)) {
-                t.element.spin();
+                t.spin();
             }
         }
+    }
+
+    fn spin(&self) {
+        self.element.spin();
+        self.pane.spin();
+    }
+
+    fn stop_spin(&self) {
+        self.element.stop_spin();
+        self.pane.stop_spin();
     }
 
     // This is the easiest implementation, but it is clumsy
@@ -590,7 +602,7 @@ impl Tab {
         }
 
         self.contents.clear(self.settings.sort);
-        self.element.stop_spin();
+        self.stop_spin();
         self.dir.unload();
     }
 
@@ -858,7 +870,7 @@ impl Tab {
         debug_assert!(self.search.is_none());
         self.pane.update_location(self.dir.path(), self.settings, &self.contents);
         self.load(context.left, context.right);
-        chooser_run(|c| c.root(&self.dir.path()));
+        chooser_run(|c| c.root(self.dir.path()));
         None
     }
 
@@ -1177,7 +1189,7 @@ impl Tab {
     fn maybe_finish_load(&mut self) {
         // We can be done loading without being loaded (flat loaded + search unloaded)
         if !self.loading() {
-            self.element.stop_spin()
+            self.stop_spin()
         }
 
         if self.loaded() {
