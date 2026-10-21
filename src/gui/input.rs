@@ -386,8 +386,8 @@ impl Gui {
                 hash_map::Entry::Vacant(vacant) => vacant.insert(AHashMap::new()),
             };
 
-            let k = Key::from_name(&s.key)
-                .unwrap_or_else(|| panic!("Could not decode Key: {}", &s.key));
+            let k =
+                Key::from_name(&s.key).unwrap_or_else(|| panic!("Could not decode Key: {}", s.key));
             inner.insert(k, &*s.action);
         };
 
