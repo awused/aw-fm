@@ -200,11 +200,11 @@ impl Progress {
             | Outcome::Copy(_)
             | Outcome::CopyOverwrite(_)
             | Outcome::NewFile(_)
-            | Outcome::Trash
+            | Outcome::Trash(_)
             | Outcome::CreateDestDir(_)
             | Outcome::MergeDestDir(_) // does this really count?
-            | Outcome::Delete
-            | Outcome::DeleteDir => {
+            | Outcome::Delete(_)
+            | Outcome::DeleteDir(_) => {
                 self.total += 1;
                 self.finished += 1
             }

@@ -17,7 +17,7 @@ use crate::com::{ActionTarget, SignalHolder};
 use crate::gui::chooser::chooser_run;
 use crate::gui::clipboard::URIS;
 use crate::gui::tabs::id::TabId;
-use crate::gui::{Selected, gui_run, tabs_run};
+use crate::gui::{Selected, gui_run, tabs_run, tabs_run_or_defer};
 
 glib::wrapper! {
     pub struct PaneElement(ObjectSubclass<imp::Pane>)
@@ -100,7 +100,8 @@ impl PaneElement {
             if !element.imp().active.get() {
                 // We set active when focus enters but deliberately do not unset it when focus
                 // leaves. If no other tab grabs focus we keep active set.
-                tabs_run(|t| t.set_active(tab));
+                // This can be triggered by scroll_to with the lock held
+                tabs_run_or_defer(move |t| t.set_active(tab));
             }
         });
         self.add_controller(focus);

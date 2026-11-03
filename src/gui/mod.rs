@@ -85,6 +85,20 @@ fn tabs_run<R, F: FnOnce(&mut TabsList) -> R>(f: F) -> R {
     })
 }
 
+// Used when we want to run something immediately, but it could be called with the tabs lock
+// already held.
+fn tabs_run_or_defer<F: FnOnce(&mut TabsList) + 'static>(f: F) {
+    gui_run(|g| {
+        if let Ok(mut tlist) = g.tabs.try_borrow_mut() {
+            f(&mut tlist)
+        } else {
+            warn!("Tabs list lock already held, this should be rare.");
+            glib::idle_add_local_once(|| tabs_run(f));
+        }
+    })
+}
+
+
 // #[derive(Debug, Copy, Clone, Default)]
 // struct WindowState {
 //     maximized: bool,

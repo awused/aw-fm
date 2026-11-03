@@ -307,6 +307,19 @@ max_undo_minutes = 360
 # Changing this is not recommended.
 nfs_polling = "off"
 
+# How long to wait, in seconds, after a file is created or deleted inside a directory to rescan the
+# directory for changes.
+#
+# Only affects immediate parents and only if you have them open in another tab.
+# Will miss any updates when a tab isn't open to see the update.
+#
+# Example is a tab open to /a/ and /a/b, creating /a/b/c will send an update to /a/ about /a/b/.
+#
+# Max 255.
+# Set to 0 to use the default internal debouncing time.
+# Comment out to disable calculating updates for parent directories.
+parent_update_delay = 2
+
 # How deeply to recurse for searches.
 #
 # Set to 0 to only search the current directory. Max 255.

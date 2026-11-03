@@ -44,6 +44,7 @@ struct Manager {
 
     watcher: RecommendedWatcher,
     poll_watcher: Option<PollWatcher>,
+    flat_watches: BTreeSet<Arc<Path>>,
     nfs_keepalives: BTreeSet<Arc<Path>>,
 
     open_searches: Vec<(Arc<AtomicBool>, notify::RecommendedWatcher)>,
@@ -136,6 +137,7 @@ impl Manager {
 
             watcher,
             poll_watcher,
+            flat_watches: BTreeSet::new(),
             nfs_keepalives: BTreeSet::new(),
 
             open_searches: Vec::new(),
@@ -256,6 +258,10 @@ impl Manager {
                 }
 
                 let _ignored = finished.send(all_paths);
+            }
+
+            TriggerUpdate(path) => {
+                self.schedule_update(path, false, None);
             }
 
             Complete(path, initial, tab) => {

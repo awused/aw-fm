@@ -14,6 +14,7 @@ use regex::bytes::{Captures, Regex};
 use self::progress::Progress;
 use super::tabs::id::TabId;
 use super::{Gui, gui_run};
+use crate::com::ManagerAction;
 use crate::config::{CONFIG, DirectoryCollision, FileCollision};
 use crate::gui::operations::ask::AskDialog;
 use crate::gui::{show_error, show_warning, tabs_run};
@@ -76,11 +77,11 @@ pub enum Outcome {
     // Nothing really happened here
     MergeDestDir(Arc<Path>),
     Skip,
-    Delete,
+    Delete(Arc<Path>),
     // Not undoable, while the directory could be recreated that's not terrible useful.
-    DeleteDir,
+    DeleteDir(Arc<Path>),
     // Not undoable without dumb hacks: https://gitlab.gnome.org/GNOME/glib/-/issues/845
-    Trash,
+    Trash(Arc<Path>),
 }
 
 impl Outcome {
@@ -92,9 +93,27 @@ impl Outcome {
             | Self::NewFile(_)
             | Self::RemoveSourceDir(..)
             | Self::CreateDestDir(_) => true,
-            Self::MergeDestDir(_) | Self::Skip | Self::Delete | Self::DeleteDir | Self::Trash => {
-                false
-            }
+            Self::MergeDestDir(_)
+            | Self::Skip
+            | Self::Delete(_)
+            | Self::DeleteDir(_)
+            | Self::Trash(_) => false,
+        }
+    }
+
+    const fn removed_source(&self) -> Option<&Arc<Path>> {
+        match self {
+            Self::Move { source, .. }
+            | Self::RemoveSourceDir(source, ..)
+            | Self::Delete(source)
+            | Self::DeleteDir(source)
+            | Self::Trash(source) => Some(&source),
+            Self::Copy(_)
+            | Self::CopyOverwrite(_)
+            | Self::NewFile(_)
+            | Self::CreateDestDir(_)
+            | Self::MergeDestDir(_)
+            | Self::Skip => None,
         }
     }
 }
@@ -796,7 +815,7 @@ impl Operation {
                     }
                 } else {
                     trace!("Finished trashing {path:?}");
-                    s.progress.borrow_mut().push_outcome(Outcome::Trash);
+                    s.progress.borrow_mut().push_outcome(Outcome::Trash(path));
                 }
                 s.process_next();
             },
@@ -869,9 +888,9 @@ impl Operation {
                     // gui_run(|g| g.handle_update(GuiAction::Update(Update::Removed(path))));
 
                     s.progress.borrow_mut().push_outcome(if was_dir {
-                        Outcome::DeleteDir
+                        Outcome::DeleteDir(path)
                     } else {
-                        Outcome::Delete
+                        Outcome::Delete(path)
                     });
                 }
                 s.process_next();
@@ -988,6 +1007,65 @@ impl Gui {
             if finished_operations.len() >= OPERATIONS_HISTORY {
                 finished_operations.pop_front();
             }
+
+            // Trigger updates for the destination directory
+            match &finished.kind {
+                Kind::Copy(parent)
+                | Kind::Trash(parent)
+                | Kind::Delete(parent)
+                | Kind::Move(parent) => {
+                    self.send_manager(ManagerAction::TriggerUpdate(parent.clone()));
+                }
+                Kind::MakeDir(path) | Kind::MakeFile(path) => {
+                    if let Some(parent) = path.parent() {
+                        self.send_manager(ManagerAction::TriggerUpdate(parent.into()))
+                    }
+                }
+                Kind::Rename(_) | Kind::Undo { .. } => {}
+            }
+
+            // Trigger updates for the source directory
+            match &finished.kind {
+                Kind::Delete(_) | Kind::Trash(_) | Kind::Move(_) => {
+                    // If we can identify a useful single parent directory, trigger an update for
+                    // it. If multiple parent directories were touched, do not trigger updates to
+                    // avoid causing performance issues.
+                    let progress = finished.progress.borrow();
+                    let mut common_parent: Option<&Path> = None;
+                    'mutated: for mutated_parent in progress
+                        .log()
+                        .iter()
+                        .flat_map(Outcome::removed_source)
+                        .flat_map(|p| p.parent())
+                    {
+                        if let Some(common) = common_parent {
+                            for ancestor in common.ancestors() {
+                                common_parent = Some(ancestor);
+                                if mutated_parent.starts_with(ancestor) {
+                                    continue 'mutated;
+                                }
+                            }
+
+                            break 'mutated;
+                        }
+
+                        common_parent = Some(mutated_parent);
+                    }
+
+                    if let Some(parent) = common_parent
+                        && parent.parent().is_some()
+                    {
+                        self.send_manager(ManagerAction::TriggerUpdate(parent.into()));
+                    }
+                }
+                Kind::Copy(_)
+                | Kind::Rename(_)
+                | Kind::MakeDir(_)
+                | Kind::MakeFile(_)
+                | Kind::Undo { .. } => {}
+            }
+
+
             finished_operations.push_back(finished);
         }
     }

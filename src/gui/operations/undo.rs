@@ -92,9 +92,9 @@ impl Operation {
             }
             Outcome::MergeDestDir(_)
             | Outcome::Skip
-            | Outcome::Delete
-            | Outcome::DeleteDir
-            | Outcome::Trash => unreachable!(),
+            | Outcome::Delete(_)
+            | Outcome::DeleteDir(_)
+            | Outcome::Trash(_) => unreachable!(),
         }
     }
 }

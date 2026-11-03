@@ -290,6 +290,9 @@ pub struct Config {
     pub nfs_polling: NfsPolling,
 
     #[serde(default)]
+    pub parent_update_delay: Option<u8>,
+
+    #[serde(default)]
     pub search_max_depth: Option<u8>,
     #[serde(default)]
     pub search_show_all: bool,

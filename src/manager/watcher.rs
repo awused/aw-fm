@@ -31,17 +31,26 @@ const DEDUPE_DELAY: Duration = Duration::from_millis(3);
 const BATCH_GRACE: Duration = Duration::from_millis(3);
 
 
+// Entry inside directory:
 // Nothing -> Deduping
 // Deduping -> Expiring
 // Expiring -> Debouncing
 // Debouncing -> Expiring
-// Expiring -> nothing
+// Expiring -> Nothing
+//
+// Parent directory for a file being updated:
+// Nothing -> DelayedParent
+// Expiring -> DelayedParent
+// DelayedParent -> Deferring (keeps pushing it back)
+// DelayedParent -> Deduping (a direct update happens)
+// DelayedParent -> Expiring
 
 #[derive(Debug, Eq, PartialEq)]
 enum State {
     Deduping,
     Expiring,
     Debounced,
+    DelayedParent,
 }
 
 
@@ -68,6 +77,8 @@ pub struct PendingUpdates {
 
 impl Manager {
     pub(super) fn watch_dir(&mut self, path: &Arc<Path>) -> bool {
+        self.flat_watches.insert(path.clone());
+
         let nfs = unsafe {
             let mut statfs: libc::statfs = std::mem::zeroed();
             let cpath = CString::new(path.as_os_str().as_bytes()).unwrap();
@@ -133,6 +144,7 @@ impl Manager {
 
     pub(super) fn unwatch_dir(&mut self, path: &Path) {
         trace!("Unwatching {path:?}");
+        self.flat_watches.remove(path);
         self.nfs_keepalives.remove(path);
         let unpoll = self.poll_watcher.as_mut().map(|w| w.unwatch(path));
         if let (Err(e), Some(Err(_)) | None) = (self.watcher.unwatch(path), unpoll) {
@@ -234,6 +246,7 @@ impl Manager {
         };
 
         let mut removal = false;
+        let mut creation = false;
 
         match event.kind {
             // Access events are worthless
@@ -244,6 +257,8 @@ impl Manager {
             Create(_) | Modify(ModifyKind::Name(RenameMode::To)) => {
                 trace!("Create {:?}", event.paths);
                 assert_eq!(event.paths.len(), 1);
+
+                creation = true;
 
                 self.jump_queue(&event.paths[0]);
             }
@@ -276,6 +291,52 @@ impl Manager {
         let mut event = event;
         let path: Arc<Path> = event.paths.pop().unwrap().into();
 
+        self.schedule_update(path.clone(), removal, source);
+
+        // Creations and removals cause changes to the parent directory
+        if (removal || creation)
+            && let Some(delay) = CONFIG.parent_update_delay
+            && let Some(parent) = path.parent()
+            && parent.parent().is_some()
+        {
+            let expiry = Instant::now()
+                + if delay != 0 { Duration::from_secs(delay as _) } else { DEBOUNCE_DURATION };
+
+            match self.recent_mutations.entry(parent.into()) {
+                btree_map::Entry::Occupied(occupied) => {
+                    let p = occupied.into_mut();
+
+                    match p.state {
+                        State::Deduping | State::Debounced => return,
+                        State::Expiring | State::DelayedParent => {
+                            trace!("Scheduling a delayed update for {parent:?}");
+                            p.state = State::DelayedParent;
+                            p.expiry = expiry;
+                        }
+                    }
+                }
+                btree_map::Entry::Vacant(vacant) => {
+                    trace!("Scheduling a delayed update for {parent:?}");
+                    vacant.insert(PendingUpdates {
+                        expiry,
+                        state: State::DelayedParent,
+                        sources: Sources::new_flat(),
+                        removal: false,
+                    });
+                }
+            }
+
+            let next = expiry + BATCH_GRACE;
+            self.next_tick = self.next_tick.map_or(Some(next), |nt| Some(nt.min(next)));
+        }
+    }
+
+    pub(super) fn schedule_update(
+        &mut self,
+        path: Arc<Path>,
+        removal: bool,
+        source: Option<RecurseId>,
+    ) {
         match self.recent_mutations.entry(path.clone()) {
             btree_map::Entry::Occupied(occupied) => {
                 let p = occupied.into_mut();
@@ -285,10 +346,17 @@ impl Manager {
                 // Events should be reflected across all listeners.
                 p.removal = removal;
 
-                if p.state == State::Deduping {
-                    trace!("Deduping event for {path:?} from {source:?}");
-                } else {
-                    // trace!("Debouncing event for {path:?} from {source:?}");
+                match p.state {
+                    State::Debounced => {}
+                    State::Expiring => p.state = State::Debounced,
+                    State::Deduping => {
+                        trace!("Deduping event for {path:?} from {source:?}");
+                    }
+                    State::DelayedParent => {
+                        // Functionally the same as Vacant, so set an appropriate delay
+                        p.expiry = Instant::now() + DEDUPE_DELAY;
+                        p.state = State::Deduping;
+                    }
                 }
 
                 match source {
@@ -300,13 +368,7 @@ impl Manager {
                     None => p.sources.flat = true,
                 }
 
-                if p.state == State::Expiring {
-                    p.state = State::Debounced;
-                    // next_tick must already be set to be in this branch.
-                    // It's possible that this expiry time hasn't been cleaned up yet,
-                    // but is before next_tick.
-                    self.next_tick = Some(self.next_tick.unwrap().min(p.expiry))
-                }
+                self.next_tick = Some(self.next_tick.unwrap().min(p.expiry + BATCH_GRACE))
             }
             btree_map::Entry::Vacant(vacant) => {
                 let expiry = Instant::now() + DEDUPE_DELAY;
@@ -316,8 +378,6 @@ impl Manager {
                     None => sources.flat = true,
                 }
 
-                let next = expiry + BATCH_GRACE;
-
                 vacant.insert(PendingUpdates {
                     expiry,
                     state: State::Deduping,
@@ -325,6 +385,7 @@ impl Manager {
                     removal,
                 });
 
+                let next = expiry + BATCH_GRACE;
                 self.next_tick = self.next_tick.map_or(Some(next), |nt| Some(nt.min(next)));
             }
         }
@@ -347,6 +408,21 @@ impl Manager {
                     }
                     State::Debounced => {
                         trace!("Sending debounced {kind} for {path:?} and {:?}", p.sources);
+                    }
+                    State::DelayedParent => {
+                        if let Some(parent) = path.parent()
+                            && !self.flat_watches.contains(parent)
+                        {
+                            trace!(
+                                "Delayed parent update for {path:?} not sent due to no watchers"
+                            );
+                            return false;
+                        }
+
+                        trace!(
+                            "Sending delayed update for parent directory for {path:?} and {:?}",
+                            p.sources
+                        );
                     }
                 }
 

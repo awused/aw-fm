@@ -761,7 +761,7 @@ impl Tab {
 
         if path.exists() {
             // Honestly should just close the tab, but this means something is seriously broken.
-            drop(self.change_location_flat(&mut context, NavTarget::assume_dir(path)));
+            drop(self.change_location_flat(&mut context, NavTarget::assume_dir(path), false));
             true
         } else {
             false
@@ -812,6 +812,7 @@ impl Tab {
         &mut self,
         context: &mut TabContext<'_>,
         target: NavTarget,
+        cache_old: bool,
     ) -> Option<NavTarget> {
         let was_search = self.search.is_some();
 
@@ -830,9 +831,13 @@ impl Tab {
         self.pane.overwrite_state(PaneState::for_jump(target.scroll));
 
         let old_dir = replace(&mut self.dir, FlatDir::new(target.dir));
-        let new_cache = old_dir
-            .try_into_cached()
-            .map(|(path, watch)| self.contents.list_into_cache(path, watch));
+        let new_cache = if cache_old {
+            old_dir
+                .try_into_cached()
+                .map(|(path, watch)| self.contents.list_into_cache(path, watch))
+        } else {
+            None
+        };
 
         let old_settings = self.settings;
         self.settings = gui_run(|g| g.database.get(self.dir.path().clone()));
@@ -1010,7 +1015,7 @@ impl Tab {
 
         let history = self.current_history();
 
-        let Some(unconsumed) = self.change_location_flat(&mut context, target) else {
+        let Some(unconsumed) = self.change_location_flat(&mut context, target, true) else {
             if forward {
                 self.past.push(history);
                 self.future.clear();
@@ -1094,7 +1099,7 @@ impl Tab {
 
         let target = NavTarget::assume_dir(hist.location);
 
-        if let Some(unconsumed) = self.change_location_flat(context, target) {
+        if let Some(unconsumed) = self.change_location_flat(context, target, true) {
             error!(
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
@@ -1167,7 +1172,7 @@ impl Tab {
         self.past.push(history);
         self.pane.overwrite_state(PaneState::default());
 
-        if let Some(unconsumed) = self.change_location_flat(&mut context, target) {
+        if let Some(unconsumed) = self.change_location_flat(&mut context, target, true) {
             error!(
                 "Failed to change location {unconsumed:?} after already checking it was a change."
             );
@@ -1698,9 +1703,9 @@ impl Tab {
                 }
                 Outcome::RemoveSourceDir(..)
                 | Outcome::Skip
-                | Outcome::Delete
-                | Outcome::DeleteDir
-                | Outcome::Trash => None,
+                | Outcome::Delete(_)
+                | Outcome::DeleteDir(_)
+                | Outcome::Trash(_) => None,
             })
             .collect()
     }

@@ -100,6 +100,8 @@ pub enum ManagerAction {
         finished: oneshot::Sender<AHashSet<Arc<Path>>>,
     },
 
+    TriggerUpdate(Arc<Path>),
+
     Complete(PathBuf, String, TabId),
     CancelCompletion,
 }
