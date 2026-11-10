@@ -181,6 +181,17 @@ pub enum Selection {
     Exactly(usize),
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ChooserOverride {
+    #[serde(default, deserialize_with = "empty_string_is_none")]
+    pub app_id: Option<String>,
+
+    #[serde(default, deserialize_with = "empty_string_is_none")]
+    pub title: Option<String>,
+
+    pub directory: PathBuf,
+}
+
 impl TryFrom<&str> for Selection {
     type Error = String;
 
@@ -282,6 +293,9 @@ pub struct Config {
 
     #[serde(default, deserialize_with = "zero_is_none")]
     pub max_undo_minutes: Option<NonZeroU64>,
+
+    #[serde(default)]
+    pub chooser_overrides: Vec<ChooserOverride>,
 
     #[serde(default, deserialize_with = "empty_path_is_none")]
     pub database: Option<PathBuf>,

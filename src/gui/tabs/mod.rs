@@ -5,12 +5,13 @@ use std::sync::Arc;
 use flat_dir::CachedDir;
 use hashlink::LinkedHashMap;
 use path_clean::PathClean;
+use regex::Regex;
 use tab::Tab;
 
 use self::contents::Contents;
 use self::list::TabsList;
 use crate::com::{DisplayMode, Entry, EntryObject};
-use crate::config::OPTIONS;
+use crate::config::{CONFIG, ChooserArgs, ChooserCommand, OPTIONS};
 use crate::gui::show_warning;
 
 mod contents;
@@ -203,21 +204,27 @@ impl NavTarget {
             .clone()
             .unwrap_or_else(|| current_dir().unwrap_or_else(|_| "/".into()));
 
-        if OPTIONS.chooser_mode.is_none() {
-            Self::open_or_jump(path, list)
-        } else {
-            let mut target = &*path;
-            while !target.as_os_str().is_empty()
-                && !target.exists()
-                && let Some(parent) = target.parent()
-            {
-                target = parent;
-            }
+        match &OPTIONS.chooser_mode {
+            None => Self::open_or_jump(path, list),
+            Some(
+                ChooserCommand::OpenFile { args, .. }
+                | ChooserCommand::SaveFile { args, .. }
+                | ChooserCommand::SaveFiles { args, .. },
+            ) => {
+                let mut target = try_chooser_override(args, &path);
 
-            if !target.exists() {
-                Self::open_or_jump(current_dir().unwrap_or_else(|_| "/".into()), list)
-            } else {
-                Self::open_or_jump(target, list)
+                while !target.as_os_str().is_empty()
+                    && !target.exists()
+                    && let Some(parent) = target.parent()
+                {
+                    target = parent;
+                }
+
+                if !target.exists() {
+                    Self::open_or_jump(current_dir().unwrap_or_else(|_| "/".into()), list)
+                } else {
+                    Self::open_or_jump(target, list)
+                }
             }
         }
     }
@@ -290,4 +297,38 @@ pub mod id {
             TabId(self.0)
         }
     }
+}
+
+fn try_chooser_override<'a>(args: &'a ChooserArgs, path: &'a Path) -> &'a Path {
+    for ov in &CONFIG.chooser_overrides {
+        if ov.app_id.is_some() && ov.app_id != args.app_id {
+            continue;
+        }
+
+        if let Some(title_re) = &ov.title {
+            let Some(title) = &args.title else {
+                continue;
+            };
+
+            let title_re = match Regex::new(title_re) {
+                Ok(re) => re,
+                Err(e) => {
+                    error!("Error decoding regular expression: '{title_re}' {e}");
+                    continue;
+                }
+            };
+
+            if !title_re.is_match(title) {
+                continue;
+            }
+        }
+
+        if !ov.directory.is_dir() {
+            break;
+        }
+
+        return &ov.directory;
+    }
+
+    path
 }

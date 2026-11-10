@@ -286,6 +286,25 @@ normalize_names = true
 # Set to 0 or comment out to disable.
 max_undo_minutes = 360
 
+
+# Override the directory the file chooser opens to depending on application or source.
+#
+# Run xdg-desktop-portal-aw-fm and look at logging to see the values passed to aw-fm. Changing this
+# does not require the portal to be restarted.
+#
+# The first matching override is taken. If the directory does not exist it is ignored.
+#
+# app_id: optional. Exact string match.
+# title: optional. Treated as a regular expression.
+# directory: required. Changes what directory is opened.
+#
+# Examples:
+# {app_id = "org.mozilla.firefox", title = "Cool Wallpaper Website", directory = "/my/wallpapers"}
+# {app_id = "org.mozilla.firefox", directory = "/default/firefox/downloads"}
+# {directory = "/path/to/default/downloads"}
+chooser_overrides = [
+]
+
 # ------------------------------------------------------------------------------------------------
 # More advanced configuration options below. They probably do not need to be changed.
 # ------------------------------------------------------------------------------------------------
